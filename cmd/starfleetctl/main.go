@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/dashboard"
 )
 
 func main() {
@@ -27,13 +28,15 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus> [args…]")
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard> [args…]")
 		os.Exit(2)
 	}
 
 	switch os.Args[1] {
 	case "agent-bus":
 		os.Exit(agentbus.Run(root, os.Args[2:]))
+	case "dashboard":
+		os.Exit(dashboard.Run(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)
