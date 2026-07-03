@@ -19,6 +19,7 @@ import (
 	"github.com/metux/starfleetctl/internal/agentbus"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/prclaim"
+	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/wscommit"
 )
 
@@ -30,7 +31,7 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit> [args…]")
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names> [args…]")
 		os.Exit(2)
 	}
 
@@ -43,6 +44,8 @@ func main() {
 		os.Exit(prclaim.Run(root, os.Args[2:]))
 	case "ws-commit":
 		os.Exit(wscommit.Run(root, os.Args[2:]))
+	case "ship-names":
+		os.Exit(shipnames.Run(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)
