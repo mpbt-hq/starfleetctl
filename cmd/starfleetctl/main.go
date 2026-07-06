@@ -21,6 +21,7 @@ import (
 	"github.com/metux/starfleetctl/internal/bootstrap"
 	"github.com/metux/starfleetctl/internal/bridged"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/genesis"
 	"github.com/metux/starfleetctl/internal/ghpr"
 	"github.com/metux/starfleetctl/internal/prclaim"
 	"github.com/metux/starfleetctl/internal/shipnames"
@@ -30,7 +31,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|bootstrap|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr|mk-agent-clone|bridged> [args…]")
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|bootstrap|genesis-init|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr|mk-agent-clone|bridged> [args…]")
 		os.Exit(2)
 	}
 
@@ -46,6 +47,14 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(withclonelock.Run(dir, os.Args[2:]))
+	}
+
+	// genesis-init is the "stand up the whole fleet from nothing" entry
+	// point — by definition it runs BEFORE AGENTS.md/scripts/ exist, so it
+	// must NOT go through workspaceRoot() either; it takes its target
+	// directory as an explicit argument (default cwd) instead.
+	if os.Args[1] == "genesis-init" {
+		os.Exit(genesis.Run(os.Args[2:]))
 	}
 
 	// The ghpr (GitHub-interaction) subcommands are likewise standalone —

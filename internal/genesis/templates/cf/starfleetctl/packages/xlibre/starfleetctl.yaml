@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Enrico Weigelt, metux IT consult
+#
+# starfleetctl: Go CLI consolidating fleet-coordination scripts (agent-bus,
+# pr-claim, ws-commit, ...) into one tool, one subcommand per script.
+#
+# Cloned into _WORK_/starfleetctl/sources/xlibre/starfleetctl, tracking its
+# `master` branch. The build just runs the repo's Makefile via mpbt's `exec`
+# builder (plain Go, no autotools/meson). The built binary lands in the
+# source checkout itself (see the Makefile), not installed anywhere — invoke
+# it from there, or via the scripts/starfleetctl wrapper.
+
+sources:
+    git:
+        ref:    origin/master
+        remotes:
+            origin:
+                url:    ${xlibre_git}/starfleetctl.git
+                fetch:
+                  - refs/tags/*:refs/tags/origin/*
+                  - refs/heads/*:refs/remotes/origin/*
+                tagopt: --no-tags
+        local-branch: master
+
+buildsystem: exec
+commands:
+    build:
+        - make

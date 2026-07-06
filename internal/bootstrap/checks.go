@@ -198,6 +198,9 @@ func verifyShipNamesFile(b *Bootstrap) (bool, string) {
 }
 
 func verifySettingsAllowlist(b *Bootstrap) (bool, string) {
+	if _, err := os.Stat(b.SettingsFile); err != nil {
+		return false, fmt.Sprintf("missing (no %s at all)", b.SettingsFile)
+	}
 	allow, err := readAllowList(b.SettingsFile)
 	if err != nil {
 		return false, fmt.Sprintf("could not read/parse %s: %v", b.SettingsFile, err)
@@ -224,7 +227,26 @@ func verifySettingsAllowlist(b *Bootstrap) (bool, string) {
 // edited by other sessions, so preserving its exact formatting/ordering for
 // every OTHER entry matters (a full re-marshal would reformat the whole
 // file and produce a huge, noisy diff).
+// minimalSettingsSkeleton is written when .claude/settings.json doesn't
+// exist at all yet (a truly fresh checkout, e.g. via `genesis-init`) — just
+// enough structure for fixSettingsAllowlist's own marker-based insertion
+// below to then add the required entries into a real (if empty) array.
+const minimalSettingsSkeleton = `{
+  "permissions": {
+    "allow": []
+  }
+}
+`
+
 func fixSettingsAllowlist(b *Bootstrap) error {
+	if _, err := os.Stat(b.SettingsFile); err != nil {
+		if err := os.MkdirAll(filepath.Dir(b.SettingsFile), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(b.SettingsFile, []byte(minimalSettingsSkeleton), 0o644); err != nil {
+			return err
+		}
+	}
 	data, err := os.ReadFile(b.SettingsFile)
 	if err != nil {
 		return err

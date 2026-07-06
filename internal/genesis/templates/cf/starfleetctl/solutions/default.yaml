@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Enrico Weigelt, metux IT consult
+#
+# Standalone solution for starfleetctl (fleet-coordination CLI).
+#
+# Deliberately SEPARATE from any other build in this workspace: starfleetctl
+# is only cloned and built here, never mixed into another project's package
+# set. Its sole build entry is xlibre/starfleetctl below.
+
+xlibre_git:     https://github.com/mpbt-hq
+
+install-prefix: ${@PROJECT::@workdir}/target
+
+build:
+    - xlibre/starfleetctl
+
+packages:
+    - ${@PROJECT::@rootdir}/cf/starfleetctl/packages
+
+package-defaults:
+    xlibre_git:     ${xlibre_git}
