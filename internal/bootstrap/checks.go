@@ -9,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/agents"
+	"github.com/metux/starfleetctl/internal/dashboard"
 )
 
 // Check is one idempotent bootstrap step: Verify reports whether it's
@@ -63,7 +66,57 @@ func Checks() []Check {
 			Verify: verifySettingsAllowlist,
 			Fix:    fixSettingsAllowlist,
 		},
+		{
+			Name:   "AGENTS.md + agents.d/index.md",
+			Verify: verifyAgentsMD,
+			Fix:    fixAgentsMD,
+		},
+		{
+			Name:   "DASHBOARD.md",
+			Verify: verifyDashboardMD,
+			Fix:    fixDashboardMD,
+		},
 	}
+}
+
+// verifyAgentsMD/fixAgentsMD delegate to internal/agents' own
+// EnsureBootstrapped — this is the "should be created fully automatically
+// when needed" requirement: a truly from-scratch checkout gets a minimal,
+// permanently-fixed root AGENTS.md (see internal/agents' doc comment for
+// why it's structured as an @agents.d/index.md import) rather than bootstrap
+// needing to know anything about that package's internals.
+func verifyAgentsMD(b *Bootstrap) (bool, string) {
+	if _, err := os.Stat(filepath.Join(b.Root, "AGENTS.md")); err == nil {
+		return true, "present"
+	}
+	return false, "missing (no AGENTS.md at all)"
+}
+
+func fixAgentsMD(b *Bootstrap) error {
+	a, err := agents.New(b.Root)
+	if err != nil {
+		return err
+	}
+	_, err = a.EnsureBootstrapped()
+	return err
+}
+
+// verifyDashboardMD/fixDashboardMD: same idea as AGENTS.md above, but for
+// DASHBOARD.md's dashboard/themes/ + reindex system (internal/dashboard).
+func verifyDashboardMD(b *Bootstrap) (bool, string) {
+	if _, err := os.Stat(filepath.Join(b.Root, "DASHBOARD.md")); err == nil {
+		return true, "present"
+	}
+	return false, "missing (no DASHBOARD.md at all)"
+}
+
+func fixDashboardMD(b *Bootstrap) error {
+	d, err := dashboard.New(b.Root)
+	if err != nil {
+		return err
+	}
+	_, err = d.EnsureBootstrapped()
+	return err
 }
 
 func verifyDirs(b *Bootstrap) (bool, string) {
@@ -153,11 +206,20 @@ func fixSettingsAllowlist(b *Bootstrap) error {
 		return fmt.Errorf("could not find %q in %s — refusing to guess where to insert", marker, b.SettingsFile)
 	}
 	insertAt := idx + len(marker)
+	// If the array is otherwise empty (next non-whitespace is the closing
+	// bracket), the LAST inserted entry must not carry a trailing comma —
+	// JSON has no trailing commas. Found this the hard way testing against
+	// a from-scratch settings.json with "allow": [] (2026-07-06).
+	arrayOtherwiseEmpty := strings.HasPrefix(strings.TrimLeft(content[insertAt:], " \t\r\n"), "]")
 	// Match the indentation of the line the marker itself is on, plus one
 	// level (2 spaces), matching this file's existing style throughout.
 	var lines []string
-	for _, e := range toAdd {
-		lines = append(lines, fmt.Sprintf("\n      %q,", e))
+	for i, e := range toAdd {
+		comma := ","
+		if arrayOtherwiseEmpty && i == len(toAdd)-1 {
+			comma = ""
+		}
+		lines = append(lines, fmt.Sprintf("\n      %q%s", e, comma))
 	}
 	newContent := content[:insertAt] + strings.Join(lines, "") + content[insertAt:]
 

@@ -100,7 +100,7 @@ func (d *Dashboard) DoThemeNew(slug, title, status, category string) error {
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("theme already exists: %s", path)
 	}
-	if err := os.MkdirAll(d.ThemesDir(), 0o755); err != nil {
+	if _, err := d.EnsureBootstrapped(); err != nil {
 		return err
 	}
 	m := ThemeMeta{Slug: slug, Title: title, Category: category, Status: status, DocRef: "—"}
@@ -159,6 +159,9 @@ var (
 // here" footer) untouched. Pure function of the current file set: two
 // ships racing a reindex converge to the same byte-identical output.
 func (d *Dashboard) DoReindex() error {
+	if _, err := d.EnsureBootstrapped(); err != nil {
+		return err
+	}
 	metas, err := d.loadAllThemes()
 	if err != nil {
 		return err
