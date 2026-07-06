@@ -31,9 +31,17 @@ const maxFrameSize = 64 * 1024 * 1024
 // "agent-bus" and "dashboard" are dispatchable in this step; "ping" is
 // handled specially as a liveness check, not forwarded to either), args are
 // the same argv a CLI invocation of that family would receive.
+//
+// Env carries per-request identity overrides (AGENT_ID and friends — see
+// allowedEnvOverrides) so one daemon instance can serve many different
+// agents' identities instead of reporting everything under whatever
+// environment the daemon process itself happened to start with. Omitting
+// Env (nil/empty) is fully backward compatible: the request runs against
+// the daemon's own ambient environment exactly like v1 did.
 type Request struct {
-	Cmd  string   `json:"cmd"`
-	Args []string `json:"args,omitempty"`
+	Cmd  string            `json:"cmd"`
+	Args []string          `json:"args,omitempty"`
+	Env  map[string]string `json:"env,omitempty"`
 }
 
 // Response mirrors what a CLI invocation would have produced: its exit

@@ -84,24 +84,48 @@ func dispatch(root string, req Request) Response {
 				"bridged: agent-bus subcommand %q is not available via the daemon "+
 					"(blocking/long-running or process-exiting) — use the CLI directly\n", sub)}
 		}
-		code, stdout, stderr := runCaptured(func() int { return agentbus.Run(root, req.Args) })
+		code, stdout, stderr := runCaptured(req.Env, func() int { return agentbus.Run(root, req.Args) })
 		return Response{ExitCode: code, Stdout: stdout, Stderr: stderr}
 	case "dashboard":
-		code, stdout, stderr := runCaptured(func() int { return dashboard.Run(root, req.Args) })
+		code, stdout, stderr := runCaptured(req.Env, func() int { return dashboard.Run(root, req.Args) })
 		return Response{ExitCode: code, Stdout: stdout, Stderr: stderr}
 	default:
 		return Response{ExitCode: 2, Stderr: fmt.Sprintf("bridged: unknown cmd %q (want \"agent-bus\" or \"dashboard\")\n", req.Cmd)}
 	}
 }
 
+// allowedEnvOverrides is the identity-related subset of environment
+// variables a request may override — exactly what agentbus.New reads to
+// resolve an agent's identity (AGENT_ID, XLIBRE_RELEASE/PROJECT,
+// AGENT_HANDLE), per Enterprise's directive (m0082). Deliberately NOT
+// including infra-level vars like BUS_DIR/BUS_TTL: overriding those per
+// request would let one caller silently point another's request at a
+// different bus directory entirely, a materially different (and unasked
+// for) feature from "each request carries its own identity". A request
+// naming any other key is a no-op — env overrides are an allowlist too,
+// same reasoning as the agent-bus subcommand allowlist above.
+var allowedEnvOverrides = map[string]bool{
+	"AGENT_ID":       true,
+	"XLIBRE_RELEASE": true,
+	"PROJECT":        true,
+	"AGENT_HANDLE":   true,
+}
+
 // runCaptured calls fn with the process's real os.Stdout/os.Stderr
-// temporarily redirected to pipes, capturing everything fn prints, and
-// restores them before returning — the standard technique for capturing
-// output from an in-process function that was written to print directly
-// rather than accept a writer. Held under execMu by every caller.
-func runCaptured(fn func() int) (exitCode int, stdout, stderr string) {
+// temporarily redirected to pipes (capturing everything fn prints) and,
+// if env is non-empty, the given identity environment variables
+// temporarily overridden — restoring both before returning. env and the
+// stdout/stderr swap are both global process state, so both are mutated
+// and restored inside the SAME execMu critical section: two overlapping
+// requests with different identities can never observe each other's
+// AGENT_ID, because only one fn() ever runs at a time between the
+// override and the restore.
+func runCaptured(env map[string]string, fn func() int) (exitCode int, stdout, stderr string) {
 	execMu.Lock()
 	defer execMu.Unlock()
+
+	restoreEnv := applyEnvOverrides(env)
+	defer restoreEnv()
 
 	origStdout, origStderr := os.Stdout, os.Stderr
 	outR, outW, err := os.Pipe()
@@ -132,6 +156,38 @@ func runCaptured(fn func() int) (exitCode int, stdout, stderr string) {
 	errR.Close()
 
 	return exitCode, outBuf.String(), errBuf.String()
+}
+
+// applyEnvOverrides sets each allowed key present in env, and returns a
+// func that restores every touched key to exactly what it was before
+// (re-set if it was previously set, unset if it wasn't) — must be called
+// while still holding execMu, before it's released.
+func applyEnvOverrides(env map[string]string) (restore func()) {
+	if len(env) == 0 {
+		return func() {}
+	}
+	type saved struct {
+		value  string
+		wasSet bool
+	}
+	prior := make(map[string]saved, len(env))
+	for k, v := range env {
+		if !allowedEnvOverrides[k] {
+			continue
+		}
+		old, wasSet := os.LookupEnv(k)
+		prior[k] = saved{value: old, wasSet: wasSet}
+		os.Setenv(k, v)
+	}
+	return func() {
+		for k, s := range prior {
+			if s.wasSet {
+				os.Setenv(k, s.value)
+			} else {
+				os.Unsetenv(k)
+			}
+		}
+	}
 }
 
 // checkNotAlreadyRunning probes sockPath the same way EnsureAgentClone's

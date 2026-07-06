@@ -4,6 +4,7 @@
 package bridged
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -132,6 +133,104 @@ func TestAgentBusRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(resp.Stdout, "TestShip") || !strings.Contains(resp.Stdout, "via bridged") {
 		t.Errorf("board output missing expected content: %q", resp.Stdout)
+	}
+}
+
+// TestPerRequestIdentityNoLeakage is the test Enterprise's directive
+// (m0082) explicitly asked for: fire many requests with DIFFERENT
+// per-request AGENT_ID overrides (via Request.Env, not ambient process
+// env) at once, and confirm each one's response reflects only its own
+// identity — none see another's, and none see the ambient ("unset")
+// identity either. Execution is serialized by execMu, so true
+// interleaving inside a single agentbus.Run call is impossible; this test
+// instead guards against the failure mode that WOULD leak: a bug in
+// applyEnvOverrides that restores the wrong value, or restores too early/
+// late relative to the mutex, would show up here as ships seeing each
+// other's identity or the wrong (ambient) one.
+func TestPerRequestIdentityNoLeakage(t *testing.T) {
+	sockPath, _, stop := startTestServer(t)
+	defer stop()
+
+	os.Unsetenv("AGENT_ID") // confirm no ambient identity leaks through
+	os.Unsetenv("XLIBRE_RELEASE")
+
+	const n = 15
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ship := fmt.Sprintf("Ship-%02d", i)
+			note := fmt.Sprintf("note-%02d", i)
+
+			statusResp, err := Call(sockPath, Request{
+				Cmd:  "agent-bus",
+				Args: []string{"status", "working", note},
+				Env:  map[string]string{"AGENT_ID": ship},
+			}, 5*time.Second)
+			if err != nil {
+				errs[i] = fmt.Errorf("%s: status call: %w", ship, err)
+				return
+			}
+			if statusResp.ExitCode != 0 {
+				errs[i] = fmt.Errorf("%s: status exit %d, stderr=%q", ship, statusResp.ExitCode, statusResp.Stderr)
+				return
+			}
+			if !strings.Contains(statusResp.Stdout, "'"+ship+"'") {
+				errs[i] = fmt.Errorf("%s: status response didn't echo own identity: %q", ship, statusResp.Stdout)
+				return
+			}
+
+			whoResp, err := Call(sockPath, Request{
+				Cmd:  "agent-bus",
+				Args: []string{"inbox"},
+				Env:  map[string]string{"AGENT_ID": ship},
+			}, 5*time.Second)
+			if err != nil {
+				errs[i] = fmt.Errorf("%s: inbox call: %w", ship, err)
+				return
+			}
+			if whoResp.ExitCode != 0 {
+				errs[i] = fmt.Errorf("%s: inbox exit %d, stderr=%q", ship, whoResp.ExitCode, whoResp.Stderr)
+			}
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+
+	// The board must show all N ships as distinct rows with their own
+	// notes — proves the writes themselves landed under the right
+	// identity, not just that each response echoed the right name.
+	boardResp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"board"}}, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < n; i++ {
+		ship := fmt.Sprintf("Ship-%02d", i)
+		note := fmt.Sprintf("note-%02d", i)
+		if !strings.Contains(boardResp.Stdout, ship) || !strings.Contains(boardResp.Stdout, note) {
+			t.Errorf("board missing %s/%s: %s", ship, note, boardResp.Stdout)
+		}
+	}
+
+	// After all overridden requests, an unspecified-Env request must fall
+	// back to the ambient (still-unset) identity, not leak the last
+	// override — proves restoration actually ran, not just that
+	// concurrent calls happened to not collide.
+	plainResp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"status", "idle", "no override"}}, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < n; i++ {
+		ship := fmt.Sprintf("Ship-%02d", i)
+		if strings.Contains(plainResp.Stdout, "'"+ship+"'") {
+			t.Errorf("unspecified-Env request leaked a prior override's identity (%s): %q", ship, plainResp.Stdout)
+		}
 	}
 }
 
