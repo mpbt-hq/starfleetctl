@@ -18,6 +18,7 @@ import (
 
 	"github.com/metux/starfleetctl/internal/agentbus"
 	"github.com/metux/starfleetctl/internal/bootstrap"
+	"github.com/metux/starfleetctl/internal/bridged"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/ghpr"
 	"github.com/metux/starfleetctl/internal/prclaim"
@@ -28,7 +29,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|bootstrap|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr|mk-agent-clone> [args…]")
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|bootstrap|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr|mk-agent-clone|bridged> [args…]")
 		os.Exit(2)
 	}
 
@@ -121,6 +122,8 @@ func main() {
 		os.Exit(bootstrap.Run(root, os.Args[2:]))
 	case "mk-agent-clone":
 		os.Exit(ghpr.RunMkAgentClone(root, os.Args[2:]))
+	case "bridged":
+		os.Exit(bridged.Run(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)
