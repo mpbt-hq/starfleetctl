@@ -34,6 +34,7 @@ var allowedAgentBusSubcommands = map[string]bool{
 	"--help":    true,
 	"status":    true,
 	"clear":     true,
+	"touch":     true,
 	"inbox":     true,
 	"ack":       true,
 	"board":     true,

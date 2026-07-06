@@ -92,6 +92,40 @@ func (b *Bus) DoStatus(state, note string) error {
 	return nil
 }
 
+// DoTouch implements `agent-bus touch`: refresh MY OWN heartbeat's
+// timestamp without changing state/note — for a periodic auto-refresh (see
+// agent-bus-monitor-loop) so a ship deep in a long task that never calls
+// DoStatus itself doesn't fall out of BusTTL and read as dead/pruned on the
+// board while the session is very much alive.
+//
+// Race-safety: this does NOT cache a state+note value anywhere — it
+// re-reads whatever is CURRENTLY on disk for my own status file, under the
+// same lock a real DoStatus write uses, and rewrites only the timestamp
+// fields. If a real DoStatus call happened since the last touch, this picks
+// up that new value (the file IS the single source of truth) and refreshes
+// its timestamp too; there's no stale copy anywhere that could overwrite a
+// fresh real post.
+//
+// Deliberately does NOT call logEvent: a pure timestamp bump every few
+// minutes forever isn't a state transition worth an audit-trail entry, and
+// would clutter events.log with noise indistinguishable from real status
+// changes. Silent no-op if there's no existing heartbeat to refresh.
+func (b *Bus) DoTouch() error {
+	lock, err := b.lockBus()
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	rec, ok := parseStatusFile(b.sfile(b.AgentID))
+	if !ok {
+		return nil
+	}
+	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		now(), isots(), rec.Agent, rec.Project, rec.State, rec.PID, rec.Handle, rec.Note)
+	return os.WriteFile(b.sfile(b.AgentID), []byte(line), 0o644)
+}
+
 // DoClear implements `agent-bus clear`.
 func (b *Bus) DoClear() error {
 	lock, err := b.lockBus()

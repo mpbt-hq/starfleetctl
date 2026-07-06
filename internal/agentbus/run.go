@@ -16,6 +16,10 @@ Worker session:
   ack <id> ["note"]         mark a directive handled
   ask "<q>" [--to <ctrl>] [--timeout <secs>]
   clear                     drop my heartbeat (session end)
+  touch                     refresh my heartbeat's timestamp only (same
+                            state/note as last posted; no-op if I never
+                            posted one) — for a periodic auto-refresh loop,
+                            not interactive use; see agent-bus-monitor-loop
 
 Control agent:
   board [--json]            the whole board
@@ -81,6 +85,8 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoStatus(state, note)
 	case "clear":
 		cmdErr = b.DoClear()
+	case "touch":
+		cmdErr = b.DoTouch()
 	case "inbox":
 		if hasJSON(args[1:]) {
 			cmdErr = b.DoInboxJSON()
