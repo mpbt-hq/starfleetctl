@@ -29,6 +29,17 @@ Control agent:
 
 --json on board/inbox/msgs/asks prints a JSON array instead of the
 human-formatted table — for scripts/agents, so no grep/awk/cut is needed.
+
+Ecosystem loops (NOT wired into production hooks/Monitor arming — see
+DASHBOARD.md starfleetctl row and this package's monitor.go doc comment):
+  monitor-loop              KNOWN BROKEN under the Monitor tool: detects a
+                            backlog match but not a live one arriving after
+                            the process starts (bash original unaffected).
+                            Watch my inbox, print new/unacked directives.
+  fleet-watch               Same known issue as monitor-loop. Watch the
+                            board for ships joining/restarting.
+  watch [interval|--stop]   desktop-notify daemon for new directives (default
+                            15s poll; --stop kills the running instance)
 `
 
 // hasJSON reports whether --json is present anywhere in the command's
@@ -120,6 +131,12 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoEvents(n)
 	case "prune":
 		cmdErr = b.DoPrune()
+	case "monitor-loop":
+		cmdErr = b.DoMonitorLoop()
+	case "fleet-watch":
+		cmdErr = b.DoFleetWatch()
+	case "watch":
+		cmdErr = b.DoWatch(arg(args, 1), arg(args, 1) == "--stop")
 	default:
 		if len(args[0]) > 1 && args[0][0] == '-' {
 			cmdErr = usageErr(fmt.Sprintf("agent-bus: unknown option: %s", args[0]))
