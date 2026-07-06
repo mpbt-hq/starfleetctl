@@ -10,10 +10,19 @@ import (
 
 const usage = `ship-names assign [flagship]  pick an unused name (flagship = Enterprise)
 ship-names release <name>     free a reservation
-ship-names list               show all names and current status
+ship-names list [--json]      show all names and current status
 ship-names gc                 remove reservations with no live agent-bus entry
 ship-names flagship           print the flagship name (Enterprise)
 `
+
+func hasJSON(args []string) bool {
+	for _, a := range args {
+		if a == "--json" {
+			return true
+		}
+	}
+	return false
+}
 
 // Run dispatches a `ship-names` invocation exactly like scripts/ship-names'
 // case statement, given the resolved workspace root. Returns the process
@@ -43,7 +52,11 @@ func Run(root string, args []string) int {
 	case "release":
 		err = r.DoRelease(arg(rest, 0))
 	case "list":
-		err = r.DoList()
+		if hasJSON(rest) {
+			err = r.DoListJSON()
+		} else {
+			err = r.DoList()
+		}
 	case "gc":
 		err = r.DoGC()
 	case "flagship":

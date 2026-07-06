@@ -12,21 +12,36 @@ const usage = `agent-bus <command> [args…]
 
 Worker session:
   status <state> ["note"]   report/refresh my heartbeat
-  inbox                     directives addressed to me or to all, unacked
+  inbox [--json]            directives addressed to me or to all, unacked
   ack <id> ["note"]         mark a directive handled
   ask "<q>" [--to <ctrl>] [--timeout <secs>]
   clear                     drop my heartbeat (session end)
 
 Control agent:
-  board                     the whole board
-  asks                      pending questions addressed to me
+  board [--json]            the whole board
+  asks [--json]             pending questions addressed to me
   reply <qid> <answer…>     answer a worker's question
   tell <agent> <text…>      queue a directive for one agent
   broadcast <text…>         queue a directive for ALL agents
-  msgs                      list all directives with ack status
+  msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
+
+--json on board/inbox/msgs/asks prints a JSON array instead of the
+human-formatted table — for scripts/agents, so no grep/awk/cut is needed.
 `
+
+// hasJSON reports whether --json is present anywhere in the command's
+// remaining args (order-independent, e.g. both `board --json` and, if ever
+// combined with other flags, `board --json --whatever`).
+func hasJSON(args []string) bool {
+	for _, a := range args {
+		if a == "--json" {
+			return true
+		}
+	}
+	return false
+}
 
 // Run dispatches an `agent-bus` invocation exactly like the bash script's
 // final case statement, given the resolved workspace root. Returns the
@@ -56,11 +71,19 @@ func Run(root string, args []string) int {
 	case "clear":
 		cmdErr = b.DoClear()
 	case "inbox":
-		cmdErr = b.DoInbox()
+		if hasJSON(args[1:]) {
+			cmdErr = b.DoInboxJSON()
+		} else {
+			cmdErr = b.DoInbox()
+		}
 	case "ack":
 		cmdErr = b.DoAck(arg(args, 1), arg(args, 2))
 	case "board", "-l", "--list":
-		cmdErr = b.DoBoard()
+		if hasJSON(args[1:]) {
+			cmdErr = b.DoBoardJSON()
+		} else {
+			cmdErr = b.DoBoard()
+		}
 	case "tell":
 		if len(args) < 3 {
 			cmdErr = usageErr("agent-bus: tell needs <agent> <text…>")
@@ -78,9 +101,17 @@ func Run(root string, args []string) int {
 		}
 		cmdErr = b.DoReply(args[1], args[2:])
 	case "asks":
-		cmdErr = b.DoAsks()
+		if hasJSON(args[1:]) {
+			cmdErr = b.DoAsksJSON()
+		} else {
+			cmdErr = b.DoAsks()
+		}
 	case "msgs", "--msgs":
-		cmdErr = b.DoMsgs()
+		if hasJSON(args[1:]) {
+			cmdErr = b.DoMsgsJSON()
+		} else {
+			cmdErr = b.DoMsgs()
+		}
 	case "events":
 		n := 20
 		if len(args) > 1 {

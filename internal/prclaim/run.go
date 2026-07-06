@@ -9,12 +9,21 @@ import (
 )
 
 const usage = `pr-claim <pr#> ["what you're doing"]   claim PR; exit 3 if held by another agent
-pr-claim --list                        show all active claims (the work log)
+pr-claim --list [--json]               show all active claims (the work log)
 pr-claim --release <pr#>               drop your claim on PR
 pr-claim --release-all                 drop all claims held by this agent
 pr-claim --steal <pr#> ["what"]        take over someone else's claim (logged)
 pr-claim --who <pr#>                   print holder; exit 3 if held by another
 `
+
+func hasJSON(args []string) bool {
+	for _, a := range args {
+		if a == "--json" {
+			return true
+		}
+	}
+	return false
+}
 
 // Run dispatches a `pr-claim` invocation exactly like scripts/pr-claim's
 // case statement, given the resolved workspace root. Returns the process
@@ -37,7 +46,11 @@ func Run(root string, args []string) int {
 		fmt.Print(usage)
 		return 0
 	case "-l", "--list":
-		cmdErr = c.DoList()
+		if hasJSON(args[1:]) {
+			cmdErr = c.DoListJSON()
+		} else {
+			cmdErr = c.DoList()
+		}
 	case "--release":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "pr-claim: --release needs <pr#>")
