@@ -27,7 +27,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict> [args…]")
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr> [args…]")
 		os.Exit(2)
 	}
 
@@ -60,6 +60,39 @@ func main() {
 		os.Exit(ghpr.RunBackportApplies(os.Args[2:]))
 	case "show-pr-conflict":
 		os.Exit(ghpr.RunShowPRConflict(os.Args[2:]))
+
+	// Phase 2 mutating subset (DASHBOARD.md "starfleetctl" row) — same
+	// stateless-wrapper reasoning as the read-only group above: pr-comment,
+	// pr-label, pr-request-reviewers, pr-set-body and pr-append-body are
+	// pure `gh api`/`gh pr` wrappers with no fleet-file dependency;
+	// pr-amend-push operates entirely on a clone dir given as an argument.
+	// NOT cut over to "preferred" anywhere (AGENTS.md/.claude/settings.json
+	// unchanged) — parity-proving only this session, per the standing rule
+	// that a mutating command needs an explicit praetor go-ahead first.
+	case "pr-comment":
+		os.Exit(ghpr.RunPRComment(os.Args[2:]))
+	case "pr-label":
+		os.Exit(ghpr.RunPRLabel(os.Args[2:]))
+	case "pr-request-reviewers":
+		os.Exit(ghpr.RunPRRequestReviewers(os.Args[2:]))
+	case "pr-set-body":
+		os.Exit(ghpr.RunPRSetBody(os.Args[2:]))
+	case "pr-append-body":
+		os.Exit(ghpr.RunPRAppendBody(os.Args[2:]))
+	case "pr-amend-push":
+		os.Exit(ghpr.RunPRAmendPush(os.Args[2:]))
+	case "xx-make-pr":
+		// Standalone invocation operates on cwd, exactly like the bash
+		// script (which reads make-pr.* from `git config` in whatever
+		// directory it's run from). backport-commit below calls
+		// ghpr.RunXXMakePR directly with an explicit clone dir instead of
+		// going through this cwd-based path.
+		dir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "starfleetctl:", err)
+			os.Exit(1)
+		}
+		os.Exit(ghpr.RunXXMakePR(dir, os.Args[2:]))
 	}
 
 	root, err := workspaceRoot()
@@ -79,6 +112,10 @@ func main() {
 		os.Exit(wscommit.Run(root, os.Args[2:]))
 	case "ship-names":
 		os.Exit(shipnames.Run(root, os.Args[2:]))
+	case "pr-checkout":
+		os.Exit(ghpr.RunPRCheckout(root, os.Args[2:]))
+	case "backport-commit":
+		os.Exit(ghpr.RunBackportCommit(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)
