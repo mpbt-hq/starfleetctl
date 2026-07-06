@@ -20,19 +20,34 @@ import (
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/prclaim"
 	"github.com/metux/starfleetctl/internal/shipnames"
+	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/wscommit"
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock> [args…]")
+		os.Exit(2)
+	}
+
+	// with-clone-lock is deliberately generic (like its bash original): it
+	// operates on whatever git working tree the CALLER's cwd is in — an
+	// xserver agent clone, a driver clone, anywhere — not just
+	// mpbt-workspace, so it must NOT go through workspaceRoot()'s
+	// AGENTS.md+scripts/ discovery (which would fail outside this checkout).
+	if os.Args[1] == "with-clone-lock" {
+		dir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "starfleetctl:", err)
+			os.Exit(1)
+		}
+		os.Exit(withclonelock.Run(dir, os.Args[2:]))
+	}
+
 	root, err := workspaceRoot()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "starfleetctl:", err)
 		os.Exit(1)
-	}
-
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names> [args…]")
-		os.Exit(2)
 	}
 
 	switch os.Args[1] {
