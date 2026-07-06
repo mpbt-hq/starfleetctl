@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Enrico Weigelt, metux IT consult
+#
+# genesis-setup — the ONE small script a brand-new (or previously
+# fleet-tooling-free) project needs to stand up the entire starfleetctl
+# fleet-coordination stack. Copy this single file into any project's root
+# and run it; everything else pulls itself up automatically from there.
+#
+# What it does, in order:
+#   1. Clone starfleetctl (if not already present at the canonical path).
+#   2. Build it (`make`, per its own Makefile — plain Go, no dependencies
+#      beyond a working `go` toolchain).
+#   3. Hand off to its own `genesis-init` subcommand, which writes the
+#      mpbt-solution wiring (cf/starfleetctl/*, run-fetch/run-build wrappers,
+#      scripts/starfleetctl) and then runs the same checks `bootstrap --fix`
+#      does (AGENTS.md/agents.d, DASHBOARD.md, _WORK_ dirs,
+#      .claude/settings.json allowlist, the self-documenting fragment).
+#
+# Deliberately dependency-free beyond git/go/make — no assumption that mpbt
+# or anything else is already set up, since the whole point is to work in a
+# project that has nothing fleet-related yet. Safe to re-run: every step
+# below, and everything genesis-init itself does, is idempotent.
+#
+# Override the source repo with STARFLEETCTL_REPO_URL if you're working
+# against a fork/mirror.
+#
+# Usage: ./genesis-setup [target-dir]   (target-dir defaults to cwd)
+set -e
+
+REPO_URL="${STARFLEETCTL_REPO_URL:-https://github.com/mpbt-hq/starfleetctl.git}"
+TARGET="${1:-.}"
+SRC="$TARGET/_WORK_/starfleetctl/sources/xlibre/starfleetctl"
+
+for tool in git go make; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "genesis-setup: required tool not found: $tool" >&2
+        exit 1
+    }
+done
+
+if [ -d "$SRC/.git" ]; then
+    echo "genesis-setup: starfleetctl already cloned at $SRC — fetching latest"
+    ( cd "$SRC" && git fetch origin && git merge --ff-only origin/master )
+else
+    echo "genesis-setup: cloning starfleetctl from $REPO_URL"
+    mkdir -p "$(dirname "$SRC")"
+    git clone "$REPO_URL" "$SRC"
+fi
+
+echo "genesis-setup: building starfleetctl"
+( cd "$SRC" && make )
+
+echo "genesis-setup: handing off to 'starfleetctl genesis-init $TARGET'"
+"$SRC/starfleetctl" genesis-init "$TARGET"
+
+echo "genesis-setup: done — see AGENTS.md / agents.d/starfleetctl.md for what's next"
