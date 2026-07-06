@@ -18,6 +18,9 @@ const usage = `agents <command> [args…]
                                               scaffold a new fragment file
   reindex                                    regenerate agents.d/index.md from agents.d/*.md
   commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) AGENTS.md+index.md
+  install-self [--order <n>]                 write/refresh agents.d/starfleetctl.md from this
+                                              binary's own embedded README.md (always overwrites —
+                                              tool-owned, re-run after a starfleetctl update)
 `
 
 // Run dispatches an `agents` invocation, given the resolved workspace root.
@@ -73,6 +76,17 @@ func Run(root string, args []string) int {
 		cmdErr = a.DoNew(slug, title, order, owner)
 	case "reindex":
 		cmdErr = a.DoReindex()
+	case "install-self":
+		order := 900 // default: near the end, after project-specific fragments
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--order" && i+1 < len(args) {
+				if n, perr := strconv.Atoi(args[i+1]); perr == nil {
+					order = n
+				}
+				i++
+			}
+		}
+		cmdErr = a.DoInstallSelf(order)
 	case "commit":
 		slug, msg, push, perr := parseCommitArgs(args[1:])
 		if perr != nil {

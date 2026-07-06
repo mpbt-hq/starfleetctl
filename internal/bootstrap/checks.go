@@ -76,7 +76,55 @@ func Checks() []Check {
 			Verify: verifyDashboardMD,
 			Fix:    fixDashboardMD,
 		},
+		{
+			Name:   "starfleetctl self-fragment (agents.d/starfleetctl.md)",
+			Verify: verifySelfFragment,
+			Fix:    fixSelfFragment,
+		},
 	}
+}
+
+// selfFragmentOrder must match install-self's own CLI default (900) — kept
+// as a literal here rather than a shared constant across packages, same as
+// every other bootstrap check's specifics are self-contained.
+const selfFragmentOrder = 900
+
+// verifySelfFragment/fixSelfFragment: the "starfleetctl carries its own
+// instructions" mechanism (praetor directive m0089, 2026-07-06) — this
+// fragment is tool-owned and always overwritten on --fix (not just
+// created-if-missing like the other checks), so a starfleetctl update run
+// through `bootstrap --fix` also refreshes the instructions that came with
+// it. Verify distinguishes "missing" from "stale" (present but from an
+// older starfleetctl commit) by comparing against what install-self would
+// write right now — a byte-different existing file is still reported as
+// not-ok, unlike every other check here, precisely because this one is
+// meant to always track the current binary.
+func verifySelfFragment(b *Bootstrap) (bool, string) {
+	a, err := agents.New(b.Root)
+	if err != nil {
+		return false, err.Error()
+	}
+	path := filepath.Join(a.FragmentsDir(), agents.SelfSlug+".md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, "missing"
+	}
+	current, err := agents.RenderSelfFragment(selfFragmentOrder)
+	if err != nil {
+		return false, err.Error()
+	}
+	if string(data) == string(current) {
+		return true, "present, up to date"
+	}
+	return false, "present but stale (starfleetctl was updated since the last install-self)"
+}
+
+func fixSelfFragment(b *Bootstrap) error {
+	a, err := agents.New(b.Root)
+	if err != nil {
+		return err
+	}
+	return a.DoInstallSelf(selfFragmentOrder)
 }
 
 // verifyAgentsMD/fixAgentsMD delegate to internal/agents' own

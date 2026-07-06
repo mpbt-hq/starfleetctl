@@ -81,7 +81,11 @@ func parseFragmentFile(data []byte) (FragmentMeta, string, error) {
 	return m, body, nil
 }
 
-func writeFragmentFile(path string, m FragmentMeta, body string) error {
+// renderFragmentFile is the pure part of writeFragmentFile — no I/O, so
+// callers that only need to know what WOULD be written (e.g. bootstrap's
+// verifySelfFragment, comparing against what's already on disk) don't need
+// a throwaway temp file.
+func renderFragmentFile(m FragmentMeta, body string) []byte {
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "slug: %s\n", m.Slug)
@@ -93,7 +97,11 @@ func writeFragmentFile(path string, m FragmentMeta, body string) error {
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimRight(body, "\n"))
 	b.WriteString("\n")
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return []byte(b.String())
+}
+
+func writeFragmentFile(path string, m FragmentMeta, body string) error {
+	return os.WriteFile(path, renderFragmentFile(m, body), 0o644)
 }
 
 // loadAllFragments reads every agents.d/*.md file's frontmatter EXCEPT
