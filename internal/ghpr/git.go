@@ -5,6 +5,7 @@ package ghpr
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -58,6 +59,43 @@ func gitCaptureQuiet(dir string, args ...string) (string, error) {
 	cmd.Stdout = &out
 	err := cmd.Run()
 	return trimTrailingNewline(out.String()), err
+}
+
+// gitCaptureNUL is gitCapture without the trailing-newline trim — for output
+// that's NUL-delimited rather than newline-terminated (e.g. `git config
+// --null --get-regexp`), where trimming would risk corrupting the last
+// entry's bytes.
+func gitCaptureNUL(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	return out.String(), err
+}
+
+// runPassthroughTo execs name with args, stdin connected to ours, stdout to
+// the given writer and stderr to ours — for commands that can't take a `-C
+// dir` prefix (e.g. `git clone`, where the destination doesn't exist yet).
+// Lets callers like EnsureAgentClone redirect a whole subprocess's stdout to
+// stderr (mirroring bash's `cmd >&2`) without duplicating the exec setup.
+func runPassthroughTo(name string, stdout io.Writer, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// gitRunTo is gitRun with stdout directed to an arbitrary writer instead of
+// always os.Stdout — lets a caller redirect an entire git call's stdout to
+// stderr (mirroring bash's `cmd >&2`) while still letting stderr flow to the
+// real stderr.
+func gitRunTo(dir string, stdout io.Writer, args ...string) error {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // gitConfigGet reads a single git config key in dir, returning "" if unset

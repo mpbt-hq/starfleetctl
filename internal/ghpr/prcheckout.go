@@ -4,9 +4,8 @@
 // Go port of scripts/pr-checkout: check out an open PR's head branch into an
 // isolated, object-shared agent clone, ready to edit (pairs with
 // pr-amend-push). Needs the workspace root (unlike the stateless ghpr
-// subcommands) to locate scripts/mk-agent-clone and construct the
-// _WORK_/... clone path, so it's wired through the workspaceRoot() dispatch
-// group in main.go, not the any-cwd one.
+// subcommands) to locate the agent-clone tree, so it's wired through the
+// workspaceRoot() dispatch group in main.go, not the any-cwd one.
 package ghpr
 
 import (
@@ -49,14 +48,12 @@ func RunPRCheckout(root string, args []string) int {
 		fmt.Fprintf(os.Stderr, "pr-checkout: coordinate, pick another PR, or 'starfleetctl pr-claim --steal %s' if that agent is gone.\n", pr)
 	}
 
-	// isolated master clone (object-shared); mk-agent-clone's own `fetch
+	// isolated master clone (object-shared); EnsureAgentClone's own `fetch
 	// origin --prune` already pulls every origin branch, including the PR
-	// head branch. Still a bash script — out of scope for this phase.
-	mkAgentClone := filepath.Join(root, "scripts", "mk-agent-clone")
-	cmd := exec.Command(mkAgentClone, "master", name)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// head branch. Progress -> stderr, matching the bash original's `>&2`
+	// on this call (pr-checkout's own stdout contract is just the final
+	// clone dir, for command-substitution capture).
+	if _, err := EnsureAgentClone(root, "master", name, os.Stderr); err != nil {
 		fprintErr("pr-checkout", err)
 		return 1
 	}

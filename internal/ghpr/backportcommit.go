@@ -46,15 +46,10 @@ func RunBackportCommit(root string, args []string) int {
 	if len(args) >= 3 {
 		name = args[2]
 	}
-	dest := filepath.Join(root, "_WORK_", fmt.Sprintf("xserver-%s", rel), "agent", name, "xserver")
 
 	// 1. refresh/create the isolated agent clone (lands on rfc/backport-<rel>)
-	mkAgentClone := filepath.Join(root, "scripts", "mk-agent-clone")
-	cmd := exec.Command(mkAgentClone, rel, name)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	dest, err := EnsureAgentClone(root, rel, name, os.Stdout)
+	if err != nil {
 		fprintErr("backport-commit", err)
 		return 1
 	}
