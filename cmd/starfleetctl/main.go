@@ -18,6 +18,7 @@ import (
 
 	"github.com/metux/starfleetctl/internal/agentbus"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/ghpr"
 	"github.com/metux/starfleetctl/internal/prclaim"
 	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/withclonelock"
@@ -26,7 +27,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock> [args…]")
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict> [args…]")
 		os.Exit(2)
 	}
 
@@ -42,6 +43,23 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(withclonelock.Run(dir, os.Args[2:]))
+	}
+
+	// The ghpr (GitHub-interaction) subcommands are likewise standalone —
+	// stateless `gh` wrappers with no fleet-file/lock dependency on this
+	// checkout, so they must work from any cwd too, same reasoning as
+	// with-clone-lock above.
+	switch os.Args[1] {
+	case "pr-view":
+		os.Exit(ghpr.RunPRView(os.Args[2:]))
+	case "pr-ci":
+		os.Exit(ghpr.RunPRCi(os.Args[2:]))
+	case "show-branch-file":
+		os.Exit(ghpr.RunShowBranchFile(os.Args[2:]))
+	case "backport-applies":
+		os.Exit(ghpr.RunBackportApplies(os.Args[2:]))
+	case "show-pr-conflict":
+		os.Exit(ghpr.RunShowPRConflict(os.Args[2:]))
 	}
 
 	root, err := workspaceRoot()
