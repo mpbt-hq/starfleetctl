@@ -153,12 +153,30 @@ func workspaceRoot() (string, error) {
 		if isFile(filepath.Join(dir, "AGENTS.md")) && isDir(filepath.Join(dir, "scripts")) {
 			return dir, nil
 		}
+		// Don't walk past a git repo/worktree boundary. A directory with its
+		// own .git (a directory for a normal repo, a file for a linked
+		// worktree) that lacks AGENTS.md + scripts/ is NOT this workspace —
+		// continuing upward risks silently escaping into an unrelated outer
+		// checkout. Concretely hit 2026-07-06: a worktree of THIS repo under
+		// _WORK_/worktrees/mpbt-workspace/<name>/ (nested inside the real
+		// checkout) had its AGENTS.md removed mid-migration; without this
+		// guard, the walk continued past the worktree's own .git file and
+		// resolved to the outer shared checkout instead, which then nearly
+		// received a write meant for the isolated worktree.
+		if exists(filepath.Join(dir, ".git")) {
+			return "", fmt.Errorf("in a git working tree (%s) with no AGENTS.md + scripts/ — refusing to search further up past this repo/worktree boundary; set MPBT_WORKSPACE_ROOT if this is intentional", dir)
+		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			return "", fmt.Errorf("could not locate mpbt-workspace root (no AGENTS.md + scripts/ found walking up from cwd); set MPBT_WORKSPACE_ROOT")
 		}
 		dir = parent
 	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func isFile(path string) bool {
