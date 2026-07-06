@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/bootstrap"
 	"github.com/metux/starfleetctl/internal/bridged"
 	"github.com/metux/starfleetctl/internal/dashboard"
@@ -120,6 +121,8 @@ func main() {
 		os.Exit(ghpr.RunBackportCommit(root, os.Args[2:]))
 	case "bootstrap":
 		os.Exit(bootstrap.Run(root, os.Args[2:]))
+	case "agents":
+		os.Exit(agents.Run(root, os.Args[2:]))
 	case "mk-agent-clone":
 		os.Exit(ghpr.RunMkAgentClone(root, os.Args[2:]))
 	case "bridged":
