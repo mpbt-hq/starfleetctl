@@ -1,0 +1,187 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Enrico Weigelt, metux IT consult
+
+package bootstrap
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Check is one idempotent bootstrap step: Verify reports whether it's
+// already satisfied (ok) plus a human-readable detail; Fix repairs it.
+// Running a Check whose Verify already returns ok is always safe (Fix is
+// simply not called) — this is what makes re-running the whole bootstrap
+// against an already-set-up checkout a no-op.
+type Check struct {
+	Name   string
+	Verify func(b *Bootstrap) (ok bool, detail string)
+	Fix    func(b *Bootstrap) error
+}
+
+// requiredDirs are every directory a starfleetctl subcommand lazily
+// os.MkdirAll's on first use — listed here too so `bootstrap` can warm them
+// all up in one pass (e.g. right after a fresh clone, before any subcommand
+// has run yet) instead of relying on each one's own first invocation.
+var requiredDirs = []string{
+	filepath.Join("_WORK_", "agent-bus", "status"),
+	filepath.Join("_WORK_", "agent-bus", "msgs"),
+	filepath.Join("_WORK_", "agent-bus", "acks"),
+	filepath.Join("_WORK_", "agent-bus", "ships"),
+	filepath.Join("_WORK_", "agent-bus", "monitor-seen"),
+	filepath.Join("_WORK_", "agent-bus", "notify", ".popup-once"),
+	filepath.Join("_WORK_", "agent-claims"),
+}
+
+// requiredAllowEntries are the starfleetctl-specific permission rules
+// `bootstrap` verifies/fixes in .claude/settings.json. Deliberately narrow —
+// this is NOT a general settings.json linter, just the entries this tool
+// itself depends on to run without a confirmation prompt every time.
+var requiredAllowEntries = []string{
+	"Bash(scripts/starfleetctl)",
+	"Bash(scripts/starfleetctl *)",
+}
+
+// Checks returns the full, ordered set of bootstrap checks.
+func Checks() []Check {
+	return []Check{
+		{
+			Name:   "_WORK_ directory tree",
+			Verify: verifyDirs,
+			Fix:    fixDirs,
+		},
+		{
+			Name:   "scripts/ship-names.txt present",
+			Verify: verifyShipNamesFile,
+			Fix:    nil, // not auto-fixable: this is source data, not a directory
+		},
+		{
+			Name:   ".claude/settings.json: starfleetctl allowlist entries",
+			Verify: verifySettingsAllowlist,
+			Fix:    fixSettingsAllowlist,
+		},
+	}
+}
+
+func verifyDirs(b *Bootstrap) (bool, string) {
+	var missing []string
+	for _, d := range requiredDirs {
+		if fi, err := os.Stat(filepath.Join(b.Root, d)); err != nil || !fi.IsDir() {
+			missing = append(missing, d)
+		}
+	}
+	if len(missing) == 0 {
+		return true, fmt.Sprintf("%d/%d present", len(requiredDirs), len(requiredDirs))
+	}
+	return false, fmt.Sprintf("missing: %s", strings.Join(missing, ", "))
+}
+
+func fixDirs(b *Bootstrap) error {
+	for _, d := range requiredDirs {
+		if err := os.MkdirAll(filepath.Join(b.Root, d), 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", d, err)
+		}
+	}
+	return nil
+}
+
+func verifyShipNamesFile(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, "scripts", "ship-names.txt")
+	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+		return true, "present"
+	}
+	return false, fmt.Sprintf("missing %s (not auto-fixable — this is source data, not something bootstrap can invent; check you're on mtx/agent-config)", path)
+}
+
+func verifySettingsAllowlist(b *Bootstrap) (bool, string) {
+	allow, err := readAllowList(b.SettingsFile)
+	if err != nil {
+		return false, fmt.Sprintf("could not read/parse %s: %v", b.SettingsFile, err)
+	}
+	present := map[string]bool{}
+	for _, a := range allow {
+		present[a] = true
+	}
+	var missing []string
+	for _, want := range requiredAllowEntries {
+		if !present[want] {
+			missing = append(missing, want)
+		}
+	}
+	if len(missing) == 0 {
+		return true, "present"
+	}
+	return false, fmt.Sprintf("missing: %s", strings.Join(missing, ", "))
+}
+
+// fixSettingsAllowlist inserts any missing required entries right after the
+// `"allow": [` line, as a targeted text edit rather than a full JSON
+// marshal/remarshal — this file is shared, hand-formatted, and actively
+// edited by other sessions, so preserving its exact formatting/ordering for
+// every OTHER entry matters (a full re-marshal would reformat the whole
+// file and produce a huge, noisy diff).
+func fixSettingsAllowlist(b *Bootstrap) error {
+	data, err := os.ReadFile(b.SettingsFile)
+	if err != nil {
+		return err
+	}
+	allow, err := readAllowList(b.SettingsFile)
+	if err != nil {
+		return err
+	}
+	present := map[string]bool{}
+	for _, a := range allow {
+		present[a] = true
+	}
+	var toAdd []string
+	for _, want := range requiredAllowEntries {
+		if !present[want] {
+			toAdd = append(toAdd, want)
+		}
+	}
+	if len(toAdd) == 0 {
+		return nil
+	}
+
+	content := string(data)
+	marker := `"allow": [`
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		return fmt.Errorf("could not find %q in %s — refusing to guess where to insert", marker, b.SettingsFile)
+	}
+	insertAt := idx + len(marker)
+	// Match the indentation of the line the marker itself is on, plus one
+	// level (2 spaces), matching this file's existing style throughout.
+	var lines []string
+	for _, e := range toAdd {
+		lines = append(lines, fmt.Sprintf("\n      %q,", e))
+	}
+	newContent := content[:insertAt] + strings.Join(lines, "") + content[insertAt:]
+
+	// Validate before writing: a broken settings.json silently disables
+	// every setting sourced from this file — never leave it invalid.
+	var probe any
+	if err := json.Unmarshal([]byte(newContent), &probe); err != nil {
+		return fmt.Errorf("edit would produce invalid JSON, aborting: %w", err)
+	}
+	return os.WriteFile(b.SettingsFile, []byte(newContent), 0o644)
+}
+
+func readAllowList(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	return doc.Permissions.Allow, nil
+}
