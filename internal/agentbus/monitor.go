@@ -7,27 +7,31 @@
 // as the rest of this package, so they're built directly on the existing
 // Bus helpers rather than shelling out.
 //
-// KNOWN ISSUE, DO NOT wire DoMonitorLoop/DoFleetWatch into the Claude Code
-// Monitor tool (i.e. do not point a `Monitor{command: "... agent-bus
-// monitor-loop"}` arm at this) — found 2026-07-06 (Farragut, directive
-// m0047): both reliably detect a BACKLOG match (a message that already
-// exists when the process starts, e.g. under `Monitor`'s own first-pass
-// scan) but reproducibly FAIL to detect a message that arrives WHILE the
-// process is already running, specifically when spawned via the Monitor
-// tool — despite the exact same binary/logic working correctly (a) via
-// plain `&`-backgrounded bash, and (b) via three separately-written minimal
-// Go reproductions of the same shape under Monitor (a bare sleep-loop; a
-// directory-listing poll loop; that same poll loop plus an open/held
-// append-mode file handle to a sibling path, mirroring this file's own
-// seen-file handling). None of the three isolate the cause — directory
-// cache staleness, held-fd interference, and workspace-root resolution were
-// all specifically tested and ruled out. Root cause NOT understood.
-// DoWatch is a different execution model (setsid-detached background
-// daemon, not Monitor-tool-managed) and was NOT tested against this same
-// failure mode — untested, not confirmed either safe or unsafe.
-// scripts/agent-bus-monitor-loop and scripts/agent-bus-fleet-watch (bash)
-// remain the only Monitor-tool-armed implementation until this is
-// understood; see DASHBOARD.md's starfleetctl row for the full writeup.
+// DoMonitorLoop CLEARED for Monitor-tool use as of 2026-07-07 (Farragut,
+// m0087/m0120): originally found reproducibly BROKEN under the Claude Code
+// Monitor tool 2026-07-06 (Farragut, directive m0047) — reliably detected a
+// BACKLOG match but reproducibly FAILED to detect a message arriving WHILE
+// already running under Monitor specifically. Root cause was never
+// isolated (three independent minimal repros under Monitor all worked
+// fine, ruling out directory-cache staleness, held-fd interference, and
+// workspace-root resolution). Two independent re-repro attempts the same
+// day (Constellation 7/7, Farragut 4/4) could no longer reproduce it at
+// all, and a subsequent extended real-production vorcheck (Farragut,
+// 2026-07-07: the actual DoMonitorLoop binary armed live via Monitor
+// against the real bus, disposable identity, ~16h continuous runtime) saw
+// 5/5 live `all`-broadcasts detected correctly with zero misses — whatever
+// the original bug was, it is gone. scripts/agent-bus-monitor-hint now arms
+// `scripts/starfleetctl agent-bus monitor-loop` for new/restarted sessions.
+// scripts/agent-bus-monitor-loop (bash) remains in place, untouched, as a
+// fallback.
+//
+// DoFleetWatch is NOT cleared — same failure-mode class as DoMonitorLoop
+// but never separately re-tested; do not wire it into a Monitor arm without
+// its own vorcheck first. DoWatch is a different execution model
+// (setsid-detached background daemon, not Monitor-tool-managed) and was
+// never tested against this failure mode either way — untested, not
+// confirmed safe or unsafe. See DASHBOARD.md's starfleetctl row / the
+// m0047 theme file for the full writeup.
 package agentbus
 
 import (

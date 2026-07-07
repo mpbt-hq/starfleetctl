@@ -34,14 +34,18 @@ Control agent:
 --json on board/inbox/msgs/asks prints a JSON array instead of the
 human-formatted table — for scripts/agents, so no grep/awk/cut is needed.
 
-Ecosystem loops (NOT wired into production hooks/Monitor arming — see
-DASHBOARD.md starfleetctl row and this package's monitor.go doc comment):
-  monitor-loop              KNOWN BROKEN under the Monitor tool: detects a
-                            backlog match but not a live one arriving after
-                            the process starts (bash original unaffected).
-                            Watch my inbox, print new/unacked directives.
-  fleet-watch               Same known issue as monitor-loop. Watch the
-                            board for ships joining/restarting.
+Ecosystem loops (see DASHBOARD.md starfleetctl row and this package's
+monitor.go doc comment for history):
+  monitor-loop              Watch my inbox, print new/unacked directives.
+                            Wired into production Monitor-tool arming as of
+                            2026-07-07 (an earlier live-detection bug under
+                            the Monitor tool specifically was found, then
+                            could no longer be reproduced after re-testing;
+                            see monitor.go doc comment).
+  fleet-watch               Watch the board for ships joining/restarting.
+                            NOT wired into Monitor-tool arming yet — same
+                            failure-mode class as monitor-loop's old bug,
+                            never separately re-tested.
   watch [interval|--stop]   desktop-notify daemon for new directives (default
                             15s poll; --stop kills the running instance)
 `
