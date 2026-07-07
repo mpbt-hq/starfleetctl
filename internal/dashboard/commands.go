@@ -88,16 +88,15 @@ func (d *Dashboard) DoCommit(msg string, push bool) error {
 	// Best-effort, mirrors ws-commit's `|| true`: a concurrent push landing
 	// between our commit and push is integrated race-free since we hold the
 	// clone lock; a genuine rebase conflict still surfaces on the push below.
-	_ = run(d.Root, "git", "pull", "--rebase", "--autostash", "origin", branch)
+	_ = run(d.Root, "git", "pull", "--rebase", "--autostash")
 	return run(d.Root, "git", "push", "origin", branch)
 }
 
-// sync runs `git pull --rebase --autostash origin <branch>` using the given
-// runner (run for visible output, runQuiet to suppress it to stderr).
+// sync runs `git pull --rebase --autostash` (no explicit remote/branch —
+// relies on the checked-out branch's configured upstream, so this also
+// works on a differently-named local branch tracking a remote one, e.g. a
+// scripts/worktree checkout) using the given runner (run for visible
+// output, runQuiet to suppress it to stderr).
 func (d *Dashboard) sync(runner func(dir, name string, args ...string) error) error {
-	branch, err := d.branch()
-	if err != nil {
-		return err
-	}
-	return runner(d.Root, "git", "pull", "--rebase", "--autostash", "origin", branch)
+	return runner(d.Root, "git", "pull", "--rebase", "--autostash")
 }

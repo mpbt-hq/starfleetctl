@@ -50,6 +50,6 @@ func (w *WsCommit) DoCommit(msg string, paths []string, push bool) error {
 		return err
 	}
 	// Best-effort, mirrors bash's `|| true`.
-	_ = run(w.Root, "git", "pull", "--rebase", "--autostash", "origin", branch)
+	_ = run(w.Root, "git", "pull", "--rebase", "--autostash")
 	return run(w.Root, "git", "push", "origin", branch)
 }

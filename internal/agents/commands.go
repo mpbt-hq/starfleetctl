@@ -188,6 +188,6 @@ func (a *Agents) DoCommit(slug, msg string, push bool) error {
 	if err != nil {
 		return err
 	}
-	_ = run(a.Root, "git", "pull", "--rebase", "--autostash", "origin", branch)
+	_ = run(a.Root, "git", "pull", "--rebase", "--autostash")
 	return run(a.Root, "git", "push", "origin", branch)
 }

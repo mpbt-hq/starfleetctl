@@ -144,7 +144,7 @@ func (d *Dashboard) DoThemeCommit(slug, msg string, push bool) error {
 	if err != nil {
 		return err
 	}
-	_ = run(d.Root, "git", "pull", "--rebase", "--autostash", "origin", branch)
+	_ = run(d.Root, "git", "pull", "--rebase", "--autostash")
 	return run(d.Root, "git", "push", "origin", branch)
 }
 
