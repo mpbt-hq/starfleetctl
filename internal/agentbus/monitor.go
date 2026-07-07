@@ -25,13 +25,20 @@
 // scripts/agent-bus-monitor-loop (bash) remains in place, untouched, as a
 // fallback.
 //
-// DoFleetWatch is NOT cleared — same failure-mode class as DoMonitorLoop
-// but never separately re-tested; do not wire it into a Monitor arm without
-// its own vorcheck first. DoWatch is a different execution model
-// (setsid-detached background daemon, not Monitor-tool-managed) and was
-// never tested against this failure mode either way — untested, not
-// confirmed safe or unsafe. See DASHBOARD.md's starfleetctl row / the
-// m0047 theme file for the full writeup.
+// DoFleetWatch CLEARED too, 2026-07-07 (Farragut, m0138(1)): its own
+// Monitor-tool vorcheck armed both the bash original and this Go binary in
+// parallel against the real board and saw 7/7 live status-change events
+// (real fleet activity plus a disposable synthetic test ship) detected
+// identically by both, including correct "New ship online" vs "Ship
+// update" labeling. scripts/agent-bus-monitor-hint's Enterprise branch now
+// arms `scripts/starfleetctl agent-bus fleet-watch`; scripts/agent-bus-
+// fleet-watch (bash) remains in place, untouched, as a fallback.
+//
+// DoWatch is a different execution model (setsid-detached background
+// daemon, not Monitor-tool-managed) and was never tested against the
+// original failure mode either way — untested, not confirmed safe or
+// unsafe. See DASHBOARD.md's starfleetctl row / the m0047 theme file for
+// the full writeup.
 package agentbus
 
 import (

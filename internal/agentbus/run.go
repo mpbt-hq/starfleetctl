@@ -43,9 +43,10 @@ monitor.go doc comment for history):
                             could no longer be reproduced after re-testing;
                             see monitor.go doc comment).
   fleet-watch               Watch the board for ships joining/restarting.
-                            NOT wired into Monitor-tool arming yet — same
-                            failure-mode class as monitor-loop's old bug,
-                            never separately re-tested.
+                            Wired into production Monitor-tool arming
+                            (flagship/control session) as of 2026-07-07,
+                            after its own vorcheck cleared the same
+                            failure-mode class as monitor-loop's old bug.
   watch [interval|--stop]   desktop-notify daemon for new directives (default
                             15s poll; --stop kills the running instance)
 `
