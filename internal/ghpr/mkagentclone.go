@@ -77,7 +77,14 @@ func EnsureAgentClone(root, rel, name string, stdout io.Writer) (string, error) 
 		}
 		// origin = real upstream (PRs push to GitHub); objects borrowed
 		// from the reference clone via --reference (alternates).
-		if err := runPassthroughTo("git", stdout, "clone", "--reference", ref, url, dest); err != nil {
+		// --reference-if-able (not --reference): the reference clones
+		// under _WORK_/ are shallow (mpbt's limited fetch depth), and git
+		// refuses to use a shallow repo as a --reference alternate
+		// (missing objects) -- every call hard-failed. -if-able degrades
+		// gracefully to a normal full clone from url instead, at the cost
+		// of the disk/bandwidth saving. Mirrors the same fix already
+		// applied to the bash original, scripts/mk-agent-clone.
+		if err := runPassthroughTo("git", stdout, "clone", "--reference-if-able", ref, url, dest); err != nil {
 			return "", err
 		}
 	}
