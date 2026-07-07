@@ -20,6 +20,17 @@ func gitRun(dir string, args ...string) error {
 	return cmd.Run()
 }
 
+// gitRunEnv is gitRun with extra environment variables (e.g.
+// GIT_SEQUENCE_EDITOR) appended on top of the current process's environment.
+func gitRunEnv(dir string, env []string, args ...string) error {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), env...)
+	return cmd.Run()
+}
+
 // gitRunErr is gitRun but with stdout routed to our stderr too — for git
 // commands whose progress output shouldn't land on our own stdout (mirrors
 // the bash originals' `>&2` redirections on progress-only git calls).

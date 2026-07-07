@@ -120,7 +120,7 @@ separate decision gated on review, same as the read-only set was before it got t
 | `pr-checkout <pr#> [agent-name]` | Set up an isolated local clone checked out to a PR's head branch — handles both same-repo and cross-fork PRs (wires a dedicated `fork` remote when needed) — and prints the clone directory on stdout. |
 | `pr-amend-push <clone-dir> [files...]` | Fold local edits into a PR's existing commit (`--amend --no-edit`, keeping the original message/trailers) and force-with-lease push it back. |
 | `backport-commit <release> <commit-ish\|PR#> [agent-name]` | One-shot backport: refresh/create an isolated agent clone for the target release, cherry-pick the given commit (falling back to a path-remapped apply if the source tree reorganized between branches), then hand off to `xx-make-pr`. |
-| `xx-make-pr [options] <commit> [<commit>...]` | Submit one or more commits from the current branch as a PR against a configured upstream (via `git config`'s `make-pr.*` keys in the working directory), then mark them with the resulting PR number and rebase the source branch. `--rebase` selects rebase mode; `--branch <name>` sets an explicit PR branch name. |
+| `xx-make-pr [options] <commit> [<commit>...]` | Submit one or more commits from the current branch as a PR against a configured upstream (via `git config`'s `make-pr.*` keys in the working directory), then mark only the incubator's copies of those commits with the resulting PR number (never the pushed/merged PR branch) and rebase the source branch. `--branch <name>` sets an explicit PR branch name. |
 
 ## Known limitations and parity notes
 
@@ -141,12 +141,12 @@ separate decision gated on review, same as the read-only set was before it got t
   `strings.ReplaceAll` instead. Behaviourally identical for every real path in the source tree this
   targets (plain `word/word/word.c` names, no regex metacharacters) — flagged here as a disclosed,
   deliberate simplification rather than a silent behavior change.
-- **`xx-make-pr` faithfully reproduces a known bug in its bash original, on purpose.** The
-  default "rebase" mode's PR-number-marker rewrite touches the *pushed* PR branch itself, not just
-  the source/incubator branch — a documented, not-yet-fixed issue in the upstream workflow this is
-  a parity port of. The alternate "incubator" mode that avoids this exists in the code (as it does
-  in bash) but has no CLI flag to select it in either implementation — this is a parity port, not a
-  redesign, so the bug (and the unreachable code path) were carried over rather than silently fixed.
+- **`xx-make-pr`'s marker-leak bug is fixed (2026-07-07), in both this port and the bash original.**
+  The old default "rebase" mode's PR-number-marker rewrite touched the *pushed* PR branch itself,
+  not just the source/incubator branch — leaked onto merged upstream commits (PR #3162). Both
+  implementations now always mark only the incubator branch, via a scripted `GIT_SEQUENCE_EDITOR`
+  (appends `exec` after just the todo lines for the submitted commits) instead of a human-driven
+  interactive rebase — no CLI mode flag needed or offered any more.
 
 ## Development
 

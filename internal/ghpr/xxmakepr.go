@@ -8,14 +8,13 @@
 // when invoked directly) — same as the bash original, which reads its
 // config from `git config` in whatever directory it's run from.
 //
-// PARITY NOTE: this preserves the bash original's DEFAULT_MODE="rebase" and
-// its documented consequence — the "rebase" mode's marker rewrite touches
-// the pushed PR branch itself, not just the incubator (see AGENTS.md "PR
-// workflow" — this is a known, not-yet-fixed leak of the "[PR #N]" prefix
-// onto merged commits). Faithfully porting the bug, not silently fixing it,
-// since this task is a parity port, not a redesign; the "incubator" mode
-// that avoids the leak exists in the code (like the bash original) but has
-// no CLI flag to select it in either version — dead code kept for parity.
+// Marks only the incubator's own copies of the submitted commits with the
+// "[PR #N] " subject prefix + "PR: <url>" trailer, via a scripted
+// GIT_SEQUENCE_EDITOR — never touches the pushed PR branch again after it's
+// pushed. An earlier version of both this port and its bash original
+// rewrote the pushed PR branch itself, which leaked the marker onto merged
+// upstream commits (seen on PR #3162, all 4 commits merged prefixed
+// "[PR #3162] "); see AGENTS.md "PR workflow" for the incident writeup.
 package ghpr
 
 import (
@@ -30,7 +29,6 @@ import (
 const xxMakePRUsage = `usage: starfleetctl xx-make-pr [options] <commit> [<commit> ...]
 
 Options:
-  --rebase            Use rebase mode (markers added to PR branch, then incubator rebased).
   --branch <name>     Explicitly set PR branch name instead of auto-generating it.
 
 Arguments:
@@ -63,13 +61,10 @@ func RunXXMakePR(dir string, args []string) int {
 	}
 	upstreamRef := upstreamRemote + "/" + upstreamBranch
 
-	mode := "rebase" // DEFAULT_MODE, matches the bash original
 	branchName := ""
 	var commits []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--rebase":
-			mode = "rebase"
 		case "--branch":
 			i++
 			if i >= len(args) {
@@ -102,7 +97,6 @@ func RunXXMakePR(dir string, args []string) int {
 	}
 	tmpBranch := "tmp-" + branchName
 
-	fmt.Printf("Mode: %s\n", mode)
 	fmt.Printf("Incubator: %s\n", incubatorBranch)
 	fmt.Printf("New PR branch: %s\n", branchName)
 	fmt.Printf("Commits: %s\n", strings.Join(commits, " "))
@@ -208,42 +202,47 @@ func RunXXMakePR(dir string, args []string) int {
 	}
 	prNumber := extractTrailingDigits(prURL)
 
-	if mode == "incubator" {
-		if err := gitRun(dir, "checkout", incubatorBranch); err != nil {
-			fprintErr("xx-make-pr", err)
-			return 1
-		}
-		for range commits {
-			markExec := fmt.Sprintf(`git log --format=%%B -1 HEAD | sed "1s/^/[PR #%s] /" | git commit --amend -F - --trailer "PR: %s"`, prNumber, prURL)
-			if err := gitRun(dir, "rebase", "-i", "--autosquash", "--keep-empty", "--exec", markExec); err != nil {
-				fprintErr("xx-make-pr", err)
-				return 1
-			}
-		}
-	} else {
-		if err := gitRun(dir, "checkout", branchName); err != nil {
-			fprintErr("xx-make-pr", err)
-			return 1
-		}
-		markExec := fmt.Sprintf(`git log --format=%%B -1 HEAD | sed "1s/^/[PR #%s] /" | git commit --amend -F - --trailer "PR: %s"`, prNumber, prURL)
-		if err := gitRun(dir, "rebase", upstreamRef, "--exec", markExec); err != nil {
-			fprintErr("xx-make-pr", err)
-			return 1
-		}
-		if err := gitRun(dir, "checkout", incubatorBranch); err != nil {
-			fprintErr("xx-make-pr", err)
-			return 1
-		}
-		if err := gitRun(dir, "rebase", branchName); err != nil {
-			fprintErr("xx-make-pr", err)
-			return 1
-		}
-	}
-
 	if err := gitRun(dir, "checkout", incubatorBranch); err != nil {
 		fprintErr("xx-make-pr", err)
 		return 1
 	}
+
+	// Explicit base instead of relying on the incubator branch having an
+	// @{upstream} configured (a bare `git rebase -i` needs one).
+	markBase, err := gitCapture(dir, "merge-base", upstreamRef, incubatorBranch)
+	if err != nil {
+		fprintErr("xx-make-pr", err)
+		return 1
+	}
+
+	markShas := make([]string, 0, len(commits))
+	for _, c := range commits {
+		full, err := gitCapture(dir, "rev-parse", c)
+		if err != nil {
+			fprintErr("xx-make-pr", err)
+			return 1
+		}
+		markShas = append(markShas, full)
+	}
+
+	markExec := fmt.Sprintf(`git log --format=%%B -1 HEAD | sed "1s/^/[PR #%s] /" | git commit --amend -F - --trailer "PR: %s"`, prNumber, prURL)
+	seqEditor, cleanup, err := writeMarkSequenceEditor()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "xx-make-pr:", err)
+		return 1
+	}
+	defer cleanup()
+
+	env := []string{
+		"GIT_SEQUENCE_EDITOR=" + seqEditor,
+		"MARK_EXEC=" + markExec,
+		"MARK_SHAS=" + strings.Join(markShas, "\n"),
+	}
+	if err := gitRunEnv(dir, env, "rebase", "-i", "--autosquash", "--keep-empty", markBase); err != nil {
+		fprintErr("xx-make-pr", err)
+		return 1
+	}
+
 	if err := gitRun(dir, "branch", "-D", branchName); err != nil {
 		fprintErr("xx-make-pr", err)
 		return 1
@@ -251,6 +250,53 @@ func RunXXMakePR(dir string, args []string) int {
 
 	fmt.Printf("Done. PR created: %s\n", prURL)
 	return 0
+}
+
+// markSequenceEditorScript is a GIT_SEQUENCE_EDITOR that appends
+// "exec $MARK_EXEC" after the todo "pick" line for each commit listed
+// (newline-separated, full SHAs) in $MARK_SHAS, leaving every other line
+// untouched — scripting exactly what a human doing `rebase -i` by hand would
+// type, so the rebase runs non-interactively. $1 is the todo file path
+// (git's contract for GIT_SEQUENCE_EDITOR).
+const markSequenceEditorScript = `#!/usr/bin/env bash
+set -euo pipefail
+todo="$1"
+tmp=$(mktemp)
+while IFS= read -r line; do
+  echo "$line" >>"$tmp"
+  case "$line" in
+    pick\ *)
+      sha=$(echo "$line" | awk '{print $2}')
+      while IFS= read -r target; do
+        [ -z "$target" ] && continue
+        case "$target" in
+          "$sha"*) echo "exec $MARK_EXEC" >>"$tmp" ;;
+        esac
+      done <<<"$MARK_SHAS"
+      ;;
+  esac
+done <"$todo"
+mv "$tmp" "$todo"
+`
+
+// writeMarkSequenceEditor writes markSequenceEditorScript to a temp
+// executable file and returns its path plus a cleanup func to remove it.
+func writeMarkSequenceEditor() (path string, cleanup func(), err error) {
+	f, err := os.CreateTemp("", "xx-make-pr-seq-editor-*.sh")
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := f.WriteString(markSequenceEditorScript); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", nil, err
+	}
+	f.Close()
+	if err := os.Chmod(f.Name(), 0o700); err != nil {
+		os.Remove(f.Name())
+		return "", nil, err
+	}
+	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
 var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
