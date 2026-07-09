@@ -6,12 +6,14 @@ package bootstrap
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	starfleetctl "github.com/metux/starfleetctl"
 )
 
 // Check is one idempotent bootstrap step: Verify reports whether it's
@@ -80,6 +82,11 @@ func Checks() []Check {
 			Name:   "starfleetctl self-fragment (agents.d/starfleet/starfleetctl.md)",
 			Verify: verifySelfFragment,
 			Fix:    fixSelfFragment,
+		},
+		{
+			Name:   "starfleet fragments (agents.d/starfleet/)",
+			Verify: verifyStarfleetFragments,
+			Fix:    fixStarfleetFragments,
 		},
 	}
 }
@@ -300,6 +307,64 @@ func fixSettingsAllowlist(b *Bootstrap) error {
 		return fmt.Errorf("edit would produce invalid JSON, aborting: %w", err)
 	}
 	return os.WriteFile(b.SettingsFile, []byte(newContent), 0o644)
+}
+
+// verifyStarfleetFragments checks that every .md file embedded under
+// fragments/starfleet/ in the starfleetctl binary is installed to
+// agents.d/<slug>.md and byte-identical to what the current binary would
+// write. This is a bulk, always-overwrite check like the self-fragment.
+func verifyStarfleetFragments(b *Bootstrap) (bool, string) {
+	a, err := agents.New(b.Root)
+	if err != nil {
+		return false, err.Error()
+	}
+	entries, err := fs.ReadDir(starfleetctl.Fragments, agents.StarfleetSubdir)
+	if err != nil {
+		return false, err.Error()
+	}
+	var missing, stale []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		current, err := agents.RenderStarfleetFragment(agents.StarfleetSubdir, e.Name())
+		if err != nil {
+			return false, err.Error()
+		}
+		// Derive slug to find the installed path.
+		meta, _, err := agents.ParseEmbeddedFragment(starfleetctl.Fragments, agents.StarfleetSubdir, e.Name())
+		if err != nil {
+			return false, err.Error()
+		}
+		installedPath := a.FragmentsDir() + string(os.PathSeparator) + meta.Slug + ".md"
+		data, err := os.ReadFile(installedPath)
+		if err != nil {
+			missing = append(missing, meta.Slug)
+			continue
+		}
+		if string(data) != string(current) {
+			stale = append(stale, meta.Slug)
+		}
+	}
+	if len(missing) == 0 && len(stale) == 0 {
+		return true, fmt.Sprintf("%d/%d present, up to date", len(entries), len(entries))
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(stale) > 0 {
+		parts = append(parts, fmt.Sprintf("stale: %s", strings.Join(stale, ", ")))
+	}
+	return false, strings.Join(parts, "; ")
+}
+
+func fixStarfleetFragments(b *Bootstrap) error {
+	a, err := agents.New(b.Root)
+	if err != nil {
+		return err
+	}
+	return a.DoInstallStarfleet(agents.StarfleetSubdir)
 }
 
 func readAllowList(path string) ([]string, error) {

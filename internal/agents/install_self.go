@@ -10,8 +10,11 @@
 package agents
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	starfleetctl "github.com/metux/starfleetctl"
 )
@@ -48,6 +51,68 @@ func (a *Agents) DoInstallSelf(order int) error {
 	}
 	if err := writeFragmentFile(path, selfFragmentMeta(order), starfleetctl.Readme); err != nil {
 		return err
+	}
+	return a.DoReindex()
+}
+
+// StarfleetSubdir is the subdirectory inside fragments/ that holds the
+// generic starfleet-wide fragment files.
+const StarfleetSubdir = "starfleet"
+
+// ParseEmbeddedFragment reads a single embedded fragment file from the
+// starfleetctl binary's embedded FS, parses its frontmatter, and returns
+// the meta and body. slug is derived from the embedded file's relative path
+// within the subdirectory.
+func ParseEmbeddedFragment(fsys fs.FS, subdir, name string) (FragmentMeta, string, error) {
+	data, err := fs.ReadFile(fsys, filepath.Join(subdir, name))
+	if err != nil {
+		return FragmentMeta{}, "", err
+	}
+	m, body, err := parseFragmentFile(data)
+	if err != nil {
+		return FragmentMeta{}, "", fmt.Errorf("%s: %w", name, err)
+	}
+	if m.Slug == "" {
+		m.Slug = subdir + "/" + strings.TrimSuffix(name, ".md")
+	}
+	return m, body, nil
+}
+
+// RenderStarfleetFragment returns exactly the bytes DoInstallStarfleet would
+// write for a given embedded fragment, without touching disk — lets bootstrap
+// verify fragments without I/O.
+func RenderStarfleetFragment(subdir, name string) ([]byte, error) {
+	m, body, err := ParseEmbeddedFragment(starfleetctl.Fragments, subdir, name)
+	if err != nil {
+		return nil, err
+	}
+	return renderFragmentFile(m, body), nil
+}
+
+// DoInstallStarfleet installs every .md file from the embedded
+// fragments/<subdir>/ directory into agents.d/<slug>.md, always
+// overwriting existing files (they are tool-owned). Then reindexes.
+// Used by both the CLI command and genesis-init.
+func (a *Agents) DoInstallStarfleet(subdir string) error {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, subdir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		meta, body, err := ParseEmbeddedFragment(starfleetctl.Fragments, subdir, e.Name())
+		if err != nil {
+			return err
+		}
+		path := a.fragmentPath(meta.Slug)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := writeFragmentFile(path, meta, body); err != nil {
+			return err
+		}
 	}
 	return a.DoReindex()
 }

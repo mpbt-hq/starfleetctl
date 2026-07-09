@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/bootstrap"
 )
 
@@ -91,6 +92,18 @@ func Init(root string) (created []string, err error) {
 		if err := c.Fix(b); err != nil {
 			return created, fmt.Errorf("bootstrap fix %q: %w", c.Name, err)
 		}
+	}
+
+	// Install the generic starfleet-wide agent fragments from the embedded
+	// binary, so a brand-new project gets the full fleet-coordination
+	// instructions automatically. Always runs (idempotent — overwrites
+	// only what it itself wrote before).
+	a, err := agents.New(root)
+	if err != nil {
+		return created, fmt.Errorf("agents: %w", err)
+	}
+	if err := a.DoInstallStarfleet(agents.StarfleetSubdir); err != nil {
+		return created, fmt.Errorf("install starfleet fragments: %w", err)
 	}
 	return created, nil
 }
