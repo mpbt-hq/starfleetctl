@@ -318,7 +318,7 @@ func verifyStarfleetFragments(b *Bootstrap) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	entries, err := fs.ReadDir(starfleetctl.Fragments, agents.StarfleetSubdir)
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, agents.StarfleetSubdir))
 	if err != nil {
 		return false, err.Error()
 	}

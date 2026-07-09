@@ -64,7 +64,7 @@ const StarfleetSubdir = "starfleet"
 // the meta and body. slug is derived from the embedded file's relative path
 // within the subdirectory.
 func ParseEmbeddedFragment(fsys fs.FS, subdir, name string) (FragmentMeta, string, error) {
-	data, err := fs.ReadFile(fsys, filepath.Join(subdir, name))
+	data, err := fs.ReadFile(fsys, filepath.Join(starfleetctl.FragmentsRoot, subdir, name))
 	if err != nil {
 		return FragmentMeta{}, "", err
 	}
@@ -94,7 +94,7 @@ func RenderStarfleetFragment(subdir, name string) ([]byte, error) {
 // overwriting existing files (they are tool-owned). Then reindexes.
 // Used by both the CLI command and genesis-init.
 func (a *Agents) DoInstallStarfleet(subdir string) error {
-	entries, err := fs.ReadDir(starfleetctl.Fragments, subdir)
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, subdir))
 	if err != nil {
 		return err
 	}
