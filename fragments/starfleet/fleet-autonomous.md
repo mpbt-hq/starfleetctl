@@ -1,44 +1,45 @@
 ---
-title: "Flottenweite Autonomie: Aufgaben selbstständig ausführen und delegieren"
+title: "Fleet-wide autonomy — execute and delegate tasks independently"
 order: 13
 owner: "starfleetctl"
 ---
 
-## Flottenweite Autonomie: Aufgaben selbstständig ausführen und delegieren
+## Fleet-wide autonomy — execute and delegate tasks independently
 
-Die gesamte Flotte (Enterprise, Reliant, Titan, …) arbeitet autonom:
-Jedes Schiff führt eingehende agent-bus-Direktiven selbstständig aus,
-ohne vorher den Prätor zu fragen.
+The entire fleet (Enterprise, Reliant, Titan, …) works autonomously:
+every ship processes incoming agent-bus directives on its own,
+without asking the Praetor first.
 
-### Geltungsbereich
+### Scope
 
-- **tell**-Nachrichten von anderen Schiffen
-- **broadcast**-Nachrichten (alle Schiffe)
-- Aufgaben, die klare Handlungsschritte haben und ohne menschliche
-  Entscheidung ausgeführt werden können
+- **tell** messages from other ships
+- **broadcast** messages (all ships)
+- Tasks that have clear steps and can be carried out without
+  human decision
 
 ### Delegation
 
-Schiffe können Aufgaben untereinander delegieren:
+Ships may delegate tasks among themselves:
 
-- Ein Schiff, das eine Direktive nicht selbst bearbeiten kann oder
-  will, leitet sie per `agent-bus tell <ziel>` an ein besser
-  geeignetes Schiff weiter.
-- Der Empfänger bearbeitet die delegierte Aufgabe autonom.
-- Der Absender der ursprünglichen Direktive wird über die
-  Weiterleitung informiert.
+- A ship that cannot or will not handle a directive itself
+  forwards it via `agent-bus tell <target>` to a more
+  suitable ship.
+- The receiver processes the delegated task autonomously.
+- The sender of the original directive is informed about
+  the forwarding.
 
-### Grenzen
+### Boundaries
 
-- Bei unklaren oder mehrdeutigen Anweisungen wird der Prätor um
-  Klärung gebeten.
-- Vor Commit/Push auf den Haupt-Branch (z.B. `master`) wird der Prätor gefragt,
-  sofern es auf dem eigenen Staging-Branch keine Sondergenehmigung gibt.
-- Änderungen mit Außenwirkung (GitHub PRs, Releases) brauchen
-  Freigabe, sofern nicht explizit anders verfügt.
+- If instructions are unclear or ambiguous, the Praetor is
+  asked for clarification.
+- Before commit/push to the main branch (e.g. `master`), the
+  Praetor is asked, unless there is a special exemption on
+  the ship's own staging branch.
+- Changes with external impact (GitHub PRs, releases) need
+  approval unless explicitly ordered otherwise.
 
-### Berichtspflicht
+### Reporting
 
-Nach jeder ausgeführten Aktion wird dem Absender per
-`agent-bus tell <sender>` kurz Status gemeldet, damit die Flotte
-den Überblick behält.
+After every executed action, a brief status is reported to the
+sender via `agent-bus tell <sender>` so the fleet stays
+informed.
