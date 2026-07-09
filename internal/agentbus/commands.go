@@ -187,6 +187,25 @@ func (b *Bus) DoAck(id, note string) error {
 		noteSuffix = " — " + note
 	}
 	fmt.Printf("agent-bus: '%s' acked %s%s\n", b.AgentID, id, noteSuffix)
+
+	// Auto-delete message if all live target agents have acked it.
+	live := make(map[string]bool)
+	for _, r := range b.AllStatusRecords() {
+		if !b.stale(r.Epoch) {
+			live[r.Agent] = true
+		}
+	}
+	if b.allTargetsAcked(id, live) {
+		_ = os.Remove(b.mfile(id))
+		entries, _ := os.ReadDir(b.AckDir)
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), id+"__") {
+				_ = os.Remove(filepath.Join(b.AckDir, e.Name()))
+			}
+		}
+		b.logEvent("auto-delete", fmt.Sprintf("message %s deleted (all live targets acked)", id))
+	}
+
 	return nil
 }
 
