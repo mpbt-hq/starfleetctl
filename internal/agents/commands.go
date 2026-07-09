@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -109,13 +110,17 @@ func (a *Agents) DoWrite(slug, src string) error {
 
 // DoNew scaffolds a new fragment file with frontmatter, refusing to clobber
 // an existing one, then reindexes (and bootstraps the root AGENTS.md/index
-// first if this is the very first fragment ever created).
+// first if this is the very first fragment ever created). Slugs may contain
+// "/" to place the fragment in a subdirectory (e.g. "starfleet/my-topic").
 func (a *Agents) DoNew(slug, title string, order int, owner string) error {
 	path := a.fragmentPath(slug)
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("fragment already exists: %s", path)
 	}
 	if _, err := a.EnsureBootstrapped(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	m := FragmentMeta{Slug: slug, Title: title, Order: order, Owner: owner}

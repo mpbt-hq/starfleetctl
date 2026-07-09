@@ -6,6 +6,7 @@ package agents
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,36 +105,46 @@ func writeFragmentFile(path string, m FragmentMeta, body string) error {
 	return os.WriteFile(path, renderFragmentFile(m, body), 0o644)
 }
 
-// loadAllFragments reads every agents.d/*.md file's frontmatter EXCEPT
-// index.md itself (the generated index isn't a content fragment), sorted by
-// (Order, Slug) — this sort order is exactly what reindex uses to generate
-// the import list, so it directly controls AGENTS.md's effective section
-// order.
+// loadAllFragments reads every agents.d/**/*.md file's frontmatter EXCEPT
+// any index.md (generated indices aren't content fragments), sorted by
+// (Order, Slug). Walks subdirectories recursively, so fragments can live
+// in e.g. agents.d/starfleet/ or agents.d/project/. The slug is the
+// relative path from agents.d/ with the .md extension stripped, so a file
+// agents.d/starfleet/fleet-autonomous.md has slug "starfleet/fleet-autonomous".
 func (a *Agents) loadAllFragments() ([]FragmentMeta, error) {
-	entries, err := os.ReadDir(a.FragmentsDir())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
 	var metas []FragmentMeta
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || e.Name() == "index.md" {
-			continue
-		}
-		data, err := os.ReadFile(a.FragmentsDir() + string(os.PathSeparator) + e.Name())
+	fragDir := a.FragmentsDir()
+	err := filepath.Walk(fragDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil, err
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(info.Name(), ".md") || info.Name() == "index.md" {
+			return nil
+		}
+		rel, err := filepath.Rel(fragDir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
 		}
 		m, _, err := parseFragmentFile(data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Name(), err)
+			return fmt.Errorf("%s: %w", rel, err)
 		}
+		slug := strings.TrimSuffix(rel, ".md")
 		if m.Slug == "" {
-			m.Slug = strings.TrimSuffix(e.Name(), ".md")
+			m.Slug = slug
 		}
 		metas = append(metas, m)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(metas, func(i, j int) bool {
 		if metas[i].Order != metas[j].Order {

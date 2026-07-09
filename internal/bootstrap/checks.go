@@ -77,7 +77,7 @@ func Checks() []Check {
 			Fix:    fixDashboardMD,
 		},
 		{
-			Name:   "starfleetctl self-fragment (agents.d/starfleetctl.md)",
+			Name:   "starfleetctl self-fragment (agents.d/starfleet/starfleetctl.md)",
 			Verify: verifySelfFragment,
 			Fix:    fixSelfFragment,
 		},

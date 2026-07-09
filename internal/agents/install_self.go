@@ -11,11 +11,12 @@ package agents
 
 import (
 	"os"
+	"path/filepath"
 
 	starfleetctl "github.com/metux/starfleetctl"
 )
 
-const SelfSlug = "starfleetctl"
+const SelfSlug = "starfleet/starfleetctl"
 
 func selfFragmentMeta(order int) FragmentMeta {
 	return FragmentMeta{
@@ -28,23 +29,24 @@ func selfFragmentMeta(order int) FragmentMeta {
 
 // RenderSelfFragment returns exactly the bytes DoInstallSelf would write,
 // without touching disk — lets a caller (bootstrap's verifySelfFragment)
-// check whether an existing agents.d/starfleetctl.md is stale relative to
+// check whether an existing agents.d/starfleet/starfleetctl.md is stale relative to
 // the currently-running binary before deciding whether a fix is needed.
 func RenderSelfFragment(order int) ([]byte, error) {
 	return renderFragmentFile(selfFragmentMeta(order), starfleetctl.Readme), nil
 }
 
-// DoInstallSelf writes agents.d/starfleetctl.md from this binary's own
+// DoInstallSelf writes agents.d/starfleet/starfleetctl.md from this binary's own
 // embedded README.md, then reindexes. Unlike DoNew, this ALWAYS overwrites
 // — the fragment is tool-owned (Owner: "starfleetctl"), meant to always
 // mirror whatever starfleetctl commit is actually checked out; hand-editing
 // it is not supported (it would just be clobbered on the next
 // install-self, e.g. from `bootstrap --fix` after an update).
 func (a *Agents) DoInstallSelf(order int) error {
-	if err := os.MkdirAll(a.FragmentsDir(), 0o755); err != nil {
+	path := a.fragmentPath(SelfSlug)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := writeFragmentFile(a.fragmentPath(SelfSlug), selfFragmentMeta(order), starfleetctl.Readme); err != nil {
+	if err := writeFragmentFile(path, selfFragmentMeta(order), starfleetctl.Readme); err != nil {
 		return err
 	}
 	return a.DoReindex()

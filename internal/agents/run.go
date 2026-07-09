@@ -16,9 +16,9 @@ const usage = `agents <command> [args…]
   write <slug> <file|->                      replace one fragment file (no commit), then reindex
   new <slug> --title "<t>" [--order <n>] [--owner "<tool>"]
                                               scaffold a new fragment file
-  reindex                                    regenerate agents.d/index.md from agents.d/*.md
+  reindex                                    regenerate agents.d/index.md from agents.d/**/*.md
   commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) AGENTS.md+index.md
-  install-self [--order <n>]                 write/refresh agents.d/starfleetctl.md from this
+  install-self [--order <n>]                 write/refresh agents.d/starfleet/starfleetctl.md from this
                                               binary's own embedded README.md (always overwrites —
                                               tool-owned, re-run after a starfleetctl update)
 `
