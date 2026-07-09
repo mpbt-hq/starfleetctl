@@ -27,3 +27,23 @@ every ship reads its inbox, acts on directives, and responds.
 
 4. **Keep the board current.** Run `agent-bus status <state> [note]` after
    starting or finishing work so the fleet sees who is idle/working/blocked.
+
+### Large payloads — use `--stdin`, not argv
+
+`agent-bus tell` / `broadcast` deliver the message body either as command-line
+arguments (`tell <agent> <text…>`) or, to bypass the OS `ARG_MAX` limit
+(~128 KB–2 MB, varies per distro) that constrains argv-based delivery, read it
+from **stdin**:
+
+```sh
+# small message — argv is fine
+starfleetctl agent-bus tell Voyager "status report: build green"
+
+# large message (logs, diffs, long briefings) — pipe via stdin
+cat briefing.txt | starfleetctl agent-bus tell Voyager --stdin
+tar -tzf artifacts.tar | starfleetctl agent-bus broadcast --stdin
+```
+
+The storage layer itself has **no** size limit (verified at 20 MB+); only the
+argv path is bounded by the kernel. Prefer `--stdin` for anything bigger than
+~100 KB so the send can't fail with `E2BIG`.

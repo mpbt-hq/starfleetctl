@@ -51,7 +51,11 @@ session is doing and steer it. All parties read/write the same gitignored files,
   handled. `starfleetctl agent-bus clear` on exit.
 - **Control agent** (the flagship): `starfleetctl agent-bus board` is the whole-fleet view.
   Steer with `starfleetctl agent-bus tell <agent> <text...>` (one agent) or
-  `starfleetctl agent-bus broadcast <text...>` (all).
+  `starfleetctl agent-bus broadcast <text...>` (all). For payloads larger than
+  ~100 KB (logs, diffs, long briefings) pass the body via stdin to avoid the
+  OS `ARG_MAX` limit on command-line arguments:
+  `starfleetctl agent-bus tell <agent> --stdin < brief.txt` (or
+  `… broadcast --stdin`).
 
 **Heartbeats are auto-reported** via session hooks or wrappers — details are workspace-specific.
 
