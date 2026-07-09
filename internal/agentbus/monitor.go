@@ -21,7 +21,7 @@
 // against the real bus, disposable identity, ~16h continuous runtime) saw
 // 5/5 live `all`-broadcasts detected correctly with zero misses — whatever
 // the original bug was, it is gone. scripts/agent-bus-monitor-hint arms
-// `scripts/starfleetctl agent-bus monitor-loop` for new/restarted sessions,
+// `.bin/starfleetctl agent-bus monitor-loop` for new/restarted sessions,
 // and scripts/agent-bus-monitor-loop is now a thin bash wrapper exec'ing
 // that same Go backend (no separate bash fallback body remains).
 //
@@ -31,7 +31,7 @@
 // (real fleet activity plus a disposable synthetic test ship) detected
 // identically by both, including correct "New ship online" vs "Ship
 // update" labeling. scripts/agent-bus-monitor-hint's Enterprise branch now
-// arms `scripts/starfleetctl agent-bus fleet-watch`; scripts/agent-bus-
+// arms `.bin/starfleetctl agent-bus fleet-watch`; scripts/agent-bus-
 // fleet-watch (bash) remains in place, untouched, as a fallback.
 //
 // DoWatch is a different execution model (setsid-detached background

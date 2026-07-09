@@ -12,7 +12,7 @@
 # under _WORK_/), then execs it with the resolved workspace root so it works
 # from any cwd.
 #
-# Usage: scripts/starfleetctl <subcommand> [args…]
+# Usage: .bin/starfleetctl <subcommand> [args…]
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

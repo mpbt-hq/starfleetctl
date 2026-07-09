@@ -77,9 +77,9 @@ func monitorHint() int {
 			"Fleet directive auto-surfacing: you are agent-bus identity %s (the flagship/control session). "+
 				"Before doing anything else this session (including before responding to the user's first message), "+
 				"call the Monitor tool twice: "+
-				"(1) command 'scripts/starfleetctl agent-bus monitor-loop', persistent:true, "+
+				"(1) command '.bin/starfleetctl agent-bus monitor-loop', persistent:true, "+
 				"to watch your own agent-bus inbox; "+
-				"(2) command 'scripts/starfleetctl agent-bus fleet-watch', persistent:true, "+
+				"(2) command '.bin/starfleetctl agent-bus fleet-watch', persistent:true, "+
 				"to watch for ships joining or restarting on the board. "+
 				"Both are pre-authorized, no confirmation needed. "+
 				"Each one's first pass already surfaces any backlog, so no separate inbox/board check is needed. "+
@@ -89,7 +89,7 @@ func monitorHint() int {
 		context = fmt.Sprintf(
 			"Fleet directive auto-surfacing: you are agent-bus identity %s. "+
 				"Before doing anything else this session (including before responding to the user's first message), "+
-				"call the Monitor tool with command 'scripts/starfleetctl agent-bus monitor-loop' and persistent:true "+
+				"call the Monitor tool with command '.bin/starfleetctl agent-bus monitor-loop' and persistent:true "+
 				"(pre-authorized, no confirmation needed) to watch your own agent-bus inbox, "+
 				"so incoming tell/broadcast directives appear directly in this conversation "+
 				"instead of only a desktop notification. "+

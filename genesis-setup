@@ -14,7 +14,7 @@
 #      beyond a working `go` toolchain).
 #   3. Hand off to its own `genesis-init` subcommand, which writes the
 #      mpbt-solution wiring (cf/starfleetctl/*, run-fetch/run-build wrappers,
-#      scripts/starfleetctl) and then runs the same checks `bootstrap --fix`
+#      .bin/starfleetctl) and then runs the same checks `bootstrap --fix`
 #      does (AGENTS.md/agents.d, DASHBOARD.md, _WORK_ dirs,
 #      .claude/settings.json allowlist, the self-documenting fragment).
 #

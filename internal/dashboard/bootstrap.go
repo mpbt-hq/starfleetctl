@@ -14,7 +14,7 @@ const minimalSkeleton = `# DASHBOARD.md
 Cross-session "what's in flight / what got parked" index. Thin index — each
 row links to its own file under ` + "`dashboard/themes/`" + `. Edit the theme file
 directly; this index itself is regenerated with
-` + "`scripts/starfleetctl dashboard reindex`" + ` and should not normally be hand-edited.
+` + "`.bin/starfleetctl dashboard reindex`" + ` and should not normally be hand-edited.
 
 ## Aktive Themen
 

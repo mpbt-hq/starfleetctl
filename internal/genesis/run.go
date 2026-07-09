@@ -12,10 +12,10 @@ import (
 const usage = `starfleetctl genesis-init [dir]
 
 Bootstraps a workspace that has NOTHING fleet-related yet — no AGENTS.md, no
-cf/starfleetctl/, no scripts/starfleetctl — from just this one already-built
+cf/starfleetctl/, no .bin/starfleetctl — from just this one already-built
 starfleetctl binary. Writes the small set of project-independent files that
 wire starfleetctl in as an mpbt solution (cf/starfleetctl/*,
-run-fetch.starfleetctl, run-build.starfleetctl, scripts/starfleetctl,
+run-fetch.starfleetctl, run-build.starfleetctl, .bin/starfleetctl,
 scripts/ship-names.txt), skipping any that already exist, then runs the same
 checks as 'bootstrap --fix' (AGENTS.md + agents.d/index.md, DASHBOARD.md,
 _WORK_ directory tree, .claude/settings.json allowlist entries, the

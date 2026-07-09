@@ -18,7 +18,7 @@
 // genuine design question for the praetor, not decided here): a plain
 // `git clone` of this repo checks out `master`, the GitHub default branch,
 // which is MISSING ./bootstrap, AGENTS.md, DASHBOARD.md, scripts/agent-bus,
-// scripts/starfleetctl, and every other piece of fleet tooling — all of it
+// .bin/starfleetctl, and every other piece of fleet tooling — all of it
 // lives only on `mtx/agent-config` (the maintainer's personal staging
 // branch, per AGENTS.md's licensing-policy section: not auto-merged to
 // master, promotion is the maintainer's own deliberate call). So "fully

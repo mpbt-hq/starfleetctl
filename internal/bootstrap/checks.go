@@ -46,8 +46,8 @@ var requiredDirs = []string{
 // this is NOT a general settings.json linter, just the entries this tool
 // itself depends on to run without a confirmation prompt every time.
 var requiredAllowEntries = []string{
-	"Bash(scripts/starfleetctl)",
-	"Bash(scripts/starfleetctl *)",
+	"Bash(.bin/starfleetctl)",
+	"Bash(.bin/starfleetctl *)",
 }
 
 // Checks returns the full, ordered set of bootstrap checks.

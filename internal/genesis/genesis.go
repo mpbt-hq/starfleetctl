@@ -37,7 +37,7 @@ const templatesRoot = "templates"
 var execTemplates = map[string]bool{
 	"run-fetch.starfleetctl": true,
 	"run-build.starfleetctl": true,
-	"scripts/starfleetctl":   true,
+	".bin/starfleetctl":   true,
 }
 
 // Init writes every template file into root that isn't already present

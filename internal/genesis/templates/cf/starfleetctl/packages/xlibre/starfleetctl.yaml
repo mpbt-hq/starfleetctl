@@ -8,7 +8,7 @@
 # `master` branch. The build just runs the repo's Makefile via mpbt's `exec`
 # builder (plain Go, no autotools/meson). The built binary lands in the
 # source checkout itself (see the Makefile), not installed anywhere — invoke
-# it from there, or via the scripts/starfleetctl wrapper.
+# it from there, or via the .bin/starfleetctl wrapper.
 
 sources:
     git:
