@@ -26,7 +26,10 @@ Control agent:
   asks [--json]             pending questions addressed to me
   reply <qid> <answer…>     answer a worker's question
   tell <agent> <text…>      queue a directive for one agent
+  tell <agent> --stdin      read the directive body from stdin (bypasses
+                            argv/ARG_MAX size limit for large messages)
   broadcast <text…>         queue a directive for ALL agents
+  broadcast --stdin         read the broadcast body from stdin
   msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
@@ -107,13 +110,26 @@ func Run(root string, args []string) int {
 			cmdErr = b.DoBoard()
 		}
 	case "tell":
-		if len(args) < 3 {
-			cmdErr = usageErr("agent-bus: tell needs <agent> <text…>")
+		if len(args) < 2 {
+			cmdErr = usageErr("agent-bus: tell needs <agent> [--stdin|<text…>]")
 			break
 		}
-		cmdErr = b.DoPost(args[1], args[2:])
+		target := args[1]
+		rest := args[2:]
+		useStdin := false
+		if len(rest) == 1 && rest[0] == "--stdin" {
+			useStdin = true
+			rest = nil
+		}
+		cmdErr = b.DoPost(target, rest, useStdin)
 	case "broadcast", "--all":
-		cmdErr = b.DoPost("all", args[1:])
+		rest := args[1:]
+		useStdin := false
+		if len(rest) == 1 && rest[0] == "--stdin" {
+			useStdin = true
+			rest = nil
+		}
+		cmdErr = b.DoPost("all", rest, useStdin)
 	case "ask":
 		cmdErr = b.DoAsk(args[1:])
 	case "reply":

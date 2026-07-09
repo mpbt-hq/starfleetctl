@@ -32,31 +32,41 @@ func (r *Registry) DoAssignFlagship() error {
 // DoAssign implements `ship-names assign`: atomically pick the first unused
 // name from NamesFile, falling back to "ws-<pid>" if all are taken.
 func (r *Registry) DoAssign() error {
-	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
+	name, err := r.AssignName()
+	if err != nil {
 		return err
+	}
+	fmt.Println(name)
+	return nil
+}
+
+// AssignName picks the first unused name from NamesFile, falling back to
+// "ws-<pid>" if all are taken.  Returns the name (not printed), for use
+// from the session package.
+func (r *Registry) AssignName() (string, error) {
+	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
+		return "", err
 	}
 	lh, err := r.assignLock()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer lh.Close()
 
 	names, err := r.readNames()
 	if err != nil {
-		return err
+		return "", err
 	}
 	for _, name := range names {
 		path := r.shipFile(name)
 		if _, err := os.Stat(path); err != nil {
 			if err := writeReservation(path); err != nil {
-				return err
+				return "", err
 			}
-			fmt.Println(name)
-			return nil
+			return name, nil
 		}
 	}
-	fmt.Printf("ws-%d\n", os.Getpid())
-	return nil
+	return fmt.Sprintf("ws-%d", os.Getpid()), nil
 }
 
 func writeReservation(path string) error {

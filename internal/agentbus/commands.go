@@ -5,6 +5,7 @@ package agentbus
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -191,7 +192,7 @@ func (b *Bus) DoAck(id, note string) error {
 
 // DoBoard implements `agent-bus board`.
 func (b *Bus) DoBoard() error {
-	recs := b.allStatusRecords()
+	recs := b.AllStatusRecords()
 	if len(recs) == 0 {
 		fmt.Println("(no agents reporting — none have run 'agent-bus status' yet)")
 		return nil
@@ -217,10 +218,24 @@ func (b *Bus) DoBoard() error {
 }
 
 // DoPost implements `agent-bus tell <agent> <text…>` / `broadcast <text…>`.
-func (b *Bus) DoPost(target string, words []string) error {
-	text := clean(strings.Join(words, " "))
+// When useStdin is true, words are ignored and the message body is read from
+// os.Stdin instead — this bypasses the OS ARG_MAX limit that constrains
+// command-line delivery of large directives (see the size-limit test,
+// 2026-07-09: tell works up to ~100KB via argv, fails at ~1MB with E2BIG;
+// the storage layer itself has no limit and handles 20MB+ fine).
+func (b *Bus) DoPost(target string, words []string, useStdin bool) error {
+	var text string
+	if useStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("agent-bus: reading stdin: %w", err)
+		}
+		text = clean(string(data))
+	} else {
+		text = clean(strings.Join(words, " "))
+	}
 	if text == "" {
-		return usageErr("agent-bus: directive needs text")
+		return usageErr("agent-bus: directive needs text (via args or stdin)")
 	}
 	b.warnID()
 	id, err := b.post(target, text)
@@ -237,7 +252,9 @@ func (b *Bus) DoPost(target string, words []string) error {
 
 const defaultController = "control"
 
-func controllerOf() string {
+// Controller returns the agent ID of the control agent from $AGENT_CONTROLLER
+// (default "control").
+func Controller() string {
 	if v := os.Getenv("AGENT_CONTROLLER"); v != "" {
 		return v
 	}
@@ -246,9 +263,8 @@ func controllerOf() string {
 
 // DoAsk implements `agent-bus ask "<q>" [--to <ctrl>] [--timeout <secs>]`.
 func (b *Bus) DoAsk(args []string) error {
-	ctrl := controllerOf()
+	ctrl := Controller()
 	timeout := int64(600)
-	poll := 5 * time.Second
 	var words []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -276,39 +292,13 @@ func (b *Bus) DoAsk(args []string) error {
 	if q == "" {
 		return usageErr("agent-bus: ask needs a <question…>")
 	}
-	b.warnID()
-	qid, err := b.post(ctrl, "[ask] "+q)
+	ans, err := b.AskAndWait(q, ctrl, timeout)
 	if err != nil {
-		return err
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(3)
 	}
-	fmt.Fprintf(os.Stderr, "agent-bus: asked '%s' (%s) — waiting up to %ds for a reply…\n", ctrl, qid, timeout)
-	prefix := fmt.Sprintf("[re %s] ", qid)
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	for {
-		for _, m := range b.allMsgRecords() {
-			if m.Target != b.AgentID {
-				continue
-			}
-			if strings.HasPrefix(m.Text, prefix) {
-				lock, err := b.lockBus()
-				if err != nil {
-					return err
-				}
-				f, ferr := os.Create(b.ackmark(m.ID, b.AgentID))
-				if ferr == nil {
-					f.Close()
-				}
-				lock.Close()
-				fmt.Println(strings.TrimPrefix(m.Text, prefix))
-				return nil
-			}
-		}
-		if time.Now().After(deadline) {
-			fmt.Fprintf(os.Stderr, "agent-bus: no reply to %s within %ds\n", qid, timeout)
-			os.Exit(3)
-		}
-		time.Sleep(poll)
-	}
+	fmt.Println(ans)
+	return nil
 }
 
 // DoReply implements `agent-bus reply <qid> <answer…>`.
@@ -416,7 +406,7 @@ func (b *Bus) DoPrune() error {
 
 	statusCnt := 0
 	live := make(map[string]bool)
-	for _, r := range b.allStatusRecords() {
+	for _, r := range b.AllStatusRecords() {
 		if b.stale(r.Epoch) {
 			os.Remove(filepath.Join(b.StatusDir, fsafe(r.Agent)+".tsv"))
 			statusCnt++
@@ -455,6 +445,45 @@ func (b *Bus) DoPrune() error {
 	b.logEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
 	fmt.Printf("agent-bus: pruned %d stale heartbeat(s), %d spent directive(s)\n", statusCnt, msgCnt)
 	return nil
+}
+
+// AskAndWait posts a question (tagged "[ask]") to the specified controller,
+// polls for the reply (tagged "[re <qid>]") addressed to us, acks it, and
+// returns the raw answer text.  This is the same logic as DoAsk but returns
+// (string, error) instead of calling os.Exit(3) on timeout — suitable for
+// use from hook subcommands that must not blow away the whole process.
+func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error) {
+	b.warnID()
+	qid, err := b.post(ctrl, "[ask] "+question)
+	if err != nil {
+		return "", fmt.Errorf("post: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "agent-bus: asked '%s' (%s) — waiting up to %ds for a reply…\n", ctrl, qid, timeoutSec)
+	prefix := "[re " + qid + "] "
+	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
+	for {
+		for _, m := range b.allMsgRecords() {
+			if m.Target != b.AgentID {
+				continue
+			}
+			if strings.HasPrefix(m.Text, prefix) {
+				lock, err := b.lockBus()
+				if err != nil {
+					return "", err
+				}
+				f, ferr := os.Create(b.ackmark(m.ID, b.AgentID))
+				if ferr == nil {
+					f.Close()
+				}
+				lock.Close()
+				return strings.TrimPrefix(m.Text, prefix), nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("no reply to %s within %ds", qid, timeoutSec)
+		}
+		time.Sleep(5 * time.Second)
+	}
 }
 
 // usageErr is a sentinel error type whose message is already fully-formatted

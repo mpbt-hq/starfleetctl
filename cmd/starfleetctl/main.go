@@ -23,15 +23,17 @@ import (
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/genesis"
 	"github.com/metux/starfleetctl/internal/ghpr"
+	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/prclaim"
 	"github.com/metux/starfleetctl/internal/shipnames"
+	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/wscommit"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|bootstrap|genesis-init|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr|mk-agent-clone|bridged> [args…]")
+		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|bootstrap|genesis-init|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr|mk-agent-clone|bridged|hook|session> [args…]")
 		os.Exit(2)
 	}
 
@@ -136,6 +138,10 @@ func main() {
 		os.Exit(ghpr.RunMkAgentClone(root, os.Args[2:]))
 	case "bridged":
 		os.Exit(bridged.Run(root, os.Args[2:]))
+	case "hook":
+		os.Exit(hook.Run(root, os.Args[2:]))
+	case "session":
+		os.Exit(session.Run(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)

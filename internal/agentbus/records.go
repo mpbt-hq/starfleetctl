@@ -11,9 +11,9 @@ import (
 	"strings"
 )
 
-// statusRecord mirrors one status/<agent>.tsv line:
+// StatusRecord mirrors one status/<agent>.tsv line:
 // epoch \t isots \t agent \t project \t state \t pid \t handle \t note
-type statusRecord struct {
+type StatusRecord struct {
 	Epoch   int64
 	ISO     string
 	Agent   string
@@ -47,17 +47,17 @@ func readFirstLine(path string) (string, error) {
 	return line, nil
 }
 
-func parseStatusFile(path string) (statusRecord, bool) {
+func parseStatusFile(path string) (StatusRecord, bool) {
 	line, err := readFirstLine(path)
 	if err != nil {
-		return statusRecord{}, false
+		return StatusRecord{}, false
 	}
 	f := strings.SplitN(line, "\t", 8)
 	for len(f) < 8 {
 		f = append(f, "")
 	}
 	epoch, _ := strconv.ParseInt(f[0], 10, 64)
-	return statusRecord{
+	return StatusRecord{
 		Epoch: epoch, ISO: f[1], Agent: f[2], Project: f[3],
 		State: f[4], PID: f[5], Handle: f[6], Note: f[7],
 	}, true
@@ -102,8 +102,8 @@ func globSortedTSV(dir, prefix string) []string {
 	return names
 }
 
-func (b *Bus) allStatusRecords() []statusRecord {
-	var out []statusRecord
+func (b *Bus) AllStatusRecords() []StatusRecord {
+	var out []StatusRecord
 	for _, agent := range globSortedTSV(b.StatusDir, "") {
 		if r, ok := parseStatusFile(filepath.Join(b.StatusDir, agent+".tsv")); ok {
 			out = append(out, r)

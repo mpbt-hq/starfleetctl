@@ -28,7 +28,7 @@ type boardEntryJSON struct {
 
 // DoBoardJSON implements `agent-bus board --json`.
 func (b *Bus) DoBoardJSON() error {
-	recs := b.allStatusRecords()
+	recs := b.AllStatusRecords()
 	out := make([]boardEntryJSON, 0, len(recs))
 	for _, r := range recs {
 		out = append(out, boardEntryJSON{

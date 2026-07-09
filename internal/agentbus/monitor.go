@@ -20,10 +20,10 @@
 // 2026-07-07: the actual DoMonitorLoop binary armed live via Monitor
 // against the real bus, disposable identity, ~16h continuous runtime) saw
 // 5/5 live `all`-broadcasts detected correctly with zero misses — whatever
-// the original bug was, it is gone. scripts/agent-bus-monitor-hint now arms
-// `scripts/starfleetctl agent-bus monitor-loop` for new/restarted sessions.
-// scripts/agent-bus-monitor-loop (bash) remains in place, untouched, as a
-// fallback.
+// the original bug was, it is gone. scripts/agent-bus-monitor-hint arms
+// `scripts/starfleetctl agent-bus monitor-loop` for new/restarted sessions,
+// and scripts/agent-bus-monitor-loop is now a thin bash wrapper exec'ing
+// that same Go backend (no separate bash fallback body remains).
 //
 // DoFleetWatch CLEARED too, 2026-07-07 (Farragut, m0138(1)): its own
 // Monitor-tool vorcheck armed both the bash original and this Go binary in
@@ -46,6 +46,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -81,6 +82,16 @@ func (b *Bus) DoMonitorLoop() error {
 	}
 	defer f.Close()
 
+	heartbeatInterval := int64(300) // HEARTBEAT_INTERVAL, same default as the bash original
+	if v := os.Getenv("HEARTBEAT_INTERVAL"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			heartbeatInterval = n
+		}
+	}
+	// Skip an immediate touch — SessionStart's hook just posted a fresh
+	// heartbeat moments ago (matches the bash original's `last_heartbeat` seed).
+	lastHeartbeat := now()
+
 	for {
 		for _, m := range b.allMsgRecords() {
 			if m.Target != "all" && m.Target != b.AgentID {
@@ -93,6 +104,15 @@ func (b *Bus) DoMonitorLoop() error {
 			seen[m.ID] = true
 			fmt.Fprintln(f, m.ID)
 		}
+		// Periodic heartbeat refresh: a ship deep in a long task that never
+		// calls `agent-bus status` itself would otherwise fall out of
+		// $BUS_TTL (15m default) and read as dead/pruned on the board despite
+		// the session being alive. `|| true`: a transient touch failure (e.g.
+		// lock contention) must not kill this persistent Monitor-tool loop.
+		if now()-lastHeartbeat >= heartbeatInterval {
+			_ = b.DoTouch()
+			lastHeartbeat = now()
+		}
 		time.Sleep(pollInterval)
 	}
 }
@@ -103,12 +123,12 @@ func (b *Bus) DoMonitorLoop() error {
 // arming are reported.
 func (b *Bus) DoFleetWatch() error {
 	lastEpoch := map[string]int64{}
-	for _, r := range b.allStatusRecords() {
+	for _, r := range b.AllStatusRecords() {
 		lastEpoch[r.Agent] = r.Epoch
 	}
 
 	for {
-		for _, r := range b.allStatusRecords() {
+		for _, r := range b.AllStatusRecords() {
 			prev, known := lastEpoch[r.Agent]
 			if known && prev == r.Epoch {
 				continue
