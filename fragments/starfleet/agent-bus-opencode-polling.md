@@ -4,6 +4,8 @@ order: 215
 owner: "starfleetctl"
 ---
 
+<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/agent-bus-opencode-polling.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+
 ## Agent-bus opencode polling
 
 opencode has no `Monitor` tool (Claude Code only), so the background

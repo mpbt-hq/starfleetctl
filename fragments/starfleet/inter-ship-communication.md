@@ -4,6 +4,8 @@ order: 12
 owner: "starfleetctl"
 ---
 
+<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/inter-ship-communication.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+
 ## Inter-ship communication (agent-bus)
 
 Ships communicate autonomously via `starfleetctl agent-bus` (or a workspace-

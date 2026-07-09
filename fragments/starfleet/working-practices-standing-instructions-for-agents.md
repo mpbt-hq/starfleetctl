@@ -4,6 +4,8 @@ order: 20
 owner: "starfleetctl"
 ---
 
+<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/working-practices-standing-instructions-for-agents.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+
 ## Working practices (standing instructions for agents)
 
 These apply to **every** session — they keep knowledge and tooling from decaying as sessions are

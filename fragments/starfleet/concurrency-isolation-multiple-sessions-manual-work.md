@@ -4,6 +4,8 @@ order: 160
 owner: "starfleetctl"
 ---
 
+<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/concurrency-isolation-multiple-sessions-manual-work.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+
 ## Concurrency / isolation (multiple sessions + manual work)
 
 **The unit of isolation is the clone (working tree + index), not the repo.** All safety rules
