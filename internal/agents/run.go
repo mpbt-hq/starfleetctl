@@ -21,7 +21,7 @@ const usage = `agents <command> [args…]
   install-self [--order <n>]                 write/refresh agents.d/starfleet/starfleetctl.md from this
                                               binary's own embedded README.md (always overwrites —
                                               tool-owned, re-run after a starfleetctl update)
-  install-star fleet [<subdir>]              install all embedded starfleet fragments from the binary
+  install-starfleet [<subdir>]               install all embedded starfleet fragments from the binary
                                               (default subdir: "starfleet") — writes to
                                               agents.d/<slug>.md for each, always overwrites, then
                                               reindexes
@@ -91,7 +91,7 @@ func Run(root string, args []string) int {
 			}
 		}
 		cmdErr = a.DoInstallSelf(order)
-	case "install-star fleet":
+	case "install-starfleet":
 		subdir := StarfleetSubdir
 		if len(args) > 1 {
 			subdir = args[1]
