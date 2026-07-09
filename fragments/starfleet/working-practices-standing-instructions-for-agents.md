@@ -12,7 +12,7 @@ These apply to **every** session — they keep knowledge and tooling from decayi
 cleared:
 
 - **Language policy: converse with the praetor and other ships in the project's primary spoken
-  language, everything else in English.** Any `agent-bus tell`/`broadcast` text — whether directed
+   language, everything else in English.** Any `starfleetctl agent-bus tell`/`broadcast` text — whether directed
   at the praetor or at another ship — is in the project's primary spoken language (e.g. German for
   the XLibre fleet). Anything that becomes part of the project's durable artifacts stays English:
   code, code comments, commit messages, PR titles/descriptions/review comments, other GitHub

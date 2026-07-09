@@ -75,7 +75,7 @@ Ships spawned by `starfleetctl fleet-autoscale` are a distinct, lower **tier**:
 - **Lower tier** — auto-spawned workers: launched with `--permission-mode dontAsk` (Claude Code),
   so anything outside the pre-authorized allowlist is rejected outright instead of blocking on a
   confirmation nobody is watching. A worker that hits a blocked action must report it to its
-  supervisor via `agent-bus tell` and continue other queued work.
+   supervisor via `starfleetctl agent-bus tell` and continue other queued work.
 
 **Preferred: agents work in their own dedicated clones.** Create an agent-owned clone:
 
