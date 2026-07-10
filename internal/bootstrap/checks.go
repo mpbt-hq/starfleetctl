@@ -50,6 +50,10 @@ var requiredAllowEntries = []string{
 	"Bash(.bin/starfleetctl *)",
 }
 
+// opencodePluginsSubdir is the subdirectory in embedded fragments that holds
+// opencode plugin files (not markdown fragments).
+const opencodePluginsSubdir = "opencode-plugins"
+
 // Checks returns the full, ordered set of bootstrap checks.
 func Checks() []Check {
 	return []Check{
@@ -87,6 +91,16 @@ func Checks() []Check {
 			Name:   "starfleet fragments (agents.d/starfleet/)",
 			Verify: verifyStarfleetFragments,
 			Fix:    fixStarfleetFragments,
+		},
+		{
+			Name:   ".opencode/plugins/ directory",
+			Verify: verifyOpencodePluginsDir,
+			Fix:    fixOpencodePluginsDir,
+		},
+		{
+			Name:   "opencode plugins (.opencode/plugins/)",
+			Verify: verifyOpencodePlugins,
+			Fix:    fixOpencodePlugins,
 		},
 	}
 }
@@ -381,4 +395,84 @@ func readAllowList(path string) ([]string, error) {
 		return nil, err
 	}
 	return doc.Permissions.Allow, nil
+}
+
+// verifyOpencodePluginsDir checks that the .opencode/plugins directory exists.
+func verifyOpencodePluginsDir(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, ".opencode", "plugins")
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return true, "present"
+	}
+	return false, "missing .opencode/plugins/"
+}
+
+func fixOpencodePluginsDir(b *Bootstrap) error {
+	path := filepath.Join(b.Root, ".opencode", "plugins")
+	return os.MkdirAll(path, 0o755)
+}
+
+// verifyOpencodePlugins checks that every embedded opencode plugin file is
+// installed to .opencode/plugins/ and byte-identical to what the current binary would write.
+func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir))
+	if err != nil {
+		// If the directory doesn't exist in the embedded FS, that's OK — no plugins to install.
+		return true, "no embedded opencode plugins"
+	}
+	var missing, stale []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+			continue
+		}
+		current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, e.Name()))
+		if err != nil {
+			return false, err.Error()
+		}
+		installedPath := filepath.Join(b.Root, ".opencode", "plugins", e.Name())
+		data, err := os.ReadFile(installedPath)
+		if err != nil {
+			missing = append(missing, e.Name())
+			continue
+		}
+		if string(data) != string(current) {
+			stale = append(stale, e.Name())
+		}
+	}
+	if len(missing) == 0 && len(stale) == 0 {
+		return true, fmt.Sprintf("%d/%d present, up to date", len(entries), len(entries))
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(stale) > 0 {
+		parts = append(parts, fmt.Sprintf("stale: %s", strings.Join(stale, ", ")))
+	}
+	return false, strings.Join(parts, "; ")
+}
+
+func fixOpencodePlugins(b *Bootstrap) error {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir))
+	if err != nil {
+		// No embedded plugins directory — nothing to do.
+		return nil
+	}
+	destDir := filepath.Join(b.Root, ".opencode", "plugins")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+			continue
+		}
+		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, e.Name()))
+		if err != nil {
+			return err
+		}
+		destPath := filepath.Join(destDir, e.Name())
+		if err := os.WriteFile(destPath, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
