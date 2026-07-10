@@ -226,8 +226,11 @@ func fixDashboardMD(b *Bootstrap) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.EnsureBootstrapped()
-	return err
+	if _, err := d.EnsureBootstrapped(); err != nil {
+		return err
+	}
+	// Also run reindex to populate tables from theme files (idempotent)
+	return d.DoReindex()
 }
 
 func verifyDirs(b *Bootstrap) (bool, string) {
