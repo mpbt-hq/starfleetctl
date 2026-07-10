@@ -11,10 +11,25 @@ import "os"
 // `dashboard theme new`/`reindex` to work immediately, no themes yet.
 const minimalSkeleton = `# DASHBOARD.md
 
-Cross-session "what's in flight / what got parked" index. Thin index — each
-row links to its own file under ` + "`dashboard/themes/`" + `. Edit the theme file
-directly; this index itself is regenerated with
-` + "`.bin/starfleetctl dashboard reindex`" + ` and should not normally be hand-edited.
+Cross-session "what's in flight / what got parked" index — lets parallel agents
+(and the praetor) see at a glance what's actively being worked, and stops
+half-started ideas from getting lost when a session ends.
+
+**Not individual PRs** (GitHub already tracks those via ` + "`gh pr list`" + `).
+
+Two sections:
+- **Aktive Themen** — anything with real state (a branch, a doc, an open decision).
+- **Parkplatz** — noticed-but-not-started, or started-then-set-aside.
+
+Thin index — each row links to its own file under ` + "`dashboard/themes/`" + `. Use
+` + "`starfleetctl dashboard theme <cmd>`" + ` to read/write/commit individual themes;
+this index itself is regenerated with
+` + "`starfleetctl dashboard reindex`" + ` and should not normally be hand-edited.
+
+**Maintenance rule** (see ` + "`AGENTS.md`" + ` "Working practices"): when you start,
+pause, or finish a theme, update its entry **in the same session**.
+Ephemeral live-status (who's online right now) stays in
+` + "`starfleetctl agent-bus board`" + ` / ` + "`starfleetctl pr-claim list`" + `.
 
 ## Aktive Themen
 
@@ -31,8 +46,9 @@ Angefangen/aufgefallen, aber (noch) nicht weiterverfolgt — kurze Notiz statt V
 ---
 
 *Not tracked here on purpose (already covered elsewhere, would just go stale):*
-individual open PRs, who's-online-now (` + "`agent-bus board`" + `), PR-branch locks
-(` + "`pr-claim --list`" + `).
+individual open PRs (` + "`gh pr list`" + `), who's-online-now
+(` + "`starfleetctl agent-bus board`" + `), PR-branch locks
+(` + "`starfleetctl pr-claim list`" + `).
 `
 
 // EnsureBootstrapped creates a minimal DASHBOARD.md skeleton if the file is

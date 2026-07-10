@@ -191,10 +191,6 @@ func (d *Dashboard) DoReindex() error {
 	var b strings.Builder
 	b.WriteString(preamble)
 	b.WriteString("## Aktive Themen\n\n")
-	b.WriteString("Thin index — each row links to its own file under `dashboard/themes/`. Read/write it via\n")
-	b.WriteString("`.bin/starfleetctl dashboard theme show|write|new|commit <slug>` (no direct file\n")
-	b.WriteString("access — see AGENTS.md); this index itself is regenerated with\n")
-	b.WriteString("`.bin/starfleetctl dashboard reindex` and should not normally be hand-edited.\n\n")
 	b.WriteString("| Thema | Status | Datei |\n|---|---|---|\n")
 	for _, m := range metas {
 		if m.Category != "active" {
