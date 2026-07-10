@@ -39,7 +39,7 @@ func (c *Claims) DoClaim(pr, note string, force bool) error {
 
 	if r, ok := c.readClaim(pr); ok {
 		switch {
-		case r.Agent == c.AgentID:
+		case r.Agent == c.ShipID:
 			if err := c.writeClaim(pr, note); err != nil {
 				return err
 			}
@@ -71,7 +71,7 @@ func (c *Claims) DoClaim(pr, note string, force bool) error {
 		return err
 	}
 	c.logEvent("claim", fmt.Sprintf("pr#%s %s", pr, note))
-	fmt.Printf("pr-claim: claimed PR #%s for '%s'\n", pr, c.AgentID)
+	fmt.Printf("pr-claim: claimed PR #%s for '%s'\n", pr, c.ShipID)
 	return nil
 }
 
@@ -89,8 +89,8 @@ func (c *Claims) DoRelease(pr string, force bool) error {
 		fmt.Printf("pr-claim: no active claim on PR #%s\n", pr)
 		return nil
 	}
-	if r.Agent != c.AgentID && !force {
-		fmt.Fprintf(os.Stderr, "pr-claim: PR #%s is held by '%s', not you ('%s'). Use FORCE=1 to override.\n", pr, r.Agent, c.AgentID)
+	if r.Agent != c.ShipID && !force {
+		fmt.Fprintf(os.Stderr, "pr-claim: PR #%s is held by '%s', not you ('%s'). Use FORCE=1 to override.\n", pr, r.Agent, c.ShipID)
 		return exitError(3)
 	}
 	if err := c.removeClaim(pr); err != nil {
@@ -111,14 +111,14 @@ func (c *Claims) DoReleaseAll() error {
 
 	cnt := 0
 	for _, r := range c.allClaims() {
-		if r.Agent == c.AgentID {
+		if r.Agent == c.ShipID {
 			if err := c.removeClaim(r.PR); err == nil {
 				cnt++
 			}
 		}
 	}
 	c.logEvent("release-all", fmt.Sprintf("%d claims", cnt))
-	fmt.Printf("pr-claim: released %d claim(s) held by '%s'\n", cnt, c.AgentID)
+	fmt.Printf("pr-claim: released %d claim(s) held by '%s'\n", cnt, c.ShipID)
 	return nil
 }
 
@@ -130,7 +130,7 @@ func (c *Claims) DoWho(pr string) error {
 	if !ok {
 		return nil
 	}
-	if r.Agent == c.AgentID || c.stale(r.Epoch) {
+	if r.Agent == c.ShipID || c.stale(r.Epoch) {
 		return nil
 	}
 	fmt.Printf("%s (age %s): %s\n", r.Agent, age(r.Epoch), r.Note)

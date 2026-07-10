@@ -20,7 +20,7 @@ const Flagship = "Enterprise"
 // Registry holds one invocation's resolved locations.
 type Registry struct {
 	Root      string
-	NamesFile string // <root>/scripts/ship-names.txt
+	NamesFile string // <root>/.starfleet-ai/etc/ship-names.txt
 	ShipsDir  string
 	StatusDir string
 }
@@ -34,7 +34,7 @@ func New(root string) *Registry {
 	}
 	return &Registry{
 		Root:      root,
-		NamesFile: filepath.Join(root, "scripts", "ship-names.txt"),
+		NamesFile: filepath.Join(root, ".starfleet-ai", "etc", "ship-names.txt"),
 		ShipsDir:  filepath.Join(workDir, "agent-bus", "ships"),
 		StatusDir: filepath.Join(workDir, "agent-bus", "status"),
 	}

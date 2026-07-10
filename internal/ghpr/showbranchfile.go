@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Go port of scripts/show-branch-file: print a source file (or a
-// function/symbol region) from the xserver repo at a given ref, straight
+// function/symbol region) from the given repo at a given ref, straight
 // from the GitHub contents API, without a local clone. Transparently
 // resolves the Xext/<ext>/ <-> <ext>/ directory reorg between newer and
 // older release lines: if the given path 404s, retries with a leading
@@ -22,8 +22,8 @@ const showBranchFileUsage = `usage: starfleetctl show-branch-file <ref> <path> [
   [symbol]  optional literal substring; prints CONTEXT lines after each hit
             (grep -A semantics: merges overlapping blocks, "--" between others)
 env:
-  REPO     override repo (default X11Libre/xserver)
-  CONTEXT  lines of context printed after a symbol hit (default 45)
+  STARFLEET_GITHUB_REPO   repo slug (or $REPO for backward compat)
+  CONTEXT                 lines of context printed after a symbol hit (default 45)
 `
 
 // fetchBranchFile fetches path (or its Xext/-toggled twin) at ref, returning

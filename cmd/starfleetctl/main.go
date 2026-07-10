@@ -25,21 +25,71 @@ import (
 	"github.com/metux/starfleetctl/internal/ghpr"
 	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/prclaim"
+	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/wscommit"
 )
 
+const helpText = `starfleetctl — fleet-coordination tool for the mpbt-workspace agent-bus.
+
+Usage:  starfleetctl <subcommand> [args...]
+
+Fleet management:
+  agent-bus         operate the session bus (read/write/ack/notify/status)
+  bootstrap         verify/fix workspace structure (dirs, allowlist, fragments)
+  bridged           manage bridged agent sessions (exec/status/log)
+  dashboard         render the workspace dashboard
+  hook              handle agent lifecycle hooks (pre/post)
+  session           manage agent sessions (list/ship)
+  ship-names        assign/release/list ship names
+  with-clone-lock   serialize git operations via flock
+  ws-commit         commit workspace changes with locking
+
+Bootstrap & setup:
+  genesis-init      bootstrap a workspace from nothing (writes starfleet-bootstrap + runs bootstrap --fix)
+  self-install      clone/pull starfleetctl source, build, and symlink into .starfleet-ai/bin/
+  agents            install/update starfleet agent fragments and skills
+
+GitHub PR commands:
+  pr-view             view a pull request
+  pr-ci               show PR CI status
+  pr-comment          comment on a PR
+  pr-label            add/remove PR labels
+  pr-request-reviewers request PR reviewers
+  pr-set-body         set PR body text
+  pr-append-body      append text to PR body
+  pr-checkout         checkout a PR into an agent clone
+  pr-amend-push       amend and force-push a PR branch
+  pr-claim            claim/unclaim a PR
+  show-branch-file    show a file from a branch
+  show-pr-conflict    show merge conflict details for a PR
+  backport-applies    check if a commit applies to a release branch
+  backport-commit     backport a commit to a release branch
+  xx-make-pr          create a PR with commit-message conventions
+  mk-agent-clone      create an isolated agent worktree clone
+
+Run 'starfleetctl <subcommand> --help' for subcommand-specific help.
+`
+
+func printHelp() {
+	fmt.Print(helpText)
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: starfleetctl <agent-bus|dashboard|pr-claim|ws-commit|ship-names|with-clone-lock|bootstrap|genesis-init|pr-view|pr-ci|show-branch-file|backport-applies|show-pr-conflict|pr-comment|pr-label|pr-request-reviewers|pr-set-body|pr-append-body|pr-checkout|pr-amend-push|backport-commit|xx-make-pr|mk-agent-clone|bridged|hook|session> [args…]")
+		printHelp()
 		os.Exit(2)
 	}
+	switch os.Args[1] {
+	case "-h", "--help":
+		printHelp()
+		return
+	}
 
-	// with-clone-lock is deliberately generic (like its bash original): it
-	// operates on whatever git working tree the CALLER's cwd is in — an
-	// xserver agent clone, a driver clone, anywhere — not just
+	// with-clone-lock operates on whatever git working tree the CALLER's cwd
+	// is in — an agent clone, a driver clone, anywhere — not just
 	// mpbt-workspace, so it must NOT go through workspaceRoot()'s
 	// AGENTS.md+scripts/ discovery (which would fail outside this checkout).
 	if os.Args[1] == "with-clone-lock" {
@@ -49,6 +99,18 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(withclonelock.Run(dir, os.Args[2:]))
+	}
+
+	// self-install clones/pulls starfleetctl source, builds it, and
+	// symlinks into .starfleet-ai/bin/ — works from cwd, no workspace
+	// root needed (useful for updates, and for the bootstrap script).
+	if os.Args[1] == "self-install" {
+		dir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "starfleetctl:", err)
+			os.Exit(1)
+		}
+		os.Exit(selfinstall.Run(dir, os.Args[2:]))
 	}
 
 	// genesis-init is the "stand up the whole fleet from nothing" entry

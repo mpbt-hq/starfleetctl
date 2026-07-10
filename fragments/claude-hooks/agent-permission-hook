@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Enrico Weigelt, metux IT consult
+#
+# Auto-installed by `starfleetctl bootstrap --fix` from
+# github.com/mpbt-hq/starfleetctl (fragments/claude-hooks/).
+# Do NOT hand-edit — changes are overwritten on the next bootstrap.
+# Edit the canonical copy in the starfleetctl repo instead.
+#
+# Claude Code PreToolUse hook that routes a tool's permission decision to the
+# central control agent (the "1st officer", see AGENT-CONTROL-PLANE.md)
+# instead of prompting the local session.
+#
+# Delegates to `starfleetctl hook claude permission`, which reads the
+# PreToolUse JSON from stdin, asks the controller via agent-bus, blocks for
+# the answer, and emits the decision JSON.
+#
+# OPT-IN, PER WORKER. Enable by adding a PreToolUse entry pointing at this
+# script to a worker's .claude/settings.local.json, e.g.:
+#   "hooks": { "PreToolUse": [ { "matcher": "Bash",
+#     "hooks": [ { "type": "command", "timeout": 120,
+#       "command": ".claude/hooks/agent-permission-hook" } ] } ] }
+# Do NOT wire it globally / into shared settings.json: a control agent that
+# never answers would gate every matched tool call in every session.
+#
+# Environment:
+#   AGENT_PERM_TIMEOUT           seconds to wait (default 60)
+#   AGENT_PERM_TIMEOUT_DECISION  decision on timeout (default deny)
+#   AGENT_CONTROLLER             controller agent id (default control)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")"/../.. && pwd)"
+exec "$ROOT/.starfleet-ai/bin/starfleetctl" hook claude permission

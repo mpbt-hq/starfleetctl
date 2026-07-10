@@ -46,7 +46,7 @@ func (c *Claims) readClaim(pr string) (claimRecord, bool) {
 
 func (c *Claims) writeClaim(pr, note string) error {
 	line := now()
-	content := strconv.FormatInt(line, 10) + "\t" + isots() + "\t" + c.AgentID + "\t" + clean(note) + "\n"
+	content := strconv.FormatInt(line, 10) + "\t" + isots() + "\t" + c.ShipID + "\t" + clean(note) + "\n"
 	return os.WriteFile(c.cfile(pr), []byte(content), 0o644)
 }
 

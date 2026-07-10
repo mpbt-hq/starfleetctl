@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/identity"
 )
 
 // Bus holds one invocation's resolved identity + storage locations, mirroring
@@ -23,8 +25,8 @@ type Bus struct {
 	Root       string // workspace root (parent of the script's own dir, in bash; here just $BUS_DIR's parent's parent)
 	BusDir     string
 	BusTTL     int64
-	AgentID    string
-	AgentIDSet bool
+	ShipID     string
+	ShipIDSet  bool
 	Project    string
 	Handle     string
 
@@ -35,8 +37,8 @@ type Bus struct {
 }
 
 // New resolves a Bus from the environment exactly like the bash script's
-// top-of-file variable setup (BUS_DIR, BUS_TTL, AGENT_ID, XLIBRE_RELEASE/
-// PROJECT, AGENT_HANDLE), given the workspace root.
+// top-of-file variable setup (BUS_DIR, BUS_TTL, STARFLEET_SHIP_ID/AGENT_ID,
+// XLIBRE_RELEASE/PROJECT, STARFLEET_AGENT_HANDLE/AGENT_HANDLE), given the workspace root.
 func New(root string) (*Bus, error) {
 	busDir := os.Getenv("BUS_DIR")
 	if busDir == "" {
@@ -48,23 +50,26 @@ func New(root string) (*Bus, error) {
 			ttl = n
 		}
 	}
-	agentID := os.Getenv("AGENT_ID")
-	agentIDSet := agentID != ""
-	if !agentIDSet {
-		agentID = defaultAgentID()
+	shipID := identity.ShipID()
+	shipIDSet := shipID != ""
+	if !shipIDSet {
+		shipID = defaultAgentID()
 	}
 	project := os.Getenv("XLIBRE_RELEASE")
 	if project == "" {
 		project = os.Getenv("PROJECT")
 	}
-	handle := os.Getenv("AGENT_HANDLE")
+	handle := os.Getenv("STARFLEET_AGENT_HANDLE")
+	if handle == "" {
+		handle = os.Getenv("AGENT_HANDLE")
+	}
 
 	b := &Bus{
 		Root:       root,
 		BusDir:     busDir,
 		BusTTL:     ttl,
-		AgentID:    agentID,
-		AgentIDSet: agentIDSet,
+		ShipID:    shipID,
+		ShipIDSet: shipIDSet,
 		Project:    project,
 		Handle:     handle,
 		StatusDir:  filepath.Join(busDir, "status"),
@@ -195,11 +200,11 @@ func (b *Bus) logEvent(kind, note string) {
 		return // best-effort, matches bash's `|| true`
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", isots(), kind, b.AgentID, clean(note))
+	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", isots(), kind, b.ShipID, clean(note))
 }
 
 func (b *Bus) warnID() {
-	if !b.AgentIDSet {
-		fmt.Fprintf(os.Stderr, "agent-bus: note: AGENT_ID not set; using '%s' — set a unique AGENT_ID per session.\n", b.AgentID)
+	if !b.ShipIDSet {
+		fmt.Fprintf(os.Stderr, "agent-bus: note: STARFLEET_SHIP_ID (or AGENT_ID) not set; using '%s' — set a unique ship ID per session.\n", b.ShipID)
 	}
 }

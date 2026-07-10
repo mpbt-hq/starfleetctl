@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Enrico Weigelt, metux IT consult
+//
+// Auto-installed by `starfleetctl bootstrap --fix` from
+// github.com/mpbt-hq/starfleetctl (fragments/opencode-plugins/).
+// Do NOT hand-edit — changes are overwritten on the next bootstrap.
+// Edit the canonical copy in the starfleetctl repo instead.
+
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -7,7 +15,7 @@ const HEARTBEAT_MS = 300_000
 const POLL_MS = 3_000
 
 function aid(): string {
-  return process.env.AGENT_ID || 'default'
+  return process.env.STARFLEET_SHIP_ID || 'default'
 }
 
 function seenFile(): string {
@@ -52,7 +60,7 @@ function parseInboxLine(line: string): { id: string; from: string; text: string 
 
 async function getInbox($: any): Promise<{ id: string; from: string; text: string }[]> {
     try {
-      const output = await $`.bin/starfleetctl agent-bus inbox`.text()
+      const output = await $`.starfleet-ai/bin/starfleetctl agent-bus inbox`.text()
       const msgs: { id: string; from: string; text: string }[] = []
       for (const line of output.split('\n')) {
         const msg = parseInboxLine(line)
@@ -65,8 +73,8 @@ async function getInbox($: any): Promise<{ id: string; from: string; text: strin
 async function autoPong($: any, id: string, from: string, text: string): Promise<void> {
   if (from === 'Enterprise' && /ping/i.test(text)) {
     try {
-      await $`scripts/starfleetctl agent-bus ack ${id} auto-pong`.quiet()
-      await $`scripts/starfleetctl agent-bus tell Enterprise Pong! (auto-reply to ${id})`.quiet()
+      await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${id} auto-pong`.quiet()
+      await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise Pong! (auto-reply to ${id})`.quiet()
       logEvent(`auto-pong ${id} → Enterprise`)
     } catch { /* ignore */ }
   }
@@ -97,11 +105,11 @@ export const plugin = async ({ client, $ }: any) => {
     }
   }
 
-  try { await $`.bin/starfleetctl agent-bus prune`.quiet() } catch { /* ignore */ }
-  try { await $`.bin/starfleetctl agent-bus status idle opencode ship`.quiet() } catch { /* ignore */ }
+  try { await $`.starfleet-ai/bin/starfleetctl agent-bus prune`.quiet() } catch { /* ignore */ }
+  try { await $`.starfleet-ai/bin/starfleetctl agent-bus status idle opencode ship`.quiet() } catch { /* ignore */ }
 
   const heartbeatTimer = setInterval(() => {
-    try { $`.bin/starfleetctl agent-bus touch`.quiet() } catch { /* ignore */ }
+    try { $`.starfleet-ai/bin/starfleetctl agent-bus touch`.quiet() } catch { /* ignore */ }
   }, HEARTBEAT_MS)
 
   let tuiReady = false
@@ -147,7 +155,7 @@ export const plugin = async ({ client, $ }: any) => {
   const cleanup = () => {
     clearInterval(heartbeatTimer)
     clearInterval(pollTimer)
-    try { $`.bin/starfleetctl agent-bus clear`.quiet() } catch { /* ignore */ }
+    try { $`.starfleet-ai/bin/starfleetctl agent-bus clear`.quiet() } catch { /* ignore */ }
   }
 
   process.on('exit', cleanup)
@@ -157,7 +165,7 @@ export const plugin = async ({ client, $ }: any) => {
       _input: any,
       output: { system: string[] },
     ) => {
-      try { await $`.bin/starfleetctl agent-bus status working opencode ship`.quiet() } catch { /* ignore */ }
+      try { await $`.starfleet-ai/bin/starfleetctl agent-bus status working opencode ship`.quiet() } catch { /* ignore */ }
 
       const seen = loadSeen()
       const lines: string[] = []
@@ -203,7 +211,7 @@ export const plugin = async ({ client, $ }: any) => {
         // Tell the CONTROL agent (flagship) only, never broadcast to all —
         // a broadcast would land in the errored ship's own inbox and the
         // self-loop would restart even for genuine (non-abort) errors.
-        try { await $`scripts/starfleetctl agent-bus tell Enterprise ⚠️ ${aid()} session.error: ${detail}`.quiet() } catch { /* ignore */ }
+        try { await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise ⚠️ ${aid()} session.error: ${detail}`.quiet() } catch { /* ignore */ }
       }
     },
   }

@@ -5,15 +5,13 @@
 // point (praetor end goal, 2026-07-06, relayed via Enterprise directives
 // m0089/m0098): once *any* copy of the starfleetctl binary exists — however
 // it got built — `genesis-init` writes the small, project-independent set
-// of files a consuming workspace needs to fetch/build/reference starfleetctl
-// itself through the normal mpbt-solution path (matching go-x11proto's and
-// flyingtux's own pattern), then hands off to `bootstrap --fix` for
-// everything else (AGENTS.md/agents.d, DASHBOARD.md, allowlist entries,
-// _WORK_ dirs, the self-documenting fragment). None of the embedded
-// templates below reference any project-specific detail (no XLibre/xserver
-// literal anywhere) — that's what makes this genuinely copy-once,
-// run-anywhere, unlike mpbt-workspace's own hand-authored cf/starfleetctl/*
-// files this package's templates are kept in sync with.
+// of files a consuming workspace needs to bootstrap starfleetctl itself
+// (the starfleet-bootstrap script), then hands
+// off to `bootstrap --fix` for everything else (AGENTS.md/agents.d,
+// DASHBOARD.md, allowlist entries, _WORK_ dirs, the self-documenting
+// fragment, opencode plugins/scripts). None of the embedded templates
+// below reference any project-specific detail (no XLibre/xserver literal
+// anywhere) — that's what makes this genuinely copy-once, run-anywhere.
 package genesis
 
 import (
@@ -35,10 +33,11 @@ const templatesRoot = "templates"
 // execTemplates are the embedded paths (relative to templatesRoot) that must
 // land on disk as executable — everything else is written 0o644.
 var execTemplates = map[string]bool{
-	"run-fetch.starfleetctl": true,
-	"run-build.starfleetctl": true,
-	".bin/starfleetctl":   true,
+	"starfleet-bootstrap": true,
 }
+
+// BootstrapSlug is the template path of the starfleet-bootstrap script.
+const BootstrapSlug = "starfleet-bootstrap"
 
 // Init writes every template file into root that isn't already present
 // (never overwrites — a genesis-init re-run against a partially-set-up

@@ -97,7 +97,7 @@ func dispatch(root string, req Request) Response {
 
 // allowedEnvOverrides is the identity-related subset of environment
 // variables a request may override — exactly what agentbus.New reads to
-// resolve an agent's identity (AGENT_ID, XLIBRE_RELEASE/PROJECT,
+// resolve an agent's identity (STARFLEET_SHIP_ID, XLIBRE_RELEASE/PROJECT,
 // AGENT_HANDLE), per Enterprise's directive (m0082). Deliberately NOT
 // including infra-level vars like BUS_DIR/BUS_TTL: overriding those per
 // request would let one caller silently point another's request at a
@@ -106,10 +106,11 @@ func dispatch(root string, req Request) Response {
 // naming any other key is a no-op — env overrides are an allowlist too,
 // same reasoning as the agent-bus subcommand allowlist above.
 var allowedEnvOverrides = map[string]bool{
-	"AGENT_ID":       true,
-	"XLIBRE_RELEASE": true,
-	"PROJECT":        true,
-	"AGENT_HANDLE":   true,
+	"STARFLEET_SHIP_ID": true,
+	"XLIBRE_RELEASE":    true,
+	"PROJECT":           true,
+	"STARFLEET_AGENT_HANDLE": true,
+	"AGENT_HANDLE":      true,
 }
 
 // runCaptured calls fn with the process's real os.Stdout/os.Stderr
@@ -119,7 +120,7 @@ var allowedEnvOverrides = map[string]bool{
 // stdout/stderr swap are both global process state, so both are mutated
 // and restored inside the SAME execMu critical section: two overlapping
 // requests with different identities can never observe each other's
-// AGENT_ID, because only one fn() ever runs at a time between the
+// STARFLEET_SHIP_ID, because only one fn() ever runs at a time between the
 // override and the restore.
 func runCaptured(env map[string]string, fn func() int) (exitCode int, stdout, stderr string) {
 	execMu.Lock()

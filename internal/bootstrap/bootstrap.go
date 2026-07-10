@@ -7,9 +7,8 @@
 // one-time setup (the _WORK_/agent-bus, _WORK_/agent-claims directory tree,
 // and the starfleetctl-related .claude/settings.json allowlist entries),
 // NOT the broader "set up the whole mpbt build system" job — that's
-// ./bootstrap's (bash, repo root) job, and it already covers installing
-// mpbt-builder, fetching xserver-master + the sister-project solutions
-// (including starfleetctl itself). `starfleetctl bootstrap` is meant to run
+// ./bootstrap's (bash, repo root) job, covering mpbt-builder, project
+// clones, and the build environment. `starfleetctl bootstrap` is meant to run
 // AFTER ./bootstrap has fetched+built the starfleetctl binary — see
 // ./bootstrap's own final step, which now calls this.
 //

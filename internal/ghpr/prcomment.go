@@ -11,11 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/identity"
 )
 
 const prCommentUsage = `usage: starfleetctl pr-comment <pr#> <body-file> [--bot-review]
-env: REPO      override repo (default X11Libre/xserver)
-     AGENT_ID  ship name shown in the --bot-review banner (falls back to user@host)
+env: STARFLEET_GITHUB_REPO   repo slug (or $REPO for backward compat)
+     STARFLEET_SHIP_ID       ship name shown in the --bot-review banner (falls back to user@host)
 `
 
 // RunPRComment implements `starfleetctl pr-comment`.
@@ -77,10 +79,10 @@ func RunPRComment(args []string) int {
 	return 0
 }
 
-// shipName mirrors the bash originals' `${AGENT_ID:-$(id -un)@$(hostname -s ...)}`
+// shipName mirrors the bash originals' `${STARFLEET_SHIP_ID:-$(id -un)@$(hostname -s ...)}`
 // fallback used in the --bot-review banner.
 func shipName() string {
-	if v := os.Getenv("AGENT_ID"); v != "" {
+	if v := identity.ShipID(); v != "" {
 		return v
 	}
 	user := os.Getenv("USER")

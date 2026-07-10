@@ -22,7 +22,7 @@ const prCIUsage = `usage: starfleetctl pr-ci <pr#>
        starfleetctl pr-ci https://github.com/OWNER/REPO/pull/<n>
        starfleetctl pr-ci <pr#> --json
 env:
-  REPO   override repo (default X11Libre/xserver); a URL argument wins over it
+  STARFLEET_GITHUB_REPO   repo slug (or $REPO for backward compat); a URL argument wins over it
 `
 
 type ciCheck struct {
@@ -90,11 +90,11 @@ type prCIView struct {
 
 var prURLRe = regexp.MustCompile(`^https?://[^/]+/([^/]+/[^/]+)/pull/(\d+)`)
 
-var knownFlakeRe = regexp.MustCompile(`(?i)dragonfly|solaris|netbsd|openbsd|freebsd|xephyr-glamor|go-xts`)
+var 	knownFlakeRe = regexp.MustCompile(`(?i)dragonfly|solaris|netbsd|openbsd|freebsd|xephyr-glamor|go-xts`)
 
 // RunPRCi implements `starfleetctl pr-ci <pr#|URL> [--json]`.
 func RunPRCi(args []string) int {
-	repoVal := repo()
+	repoVal := ""
 	pr := ""
 	wantJSON := false
 
@@ -122,6 +122,14 @@ func RunPRCi(args []string) int {
 	if pr == "" {
 		fmt.Fprintln(os.Stderr, "pr-ci: need a PR number or URL (see --help)")
 		return 2
+	}
+	if repoVal == "" {
+		var err error
+		repoVal, err = Repo()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "pr-ci:", err)
+			return 2
+		}
 	}
 
 	// bash pr-ci redirects gh's stderr to /dev/null on this call and prints

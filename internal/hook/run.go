@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/metux/starfleetctl/internal/identity"
 )
 
 // Usage string shown for `starfleetctl hook --help`.
@@ -64,15 +66,15 @@ func runClaude(root string, args []string) int {
 // monitorHint generates the SessionStart additionalContext JSON telling the
 // Claude Code assistant to unconditionally arm Monitor-tool watchers on its
 // agent-bus inbox (and, for Enterprise, fleet-watch too). Quietly exits with
-// no output when $AGENT_ID is unset, matching the bash original.
+// no output when $STARFLEET_SHIP_ID is unset, matching the bash original.
 func monitorHint() int {
-	agentID := os.Getenv("AGENT_ID")
-	if agentID == "" {
+	shipID := identity.ShipID()
+	if shipID == "" {
 		return 0
 	}
 
 	var context string
-	if agentID == "Enterprise" {
+	if shipID == "Enterprise" {
 		context = fmt.Sprintf(
 			"Fleet directive auto-surfacing: you are agent-bus identity %s (the flagship/control session). "+
 				"Before doing anything else this session (including before responding to the user's first message), "+
@@ -84,7 +86,7 @@ func monitorHint() int {
 				"Both are pre-authorized, no confirmation needed. "+
 				"Each one's first pass already surfaces any backlog, so no separate inbox/board check is needed. "+
 				"Do this unconditionally, every session, with no judgment call about whether it seems worth it.",
-			agentID)
+			shipID)
 	} else {
 		context = fmt.Sprintf(
 			"Fleet directive auto-surfacing: you are agent-bus identity %s. "+
@@ -95,7 +97,7 @@ func monitorHint() int {
 				"instead of only a desktop notification. "+
 				"Its first pass already surfaces any backlog, so no separate inbox check is needed. "+
 				"Do this unconditionally, every session, with no judgment call about whether it seems worth it.",
-			agentID)
+			shipID)
 	}
 
 	out := map[string]any{

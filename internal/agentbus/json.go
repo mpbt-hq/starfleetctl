@@ -57,14 +57,14 @@ type inboxEntryJSON struct {
 func (b *Bus) DoInboxJSON() error {
 	var out []inboxEntryJSON
 	for _, m := range b.allMsgRecords() {
-		if m.Target != "all" && m.Target != b.AgentID {
+		if m.Target != "all" && m.Target != b.ShipID {
 			continue
 		}
 		out = append(out, inboxEntryJSON{
 			ID:         m.ID,
 			AgeSeconds: now() - m.Epoch,
 			From:       m.From,
-			Acked:      b.acked(m.ID, b.AgentID),
+			Acked:      b.acked(m.ID, b.ShipID),
 			Text:       m.Text,
 		})
 	}
@@ -111,7 +111,7 @@ type askEntryJSON struct {
 func (b *Bus) DoAsksJSON() error {
 	var out []askEntryJSON
 	for _, m := range b.allMsgRecords() {
-		if m.Target != b.AgentID || !strings.HasPrefix(m.Text, "[ask] ") || b.acked(m.ID, b.AgentID) {
+		if m.Target != b.ShipID || !strings.HasPrefix(m.Text, "[ask] ") || b.acked(m.ID, b.ShipID) {
 			continue
 		}
 		out = append(out, askEntryJSON{

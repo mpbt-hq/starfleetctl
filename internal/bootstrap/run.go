@@ -17,10 +17,10 @@ starfleetctl-related .claude/settings.json allowlist entries.
 
 Without --fix: report-only, exits 1 if anything is missing.
 With --fix: repairs whatever it safely can, exits 0 unless something
-that isn't auto-fixable is still missing (e.g. scripts/ship-names.txt).
+that isn't auto-fixable is still missing (e.g. .starfleet-ai/etc/ship-names.txt).
 
 This does NOT set up the broader mpbt build system (mpbt-builder,
-xserver sources, etc.) — see ./bootstrap at the workspace root for that;
+project sources, etc.) — see ./bootstrap at the workspace root for that;
 run this AFTER it, once starfleetctl itself is built.
 `
 

@@ -44,7 +44,7 @@ func (b *Bus) post(target, text string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\n", now(), isots(), b.AgentID, target, text)
+	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\n", now(), isots(), b.ShipID, target, text)
 	if err := os.WriteFile(b.mfile(id), []byte(line), 0o644); err != nil {
 		return "", err
 	}
@@ -72,8 +72,8 @@ func (b *Bus) DoStatus(state, note string) error {
 		hh = "-"
 	}
 	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-		now(), isots(), b.AgentID, pp, clean(state), os.Getpid(), hh, clean(note))
-	if err := os.WriteFile(b.sfile(b.AgentID), []byte(line), 0o644); err != nil {
+		now(), isots(), b.ShipID, pp, clean(state), os.Getpid(), hh, clean(note))
+	if err := os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644); err != nil {
 		return err
 	}
 	proj := ""
@@ -89,7 +89,7 @@ func (b *Bus) DoStatus(state, note string) error {
 	if note != "" {
 		noteSuffix = " — " + note
 	}
-	fmt.Printf("agent-bus: '%s'%s → %s%s\n", b.AgentID, suffix, state, noteSuffix)
+	fmt.Printf("agent-bus: '%s'%s → %s%s\n", b.ShipID, suffix, state, noteSuffix)
 	return nil
 }
 
@@ -118,13 +118,13 @@ func (b *Bus) DoTouch() error {
 	}
 	defer lock.Close()
 
-	rec, ok := parseStatusFile(b.sfile(b.AgentID))
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
 	if !ok {
 		return nil
 	}
 	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 		now(), isots(), rec.Agent, rec.Project, rec.State, rec.PID, rec.Handle, rec.Note)
-	return os.WriteFile(b.sfile(b.AgentID), []byte(line), 0o644)
+	return os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644)
 }
 
 // DoClear implements `agent-bus clear`.
@@ -134,9 +134,9 @@ func (b *Bus) DoClear() error {
 		return err
 	}
 	defer lock.Close()
-	_ = os.Remove(b.sfile(b.AgentID))
+	_ = os.Remove(b.sfile(b.ShipID))
 	b.logEvent("clear", "")
-	fmt.Printf("agent-bus: cleared heartbeat for '%s'\n", b.AgentID)
+	fmt.Printf("agent-bus: cleared heartbeat for '%s'\n", b.ShipID)
 	return nil
 }
 
@@ -144,7 +144,7 @@ func (b *Bus) DoClear() error {
 func (b *Bus) DoInbox() error {
 	found := false
 	for _, m := range b.allMsgRecords() {
-		if m.Target != "all" && m.Target != b.AgentID {
+		if m.Target != "all" && m.Target != b.ShipID {
 			continue
 		}
 		if !found {
@@ -152,13 +152,13 @@ func (b *Bus) DoInbox() error {
 			found = true
 		}
 		a := " "
-		if b.acked(m.ID, b.AgentID) {
+		if b.acked(m.ID, b.ShipID) {
 			a = "✓"
 		}
 		fmt.Printf("%-6s  %-7s  %-18s  %-4s  %s\n", m.ID, age(m.Epoch), m.From, a, m.Text)
 	}
 	if !found {
-		fmt.Printf("(inbox empty for '%s')\n", b.AgentID)
+		fmt.Printf("(inbox empty for '%s')\n", b.ShipID)
 	}
 	return nil
 }
@@ -176,7 +176,7 @@ func (b *Bus) DoAck(id, note string) error {
 		return err
 	}
 	defer lock.Close()
-	f, err := os.Create(b.ackmark(id, b.AgentID))
+	f, err := os.Create(b.ackmark(id, b.ShipID))
 	if err != nil {
 		return err
 	}
@@ -186,26 +186,7 @@ func (b *Bus) DoAck(id, note string) error {
 	if note != "" {
 		noteSuffix = " — " + note
 	}
-	fmt.Printf("agent-bus: '%s' acked %s%s\n", b.AgentID, id, noteSuffix)
-
-	// Auto-delete message if all live target agents have acked it.
-	live := make(map[string]bool)
-	for _, r := range b.AllStatusRecords() {
-		if !b.stale(r.Epoch) {
-			live[r.Agent] = true
-		}
-	}
-	if b.allTargetsAcked(id, live) {
-		_ = os.Remove(b.mfile(id))
-		entries, _ := os.ReadDir(b.AckDir)
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), id+"__") {
-				_ = os.Remove(filepath.Join(b.AckDir, e.Name()))
-			}
-		}
-		b.logEvent("auto-delete", fmt.Sprintf("message %s deleted (all live targets acked)", id))
-	}
-
+	fmt.Printf("agent-bus: '%s' acked %s%s\n", b.ShipID, id, noteSuffix)
 	return nil
 }
 
@@ -262,9 +243,9 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool) error {
 		return err
 	}
 	if target == "all" {
-		fmt.Printf("agent-bus: broadcast %s from '%s' → ALL: %s\n", id, b.AgentID, text)
+		fmt.Printf("agent-bus: broadcast %s from '%s' → ALL: %s\n", id, b.ShipID, text)
 	} else {
-		fmt.Printf("agent-bus: directive %s from '%s' → %s: %s\n", id, b.AgentID, target, text)
+		fmt.Printf("agent-bus: directive %s from '%s' → %s: %s\n", id, b.ShipID, target, text)
 	}
 	return nil
 }
@@ -339,7 +320,7 @@ func (b *Bus) DoReply(qid string, words []string) error {
 	if err != nil {
 		return err
 	}
-	f, ferr := os.Create(b.ackmark(qid, b.AgentID))
+	f, ferr := os.Create(b.ackmark(qid, b.ShipID))
 	if ferr == nil {
 		f.Close()
 	}
@@ -352,13 +333,13 @@ func (b *Bus) DoReply(qid string, words []string) error {
 func (b *Bus) DoAsks() error {
 	found := false
 	for _, m := range b.allMsgRecords() {
-		if m.Target != b.AgentID {
+		if m.Target != b.ShipID {
 			continue
 		}
 		if !strings.HasPrefix(m.Text, "[ask] ") {
 			continue
 		}
-		if b.acked(m.ID, b.AgentID) {
+		if b.acked(m.ID, b.ShipID) {
 			continue
 		}
 		if !found {
@@ -368,7 +349,7 @@ func (b *Bus) DoAsks() error {
 		fmt.Printf("%-6s  %-7s  %-18s  %s\n", m.ID, age(m.Epoch), m.From, strings.TrimPrefix(m.Text, "[ask] "))
 	}
 	if !found {
-		fmt.Printf("(no pending questions for '%s')\n", b.AgentID)
+		fmt.Printf("(no pending questions for '%s')\n", b.ShipID)
 	}
 	return nil
 }
@@ -482,7 +463,7 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error
 	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
 	for {
 		for _, m := range b.allMsgRecords() {
-			if m.Target != b.AgentID {
+			if m.Target != b.ShipID {
 				continue
 			}
 			if strings.HasPrefix(m.Text, prefix) {
@@ -490,7 +471,7 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error
 				if err != nil {
 					return "", err
 				}
-				f, ferr := os.Create(b.ackmark(m.ID, b.AgentID))
+				f, ferr := os.Create(b.ackmark(m.ID, b.ShipID))
 				if ferr == nil {
 					f.Close()
 				}

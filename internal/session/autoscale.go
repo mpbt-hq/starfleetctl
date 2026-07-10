@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/identity"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -207,7 +208,7 @@ func runAutoscaleNeed(root string, args []string) int {
 // spawnShips launches N worker sessions and returns the successfully spawned names.
 func spawnShips(root string, spawn int, release, client, supervisor, permissionMode, reason string, need, total, max int) []string {
 	var spawned []string
-	callerID := os.Getenv("AGENT_ID")
+	callerID := identity.ShipID()
 	if callerID == "" {
 		callerID = "unknown"
 	}
@@ -293,7 +294,7 @@ func fleetCounts(root string) (total, idle int) {
 func appendAudit(root, msg string) {
 	logPath := filepath.Join(root, "_WORK_", auditLog)
 	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
-	callerID := os.Getenv("AGENT_ID")
+	callerID := identity.ShipID()
 	if callerID == "" {
 		callerID = "unknown"
 	}

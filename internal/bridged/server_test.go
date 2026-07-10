@@ -113,8 +113,8 @@ func TestAgentBusRoundTrip(t *testing.T) {
 	sockPath, _, stop := startTestServer(t)
 	defer stop()
 
-	os.Setenv("AGENT_ID", "TestShip")
-	defer os.Unsetenv("AGENT_ID")
+	os.Setenv("STARFLEET_SHIP_ID", "TestShip")
+	defer os.Unsetenv("STARFLEET_SHIP_ID")
 
 	resp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"status", "working", "via bridged"}}, time.Second)
 	if err != nil {
@@ -138,9 +138,9 @@ func TestAgentBusRoundTrip(t *testing.T) {
 
 // TestPerRequestIdentityNoLeakage is the test Enterprise's directive
 // (m0082) explicitly asked for: fire many requests with DIFFERENT
-// per-request AGENT_ID overrides (via Request.Env, not ambient process
-// env) at once, and confirm each one's response reflects only its own
-// identity — none see another's, and none see the ambient ("unset")
+// per-request STARFLEET_SHIP_ID overrides (via Request.Env, not ambient
+// process env) at once, and confirm each one's response reflects only its
+// own identity — none see another's, and none see the ambient ("unset")
 // identity either. Execution is serialized by execMu, so true
 // interleaving inside a single agentbus.Run call is impossible; this test
 // instead guards against the failure mode that WOULD leak: a bug in
@@ -151,7 +151,7 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 	sockPath, _, stop := startTestServer(t)
 	defer stop()
 
-	os.Unsetenv("AGENT_ID") // confirm no ambient identity leaks through
+	os.Unsetenv("STARFLEET_SHIP_ID") // confirm no ambient identity leaks through
 	os.Unsetenv("XLIBRE_RELEASE")
 
 	const n = 15
@@ -167,7 +167,7 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 			statusResp, err := Call(sockPath, Request{
 				Cmd:  "agent-bus",
 				Args: []string{"status", "working", note},
-				Env:  map[string]string{"AGENT_ID": ship},
+				Env:  map[string]string{"STARFLEET_SHIP_ID": ship},
 			}, 5*time.Second)
 			if err != nil {
 				errs[i] = fmt.Errorf("%s: status call: %w", ship, err)
@@ -185,7 +185,7 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 			whoResp, err := Call(sockPath, Request{
 				Cmd:  "agent-bus",
 				Args: []string{"inbox"},
-				Env:  map[string]string{"AGENT_ID": ship},
+				Env:  map[string]string{"STARFLEET_SHIP_ID": ship},
 			}, 5*time.Second)
 			if err != nil {
 				errs[i] = fmt.Errorf("%s: inbox call: %w", ship, err)
@@ -220,8 +220,8 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 
 	// After all overridden requests, an unspecified-Env request must fall
 	// back to the ambient (still-unset) identity, not leak the last
-	// override — proves restoration actually ran, not just that
-	// concurrent calls happened to not collide.
+	// override — proves restoration actually ran, not just that concurrent
+	// calls happened to not collide.
 	plainResp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"status", "idle", "no override"}}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)

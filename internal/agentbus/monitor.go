@@ -59,14 +59,14 @@ const pollInterval = 2 * time.Second
 // new/unacked directive. Runs forever (Monitor tool kills the process to
 // stop it) — same shape as the bash `while true; do …; sleep 2; done`.
 func (b *Bus) DoMonitorLoop() error {
-	if !b.AgentIDSet {
+	if !b.ShipIDSet {
 		return fmt.Errorf("agent-bus-monitor-loop: $AGENT_ID is not set")
 	}
 	seenDir := filepath.Join(b.BusDir, "monitor-seen")
 	if err := os.MkdirAll(seenDir, 0o755); err != nil {
 		return err
 	}
-	seenFile := filepath.Join(seenDir, b.AgentID)
+	seenFile := filepath.Join(seenDir, b.ShipID)
 
 	seen := map[string]bool{}
 	if data, err := os.ReadFile(seenFile); err == nil {
@@ -94,10 +94,10 @@ func (b *Bus) DoMonitorLoop() error {
 
 	for {
 		for _, m := range b.allMsgRecords() {
-			if m.Target != "all" && m.Target != b.AgentID {
+			if m.Target != "all" && m.Target != b.ShipID {
 				continue
 			}
-			if b.acked(m.ID, b.AgentID) || seen[m.ID] {
+			if b.acked(m.ID, b.ShipID) || seen[m.ID] {
 				continue
 			}
 			fmt.Printf("[%s] from %s: %s\n", m.ID, m.From, m.Text)
@@ -161,7 +161,7 @@ func (b *Bus) DoWatch(intervalArg string, stop bool) error {
 	if err := os.MkdirAll(popupOnceDir, 0o755); err != nil {
 		return err
 	}
-	agentSafe := fsafe(b.AgentID)
+	agentSafe := fsafe(b.ShipID)
 	pidFile := filepath.Join(notifyDir, ".watch-"+agentSafe+".pid")
 	seenFile := filepath.Join(notifyDir, ".seen-"+agentSafe)
 	logFile := filepath.Join(notifyDir, agentSafe+".log")
@@ -201,13 +201,13 @@ func (b *Bus) DoWatch(intervalArg string, stop bool) error {
 
 	for {
 		for _, m := range b.allMsgRecords() {
-			if m.Target != "all" && m.Target != b.AgentID {
+			if m.Target != "all" && m.Target != b.ShipID {
 				continue
 			}
-			if b.acked(m.ID, b.AgentID) || seen[m.ID] {
+			if b.acked(m.ID, b.ShipID) || seen[m.ID] {
 				continue
 			}
-			notify(logFile, popupOnceDir, b.AgentID, m)
+			notify(logFile, popupOnceDir, b.ShipID, m)
 			seen[m.ID] = true
 			fmt.Fprintln(seenF, m.ID)
 		}

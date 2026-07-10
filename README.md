@@ -8,17 +8,38 @@ to GitHub PRs — into one binary, one subcommand per script.
 It grew out of [`mpbt-workspace`](https://github.com/X11Libre/mpbt-workspace) (a build
 orchestrator + fleet-coordination workspace for the [XLibre](https://github.com/X11Libre) X server
 project), where the original bash scripts still live under `scripts/*` and remain the reference
-implementation for anything not yet ported here. This README documents `starfleetctl` on its own
-terms — no need to read `mpbt-workspace`'s `AGENTS.md` first — but if you're actually running this
-inside that workspace, `.bin/starfleetctl <subcommand>` is the way every subcommand is normally
-invoked there (see [Usage](#usage) below).
+implementation for anything not yet ported here.
+
+## Deployment
+
+starfleetctl is deployed into a workspace via the **genesis → bootstrap** two-phase model:
+
+1. **Phase A (genesis):** One already-built starfleetctl binary writes a minimal
+   `starfleet-bootstrap` shell script into a fresh checkout:
+   ```
+   starfleetctl genesis-init .
+   ```
+   This also runs `bootstrap --fix` to set up AGENTS.md, DASHBOARD.md, allowlist entries,
+   `_WORK_/` directories, agent fragments, and opencode plugins/scripts.
+
+2. **Phase B (bootstrap):** The committed `starfleet-bootstrap` script clones or pulls the
+   starfleetctl source repo, builds it with `go build`, symlinks the binary to
+   `.starfleet-ai/bin/starfleetctl`, and re-runs `bootstrap --fix`:
+   ```
+   ./starfleet-bootstrap
+   ```
+   Re-run anytime to update starfleetctl and re-apply all workspace configuration.
+
+Everything under `.starfleet-ai/` is gitignored. The `starfleet-bootstrap` script is the only
+committed file. starfleetctl also provides `starfleetctl self-install` to clone/build/link
+itself without the bootstrap script (useful for updates when the binary is already installed).
 
 ## Why a Go rewrite of working bash scripts?
 
 1. **One allowlist entry covers every subcommand.** Tools like Claude Code gate shell commands
    behind a per-command permission allowlist. ~30 separate bash scripts needed ~30 separate
    allowlist entries (`Bash(scripts/foo)` + `Bash(scripts/foo *)` each); a single
-   `Bash(.bin/starfleetctl)`/`Bash(.bin/starfleetctl *)` pair covers every subcommand this
+   `Bash(scripts/starfleetctl)`/`Bash(scripts/starfleetctl *)` pair covers every subcommand this
    binary has now *and* every one it gains later. The trade-off, accepted deliberately: less
    granular — a bug in one subcommand isn't scoped out from the others by the allowlist.
 2. **`encoding/json` + `os/exec` argument arrays eliminate a real class of bash bugs** — quoting
@@ -47,7 +68,8 @@ or directly:
 go build -o starfleetctl ./cmd/starfleetctl
 ```
 
-Inside `mpbt-workspace`, this repo is cloned and built as its own **mpbt solution** (`cf/starfleetctl/`), separate from the actual X-server build — `./run-fetch.starfleetctl` / `./run-build.starfleetctl`.
+Inside `mpbt-workspace`, starfleetctl is deployed under `.starfleet-ai/` by the
+`starfleet-bootstrap` script (or via `starfleetctl self-install` for updates).
 
 ## Usage
 
@@ -55,19 +77,23 @@ Inside `mpbt-workspace`, this repo is cloned and built as its own **mpbt solutio
 starfleetctl <subcommand> [args…]
 ```
 
-Every subcommand that touches `mpbt-workspace`'s shared coordination files (the "fleet
+Inside `mpbt-workspace` (or any fleet workspace), the canonical path is
+`.starfleet-ai/bin/starfleetctl`, installed by `starfleet-bootstrap` or `starfleetctl self-install`.
+Run it from the workspace root (or any subdirectory — it discovers the root by walking up):
+
+```sh
+.starfleet-ai/bin/starfleetctl <subcommand> [args...]
+```
+
+Every subcommand that touches the workspace's shared coordination files (the "fleet
 coordination" group below) needs to know the workspace root: it's resolved from
 `$MPBT_WORKSPACE_ROOT` if set, otherwise by walking up from the current directory looking for an
 `AGENTS.md` next to a `scripts/` directory (the same landmarks a human would look for) — so it
 works run from the workspace root or any subdirectory of it. The GitHub-interaction subcommands and
 `with-clone-lock` don't need any of that; they work from any `cwd`.
 
-Inside `mpbt-workspace` itself, the thin wrapper `.bin/starfleetctl` rebuilds this binary
-automatically whenever its source is newer, then execs it with the workspace root already
-resolved — so the normal way to invoke any subcommand there is
-`.bin/starfleetctl <subcommand> [args…]`, not calling this binary directly.
-
-Run `starfleetctl <subcommand> --help` (or with no args) for that subcommand's own usage text —
+Run `starfleetctl --help` for a top-level command list, or
+`starfleetctl <subcommand> --help` for that subcommand's own usage text —
 this README summarizes them, the `--help` output is authoritative.
 
 ## Subcommand reference
@@ -87,7 +113,7 @@ same `_WORK_/agent-bus/` files without racing or misreading each other's state.
 | `ws-commit` | `ws-commit -m "<msg>" <path> [<path>...]` (or `-a` for all tracked changes, `--no-push` to skip the push) — commit+push under the shared clone lock, so concurrent sessions don't race the same working tree's index/HEAD. |
 | `ship-names <cmd>` | Star-Trek-themed per-session identity registry: `assign [flagship]`, `release <name>`, `list [--json]`, `gc`, `flagship`. |
 | `with-clone-lock [cmd...]` | Generic "serialize mutating work in this git working tree" primitive everything above is built on — acquires `<gitdir>/mpbt-clone.lock`, then execs the given command (or an interactive shell with none given) with the lock held. Works in *any* git working tree, not just an `mpbt-workspace` checkout. |
-| `hook claude monitor-hint` | Claude Code `SessionStart` hook helper: emits `hookSpecificOutput.additionalContext` JSON telling the assistant to unconditionally arm Monitor-tool watchers on its agent-bus inbox (and, for `Enterprise`, fleet-watch too). Wired as a `SessionStart` hook in `.claude/settings.json`. Quiet no-op when `$AGENT_ID` is unset. |
+| `hook claude monitor-hint` | Claude Code `SessionStart` hook helper: emits `hookSpecificOutput.additionalContext` JSON telling the assistant to unconditionally arm Monitor-tool watchers on its agent-bus inbox (and, for `Enterprise`, fleet-watch too). Wired as a `SessionStart` hook in `.claude/settings.json`. Quiet no-op when `$STARFLEET_SHIP_ID` is unset. |
 | `hook claude permission` | Claude Code `PreToolUse` hook helper: reads the tool-invocation JSON from stdin, asks the control agent (`$AGENT_CONTROLLER`) via agent-bus `ask`/`reply` for an allow/deny decision, blocks up to `$AGENT_PERM_TIMEOUT` (default 60s), and emits a `permissionDecision` JSON. Fail-closed (deny on timeout unless `$AGENT_PERM_TIMEOUT_DECISION=ask`). Used by `scripts/agent-permission-hook`. |
 | `session attach <id> [--read-only] [--independent]` | Resolve an agent ID / handle / tmux session name / unique substring to a concrete tmux session and print it (tab-separated with mode). Used by `scripts/agent-attach` which then `exec tmux attach -t`. |
 | `session attach --list` | List running `mpbt-` tmux sessions and the agent-bus board in one call. |
@@ -120,7 +146,7 @@ separate decision gated on review, same as the read-only set was before it got t
 
 | Subcommand | Purpose |
 |---|---|
-| `pr-comment <pr#> <body-file> [--bot-review]` | Post a PR comment; `--bot-review` prepends a fixed disclosure banner naming the `$AGENT_ID` that posted it. |
+| `pr-comment <pr#> <body-file> [--bot-review]` | Post a PR comment; `--bot-review` prepends a fixed disclosure banner naming the `$STARFLEET_SHIP_ID` that posted it. |
 | `pr-label <pr#> add\|remove <label...>` / `pr-label <pr#> set-review passed\|changes-requested` | Add/remove labels via the REST API (works around a broken `gh pr edit` on some repos); `set-review` swaps two mutually-exclusive review-outcome labels atomically. |
 | `pr-request-reviewers <pr#> <login> [login...]` | Request reviewers via the REST API. |
 | `pr-set-body <pr#> <body-file>` | Replace a PR's body via the REST API. |

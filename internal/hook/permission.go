@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/identity"
 )
 
 // permission implements `starfleetctl hook claude permission`.
@@ -28,9 +29,9 @@ import (
 //	                              the hook's Claude Code "timeout" setting)
 //	$AGENT_PERM_TIMEOUT_DECISION  decision on timeout (default deny)
 func permission(root string) int {
-	agentID := os.Getenv("AGENT_ID")
-	if agentID == "" {
-		emitPermission("ask", "AGENT_ID not set — cannot route to control agent")
+	shipID := identity.ShipID()
+	if shipID == "" {
+		emitPermission("ask", "STARFLEET_SHIP_ID (or AGENT_ID) not set — cannot route to control agent")
 		return 0
 	}
 
@@ -47,7 +48,7 @@ func permission(root string) int {
 
 	var payload struct {
 		ToolName  string         `json:"tool_name"`
-		AgentID   string         `json:"agent_id"`
+		ShipID    string         `json:"ship_id"`
 		ToolInput map[string]any `json:"tool_input"`
 	}
 	if err := json.NewDecoder(os.Stdin).Decode(&payload); err != nil {
@@ -72,7 +73,7 @@ func permission(root string) int {
 	}
 
 	tool := payload.ToolName
-	agent := payload.AgentID
+	agent := payload.ShipID
 	if agent == "" {
 		agent = "?"
 	}

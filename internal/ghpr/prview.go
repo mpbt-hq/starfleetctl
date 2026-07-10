@@ -15,7 +15,7 @@ import (
 const prViewUsage = `usage: starfleetctl pr-view <pr#> [json-fields]
   default fields: number,title,state
 env:
-  REPO   repo slug (default X11Libre/xserver)
+  STARFLEET_GITHUB_REPO   repo slug (or $REPO for backward compat)
 `
 
 // RunPRView implements `starfleetctl pr-view <pr#> [json-fields]`.

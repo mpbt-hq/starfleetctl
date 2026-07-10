@@ -14,7 +14,7 @@ import (
 
 const prLabelUsage = `usage: starfleetctl pr-label <pr#> add|remove <label...>
        starfleetctl pr-label <pr#> set-review passed|changes-requested
-env: REPO  override repo (default X11Libre/xserver)
+env: STARFLEET_GITHUB_REPO   repo slug (or $REPO for backward compat)
 `
 
 // RunPRLabel implements `starfleetctl pr-label`.

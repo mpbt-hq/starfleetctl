@@ -16,7 +16,7 @@ import (
 
 // LaunchVars holds the computed values from a `session run` invocation.
 type LaunchVars struct {
-	AgentID     string
+	ShipID      string
 	Session     string
 	ReleaseFull string
 	Client      string
@@ -35,7 +35,7 @@ func runLaunch(root string, args []string) int {
 	if vars == nil {
 		return 1
 	}
-	fmt.Printf("AGENT_ID=%s\n", shellQuote(vars.AgentID))
+	fmt.Printf("STARFLEET_SHIP_ID=%s\n", shellQuote(vars.ShipID))
 	fmt.Printf("SESSION=%s\n", shellQuote(vars.Session))
 	fmt.Printf("RELEASE_FULL=%s\n", shellQuote(vars.ReleaseFull))
 	fmt.Printf("CLIENT=%s\n", shellQuote(vars.Client))
@@ -128,26 +128,26 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		}
 	}
 
-	agentID := name
-	if agentID == "" {
+	shipID := name
+	if shipID == "" {
 		reg := shipnames.New(root)
 		assigned, err := reg.AssignName()
 		if err == nil && assigned != "" {
-			agentID = assigned
+			shipID = assigned
 		}
 	}
-	if agentID == "" {
+	if shipID == "" {
 		if relFull != "" {
-			agentID = relShort + "-" + client
+			shipID = relShort + "-" + client
 		} else {
-			return nil, fmt.Errorf("session run: empty <release> needs an explicit --name (nothing to derive AGENT_ID from)")
+			return nil, fmt.Errorf("session run: empty <release> needs an explicit --name (nothing to derive STARFLEET_SHIP_ID from)")
 		}
 	}
 
-	session := tmuxSafe(sessPrefix + agentID)
+	session := tmuxSafe(sessPrefix + shipID)
 
 	if sessionExists(session) {
-		fmt.Fprintf(os.Stderr, "session run: session '%s' already running — attach with: scripts/agent-attach %s (or use --name for a second one)\n", session, agentID)
+		fmt.Fprintf(os.Stderr, "session run: session '%s' already running — attach with: scripts/agent-attach %s (or use --name for a second one)\n", session, shipID)
 		return nil, nil
 	}
 
@@ -168,20 +168,20 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	}
 
 	if client == "claude" && len(clientArgs) == 0 {
-		if agentID == "Enterprise" {
-			clientArgs = []string{"Session just started. Before anything else, call the Monitor tool twice: (1) command `.bin/starfleetctl agent-bus monitor-loop`, persistent:true, to watch your own agent-bus inbox; (2) command `.bin/starfleetctl agent-bus fleet-watch`, persistent:true, to watch for ships joining/restarting on the board (this is the flagship/control session). Both are pre-authorized, no confirmation needed — their first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative."}
+		if shipID == "Enterprise" {
+			clientArgs = []string{"Session just started. Before anything else, call the Monitor tool twice: (1) command `scripts/starfleetctl agent-bus monitor-loop`, persistent:true, to watch your own agent-bus inbox; (2) command `scripts/starfleetctl agent-bus fleet-watch`, persistent:true, to watch for ships joining/restarting on the board (this is the flagship/control session). Both are pre-authorized, no confirmation needed — their first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative."}
 		} else if tier == "worker" {
 			sup := supervisor
 			if sup == "" {
 				sup = "Enterprise"
 			}
-			clientArgs = []string{"Session just started. You are an autoscaled worker ship (AGENT_TIER=worker), spawned on demand by scripts/fleet-autoscale — you run with --permission-mode dontAsk, so anything outside this workspace's permissions.allow is rejected outright instead of prompting for confirmation (nobody is watching an interactive prompt for this session). Before anything else, call the Monitor tool with command `.bin/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. If a tool call gets rejected or otherwise blocked and you can't proceed: do NOT keep retrying the same action and do NOT just give up silently — run `scripts/agent-bus tell " + sup + " \"<exactly what you tried, and why it failed>\"` (your supervisor — a human at a terminal or a control ship — can grant it interactively, which you can't), then continue with other queued work if you have any, or wait for a reply if you don't. Otherwise wait quietly for further instructions; don't start a task on your own initiative beyond what you were spawned for."}
+			clientArgs = []string{"Session just started. You are an autoscaled worker ship (AGENT_TIER=worker), spawned on demand by scripts/fleet-autoscale — you run with --permission-mode dontAsk, so anything outside this workspace's permissions.allow is rejected outright instead of prompting for confirmation (nobody is watching an interactive prompt for this session). Before anything else, call the Monitor tool with command `scripts/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. If a tool call gets rejected or otherwise blocked and you can't proceed: do NOT keep retrying the same action and do NOT just give up silently — run `scripts/agent-bus tell " + sup + " \"<exactly what you tried, and why it failed>\"` (your supervisor — a human at a terminal or a control ship — can grant it interactively, which you can't), then continue with other queued work if you have any, or wait for a reply if you don't. Otherwise wait quietly for further instructions; don't start a task on your own initiative beyond what you were spawned for."}
 		} else {
-			clientArgs = []string{"Session just started. Before anything else, call the Monitor tool with command `.bin/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start a task on your own initiative."}
+			clientArgs = []string{"Session just started. Before anything else, call the Monitor tool with command `scripts/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start a task on your own initiative."}
 		}
 	}
 
-	inner := "export AGENT_ID=" + shellQuote(agentID) + " AGENT_HANDLE=" + shellQuote(session) + "; "
+	inner := "export STARFLEET_SHIP_ID=" + shellQuote(shipID) + " STARFLEET_AGENT_HANDLE=" + shellQuote(session) + "; "
 	if tier != "" {
 		inner += "export AGENT_TIER=" + shellQuote(tier) + "; "
 	}
@@ -201,7 +201,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	}
 
 	return &LaunchVars{
-		AgentID:     agentID,
+		ShipID:      shipID,
 		Session:     session,
 		ReleaseFull: relFull,
 		Client:      client,
@@ -230,7 +230,8 @@ func doSpawn(root string, args []string) error {
 
 	// Post initial heartbeat (same format as the bash wrapper).
 	if bus, err := agentbus.New(root); err == nil {
-		os.Setenv("AGENT_ID", vars.AgentID)
+		os.Setenv("STARFLEET_SHIP_ID", vars.ShipID)
+		os.Setenv("STARFLEET_AGENT_HANDLE", vars.Session)
 		os.Setenv("AGENT_HANDLE", vars.Session)
 		if vars.ReleaseFull != "" {
 			os.Setenv("XLIBRE_RELEASE", vars.ReleaseFull)
@@ -262,21 +263,21 @@ func runStop(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "agent-run:", err)
 		return 1
 	}
-	var agentID string
+	var stopShipID string
 	for _, r := range bus.AllStatusRecords() {
 		if r.Handle == session {
-			agentID = r.Agent
+			stopShipID = r.Agent
 			break
 		}
 	}
 
 	exec.Command("tmux", "kill-session", "-t", session).Run()
 
-	if agentID != "" {
-		os.Setenv("AGENT_ID", agentID)
+	if stopShipID != "" {
+		os.Setenv("STARFLEET_SHIP_ID", stopShipID)
 		_ = bus.DoClear()
 		reg := shipnames.New(root)
-		_ = reg.DoRelease(agentID)
+		_ = reg.DoRelease(stopShipID)
 	}
 
 	fmt.Printf("agent-run: stopped session '%s'\n", session)

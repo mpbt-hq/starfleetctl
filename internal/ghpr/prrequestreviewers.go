@@ -14,7 +14,7 @@ import (
 )
 
 const prRequestReviewersUsage = `usage: starfleetctl pr-request-reviewers <pr#> <login> [login...]
-env: REPO  override repo (default X11Libre/xserver)
+env: STARFLEET_GITHUB_REPO   repo slug (or $REPO for backward compat)
 `
 
 // RunPRRequestReviewers implements `starfleetctl pr-request-reviewers`.

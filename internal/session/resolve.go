@@ -53,7 +53,7 @@ func ResolveID(root, arg string) string {
 		return prefixed
 	}
 
-	// 3) board lookup: AGENT_ID or handle matches arg
+	// 3) board lookup: STARFLEET_SHIP_ID or handle matches arg
 	bus, err := agentbus.New(root)
 	if err != nil {
 		return ""

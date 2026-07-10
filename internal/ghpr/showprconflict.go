@@ -21,7 +21,7 @@ type prConflictEntry struct {
 // RunShowPRConflict implements `starfleetctl show-pr-conflict`.
 func RunShowPRConflict(args []string) int {
 	if len(args) >= 1 && (args[0] == "-h" || args[0] == "--help") {
-		fmt.Println("usage: starfleetctl show-pr-conflict\nenv: REPO (default X11Libre/xserver)")
+		fmt.Println("usage: starfleetctl show-pr-conflict\nenv: STARFLEET_GITHUB_REPO (or $REPO for backward compat)")
 		return 0
 	}
 

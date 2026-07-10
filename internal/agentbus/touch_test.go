@@ -12,12 +12,14 @@ import (
 func newTestBus(t *testing.T, agentID string) *Bus {
 	t.Helper()
 	root := t.TempDir()
-	os.Setenv("AGENT_ID", agentID)
+	os.Setenv("STARFLEET_SHIP_ID", agentID)
+	os.Unsetenv("AGENT_ID")
 	os.Unsetenv("BUS_DIR")
 	os.Unsetenv("XLIBRE_RELEASE")
 	os.Unsetenv("PROJECT")
+	os.Unsetenv("STARFLEET_AGENT_HANDLE")
 	os.Unsetenv("AGENT_HANDLE")
-	t.Cleanup(func() { os.Unsetenv("AGENT_ID") })
+	t.Cleanup(func() { os.Unsetenv("STARFLEET_SHIP_ID") })
 	b, err := New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +32,7 @@ func TestDoTouchNoopWithoutExistingHeartbeat(t *testing.T) {
 	if err := b.DoTouch(); err != nil {
 		t.Fatalf("DoTouch on a never-posted ship should be a silent no-op, got: %v", err)
 	}
-	if _, err := os.Stat(b.sfile(b.AgentID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(b.sfile(b.ShipID)); !os.IsNotExist(err) {
 		t.Errorf("DoTouch should not create a heartbeat file out of nothing: err=%v", err)
 	}
 }
@@ -41,7 +43,7 @@ func TestDoTouchRefreshesTimestampOnly(t *testing.T) {
 	if err := b.DoStatus("working", "on it"); err != nil {
 		t.Fatal(err)
 	}
-	before, ok := parseStatusFile(b.sfile(b.AgentID))
+	before, ok := parseStatusFile(b.sfile(b.ShipID))
 	if !ok {
 		t.Fatal("expected a status file after DoStatus")
 	}
@@ -50,7 +52,7 @@ func TestDoTouchRefreshesTimestampOnly(t *testing.T) {
 	if err := b.DoTouch(); err != nil {
 		t.Fatal(err)
 	}
-	after, ok := parseStatusFile(b.sfile(b.AgentID))
+	after, ok := parseStatusFile(b.sfile(b.ShipID))
 	if !ok {
 		t.Fatal("expected a status file after DoTouch")
 	}
@@ -83,7 +85,7 @@ func TestDoTouchPicksUpLatestRealStatusNotACache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec, ok := parseStatusFile(b.sfile(b.AgentID))
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
 	if !ok {
 		t.Fatal("expected a status file")
 	}

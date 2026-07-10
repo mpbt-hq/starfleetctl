@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/identity"
 )
 
 // Claims holds one invocation's resolved identity + storage locations.
@@ -25,13 +27,13 @@ type Claims struct {
 	Root       string
 	ClaimDir   string
 	ClaimTTL   int64
-	AgentID    string
-	AgentIDSet bool
+	ShipID     string
+	ShipIDSet  bool
 	Events     string
 }
 
 // New resolves Claims from the environment, mirroring scripts/pr-claim's
-// top-of-file variable setup (CLAIM_DIR, CLAIM_TTL, AGENT_ID).
+// top-of-file variable setup (CLAIM_DIR, CLAIM_TTL, STARFLEET_SHIP_ID).
 func New(root string) (*Claims, error) {
 	dir := os.Getenv("CLAIM_DIR")
 	if dir == "" {
@@ -43,18 +45,18 @@ func New(root string) (*Claims, error) {
 			ttl = n
 		}
 	}
-	agentID := os.Getenv("AGENT_ID")
-	agentIDSet := agentID != ""
-	if !agentIDSet {
-		agentID = defaultAgentID()
+	shipID := identity.ShipID()
+	shipIDSet := shipID != ""
+	if !shipIDSet {
+		shipID = defaultAgentID()
 	}
 
 	c := &Claims{
 		Root:       root,
 		ClaimDir:   dir,
 		ClaimTTL:   ttl,
-		AgentID:    agentID,
-		AgentIDSet: agentIDSet,
+		ShipID:     shipID,
+		ShipIDSet:  shipIDSet,
 		Events:     filepath.Join(dir, "events.log"),
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -132,11 +134,11 @@ func (c *Claims) logEvent(kind, note string) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", isots(), kind, c.AgentID, clean(note))
+	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", isots(), kind, c.ShipID, clean(note))
 }
 
 func (c *Claims) warnID() {
-	if !c.AgentIDSet {
-		fmt.Fprintf(os.Stderr, "pr-claim: note: AGENT_ID not set; using '%s' — set a unique AGENT_ID per agent.\n", c.AgentID)
+	if !c.ShipIDSet {
+		fmt.Fprintf(os.Stderr, "pr-claim: note: STARFLEET_SHIP_ID (or AGENT_ID) not set; using '%s' — set a unique STARFLEET_SHIP_ID per agent.\n", c.ShipID)
 	}
 }

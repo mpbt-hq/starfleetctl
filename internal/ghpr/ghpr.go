@@ -26,15 +26,27 @@ import (
 	"os/exec"
 )
 
-// DefaultRepo mirrors every affected script's `REPO="${REPO:-X11Libre/xserver}"`.
-const DefaultRepo = "X11Libre/xserver"
-
-// repo resolves the target repo slug: $REPO if set, else DefaultRepo.
-func repo() string {
-	if r := os.Getenv("REPO"); r != "" {
-		return r
+// Repo resolves the GitHub repo slug from $STARFLEET_GITHUB_REPO or (deprecated) $REPO.
+// Returns an error if neither is set, so callers can choose a fallback (e.g. URL
+// override) before giving up.
+func Repo() (string, error) {
+	if r := os.Getenv("STARFLEET_GITHUB_REPO"); r != "" {
+		return r, nil
 	}
-	return DefaultRepo
+	if r := os.Getenv("REPO"); r != "" {
+		return r, nil
+	}
+	return "", fmt.Errorf("no GitHub repo: set $STARFLEET_GITHUB_REPO or (deprecated) $REPO")
+}
+
+// repo is the CLI convenience helper: calls Repo() and exits on failure.
+func repo() string {
+	r, err := Repo()
+	if err != nil {
+		fprintErr("ghpr", err)
+		os.Exit(1)
+	}
+	return r
 }
 
 // runGH execs `gh <args...>` and returns its stdout. Mirrors the bash

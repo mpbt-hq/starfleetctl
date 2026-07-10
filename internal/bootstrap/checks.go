@@ -46,13 +46,30 @@ var requiredDirs = []string{
 // this is NOT a general settings.json linter, just the entries this tool
 // itself depends on to run without a confirmation prompt every time.
 var requiredAllowEntries = []string{
-	"Bash(.bin/starfleetctl)",
-	"Bash(.bin/starfleetctl *)",
+	"Bash(.starfleet-ai/bin/starfleetctl)",
+	"Bash(.starfleet-ai/bin/starfleetctl *)",
 }
+
+// requiredPreToolHookMarker is the string we check for to decide whether the
+// agent-permission-hook is already wired into .claude/settings.json.
+const requiredPreToolHookMarker = "agent-permission-hook"
+
+// permissionHookCommand is the JSON command value written into
+// .claude/settings.json's PreToolUse entry. Uses $CLAUDE_PROJECT_DIR so it
+// resolves regardless of which Claude-managed project the agent is running in.
+const permissionHookCommand = `\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/agent-permission-hook`
 
 // opencodePluginsSubdir is the subdirectory in embedded fragments that holds
 // opencode plugin files (not markdown fragments).
 const opencodePluginsSubdir = "opencode-plugins"
+
+// opencodeScriptsSubdir is the subdirectory in embedded fragments that holds
+// opencode launcher scripts (run-opencode.flagship, run-opencode.ship).
+const opencodeScriptsSubdir = "opencode-scripts"
+
+// claudeHooksSubdir is the subdirectory in embedded fragments that holds
+// Claude Code hook scripts (e.g. agent-permission-hook).
+const claudeHooksSubdir = "claude-hooks"
 
 // Checks returns the full, ordered set of bootstrap checks.
 func Checks() []Check {
@@ -63,7 +80,7 @@ func Checks() []Check {
 			Fix:    fixDirs,
 		},
 		{
-			Name:   "scripts/ship-names.txt present",
+			Name:   "ship-names.txt present (.starfleet-ai/etc/)",
 			Verify: verifyShipNamesFile,
 			Fix:    nil, // not auto-fixable: this is source data, not a directory
 		},
@@ -71,6 +88,11 @@ func Checks() []Check {
 			Name:   ".claude/settings.json: starfleetctl allowlist entries",
 			Verify: verifySettingsAllowlist,
 			Fix:    fixSettingsAllowlist,
+		},
+		{
+			Name:   ".claude/settings.json: agent-permission-hook PreToolUse",
+			Verify: verifySettingsPermissionHook,
+			Fix:    fixSettingsPermissionHook,
 		},
 		{
 			Name:   "AGENTS.md + agents.d/index.md",
@@ -101,6 +123,26 @@ func Checks() []Check {
 			Name:   "opencode plugins (.opencode/plugins/)",
 			Verify: verifyOpencodePlugins,
 			Fix:    fixOpencodePlugins,
+		},
+		{
+			Name:   "opencode launcher scripts (.starfleet-ai/bin/)",
+			Verify: verifyOpencodeScripts,
+			Fix:    fixOpencodeScripts,
+		},
+		{
+			Name:   "claude hooks directory (.claude/hooks/)",
+			Verify: verifyClaudeHooksDir,
+			Fix:    fixClaudeHooksDir,
+		},
+		{
+			Name:   "claude hooks (.claude/hooks/)",
+			Verify: verifyClaudeHooks,
+			Fix:    fixClaudeHooks,
+		},
+		{
+			Name:   ".gitignore: claude hooks entry",
+			Verify: verifyGitignoreClaudeHooks,
+			Fix:    fixGitignoreClaudeHooks,
 		},
 	}
 }
@@ -211,11 +253,11 @@ func fixDirs(b *Bootstrap) error {
 }
 
 func verifyShipNamesFile(b *Bootstrap) (bool, string) {
-	path := filepath.Join(b.Root, "scripts", "ship-names.txt")
+	path := filepath.Join(b.Root, ".starfleet-ai", "etc", "ship-names.txt")
 	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
 		return true, "present"
 	}
-	return false, fmt.Sprintf("missing %s (not auto-fixable — this is source data, not something bootstrap can invent; check you're on mtx/agent-config)", path)
+	return false, fmt.Sprintf("missing %s (not auto-fixable — this is source data, not something bootstrap can invent; run genesis-init or copy from the symlink at scripts/ship-names.txt)", path)
 }
 
 func verifySettingsAllowlist(b *Bootstrap) (bool, string) {
@@ -258,6 +300,73 @@ const minimalSettingsSkeleton = `{
   }
 }
 `
+
+// verifySettingsPermissionHook checks that the agent-permission-hook is
+// wired into .claude/settings.json's PreToolUse hooks.
+func verifySettingsPermissionHook(b *Bootstrap) (bool, string) {
+	if _, err := os.Stat(b.SettingsFile); err != nil {
+		return false, fmt.Sprintf("missing (no %s at all)", b.SettingsFile)
+	}
+	data, err := os.ReadFile(b.SettingsFile)
+	if err != nil {
+		return false, fmt.Sprintf("could not read %s: %v", b.SettingsFile, err)
+	}
+	content := string(data)
+	if strings.Contains(content, requiredPreToolHookMarker) {
+		return true, "present"
+	}
+	return false, "missing agent-permission-hook in PreToolUse hooks"
+}
+
+// fixSettingsPermissionHook inserts the agent-permission-hook entry into
+// .claude/settings.json's PreToolUse hooks, right after the existing
+// confirm-log-hook entry.
+func fixSettingsPermissionHook(b *Bootstrap) error {
+	if _, err := os.Stat(b.SettingsFile); err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(b.SettingsFile)
+	if err != nil {
+		return err
+	}
+	content := string(data)
+	if strings.Contains(content, requiredPreToolHookMarker) {
+		return nil
+	}
+
+	marker := `"statusMessage": "confirm-log: telemetry"`
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		return fmt.Errorf("could not find %q in %s — cannot auto-wire permission hook", marker, b.SettingsFile)
+	}
+	closingBrace := strings.Index(content[idx:], "\n")
+	if closingBrace < 0 {
+		return fmt.Errorf("malformed settings.json near confirm-log-hook marker")
+	}
+	insertAt := idx + closingBrace
+	rest := content[insertAt:]
+	objEnd := strings.Index(rest, "          }")
+	if objEnd < 0 {
+		return fmt.Errorf("could not find hook object boundary near confirm-log-hook")
+	}
+	insertAt += objEnd + len("          }")
+
+	hookEntry := `,
+          {
+            "type": "command",
+            "timeout": 120,
+            "command": "` + permissionHookCommand + `",
+            "statusMessage": "agent-permission: 1st officer"
+          }`
+
+	newContent := content[:insertAt] + hookEntry + content[insertAt:]
+
+	var probe any
+	if err := json.Unmarshal([]byte(newContent), &probe); err != nil {
+		return fmt.Errorf("edit would produce invalid JSON, aborting: %w", err)
+	}
+	return os.WriteFile(b.SettingsFile, []byte(newContent), 0o644)
+}
 
 func fixSettingsAllowlist(b *Bootstrap) error {
 	if _, err := os.Stat(b.SettingsFile); err != nil {
@@ -475,4 +584,173 @@ func fixOpencodePlugins(b *Bootstrap) error {
 		}
 	}
 	return nil
+}
+
+// verifyOpencodeScripts checks that every embedded opencode launcher script is
+// installed to .starfleet-ai/bin/ and byte-identical.
+func verifyOpencodeScripts(b *Bootstrap) (bool, string) {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodeScriptsSubdir))
+	if err != nil {
+		return true, "no embedded opencode scripts"
+	}
+	var missing, stale []string
+	destDir := filepath.Join(b.Root, ".starfleet-ai", "bin")
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodeScriptsSubdir, e.Name()))
+		if err != nil {
+			return false, err.Error()
+		}
+		installedPath := filepath.Join(destDir, e.Name())
+		data, err := os.ReadFile(installedPath)
+		if err != nil {
+			missing = append(missing, e.Name())
+			continue
+		}
+		if string(data) != string(current) {
+			stale = append(stale, e.Name())
+		}
+	}
+	if len(missing) == 0 && len(stale) == 0 {
+		return true, fmt.Sprintf("%d/%d present, up to date", len(entries), len(entries))
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(stale) > 0 {
+		parts = append(parts, fmt.Sprintf("stale: %s", strings.Join(stale, ", ")))
+	}
+	return false, strings.Join(parts, "; ")
+}
+
+func fixOpencodeScripts(b *Bootstrap) error {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodeScriptsSubdir))
+	if err != nil {
+		return nil
+	}
+	destDir := filepath.Join(b.Root, ".starfleet-ai", "bin")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodeScriptsSubdir, e.Name()))
+		if err != nil {
+			return err
+		}
+		destPath := filepath.Join(destDir, e.Name())
+		if err := os.WriteFile(destPath, data, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyClaudeHooksDir(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, ".claude", "hooks")
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return true, "present"
+	}
+	return false, "missing .claude/hooks/"
+}
+
+func fixClaudeHooksDir(b *Bootstrap) error {
+	path := filepath.Join(b.Root, ".claude", "hooks")
+	return os.MkdirAll(path, 0o755)
+}
+
+func verifyClaudeHooks(b *Bootstrap) (bool, string) {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeHooksSubdir))
+	if err != nil {
+		return true, "no embedded claude hooks"
+	}
+	var missing, stale []string
+	destDir := filepath.Join(b.Root, ".claude", "hooks")
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeHooksSubdir, e.Name()))
+		if err != nil {
+			return false, err.Error()
+		}
+		installedPath := filepath.Join(destDir, e.Name())
+		data, err := os.ReadFile(installedPath)
+		if err != nil {
+			missing = append(missing, e.Name())
+			continue
+		}
+		if string(data) != string(current) {
+			stale = append(stale, e.Name())
+		}
+	}
+	if len(missing) == 0 && len(stale) == 0 {
+		return true, fmt.Sprintf("%d/%d present, up to date", len(entries), len(entries))
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(stale) > 0 {
+		parts = append(parts, fmt.Sprintf("stale: %s", strings.Join(stale, ", ")))
+	}
+	return false, strings.Join(parts, "; ")
+}
+
+func fixClaudeHooks(b *Bootstrap) error {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeHooksSubdir))
+	if err != nil {
+		return nil
+	}
+	destDir := filepath.Join(b.Root, ".claude", "hooks")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeHooksSubdir, e.Name()))
+		if err != nil {
+			return err
+		}
+		destPath := filepath.Join(destDir, e.Name())
+		if err := os.WriteFile(destPath, data, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+const gitignoreClaudeHooksEntry = "/.claude/hooks/"
+
+func verifyGitignoreClaudeHooks(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Sprintf("missing .gitignore: %v", err)
+	}
+	if strings.Contains(string(data), gitignoreClaudeHooksEntry) {
+		return true, "present"
+	}
+	return false, "missing /.claude/hooks/ entry in .gitignore"
+}
+
+func fixGitignoreClaudeHooks(b *Bootstrap) error {
+	path := filepath.Join(b.Root, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading .gitignore: %w", err)
+	}
+	content := string(data)
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += gitignoreClaudeHooksEntry + "\n"
+	return os.WriteFile(path, []byte(content), 0o644)
 }
