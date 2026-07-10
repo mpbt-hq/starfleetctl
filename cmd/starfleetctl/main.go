@@ -29,6 +29,7 @@ import (
 	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/withclonelock"
+	"github.com/metux/starfleetctl/internal/worktree"
 	"github.com/metux/starfleetctl/internal/wscommit"
 )
 
@@ -45,6 +46,7 @@ Fleet management:
   session           manage agent sessions (list/ship)
   ship-names        assign/release/list ship names
   with-clone-lock   serialize git operations via flock
+  worktree          create/list/remove throwaway git worktrees
   ws-commit         commit workspace changes with locking
 
 Bootstrap & setup:
@@ -204,6 +206,8 @@ func main() {
 		os.Exit(hook.Run(root, os.Args[2:]))
 	case "session":
 		os.Exit(session.Run(root, os.Args[2:]))
+	case "worktree":
+		os.Exit(worktree.Run(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)
