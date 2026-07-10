@@ -25,6 +25,25 @@ Commands:
                           (tells the assistant to arm Monitor tools)
   claude permission       PreToolUse permission hook — ask the control
                           agent to allow/deny a tool via agent-bus ask/reply
+
+` + "`hook claude permission`" + ` is used by the agent-permission-hook Claude
+hook (auto-installed by bootstrap to .claude/hooks/). Reads the PreToolUse
+JSON from stdin, asks $AGENT_CONTROLLER (default "control") via agent-bus
+ask/reply, blocks for the reply, and emits permissionDecision: allow|deny.
+
+Env vars (for wiring via settings.local.json, NOT shared settings.json):
+  $AGENT_PERM_TIMEOUT             seconds to wait (default 60)
+  $AGENT_PERM_TIMEOUT_DECISION    deny (default) | ask — decision on timeout
+  $AGENT_CONTROLLER               controller agent id (default "control")
+
+Fail-safe: Claude Code's own hook timeout fails open (tool proceeds), so
+this hook enforces its own shorter timeout and returns first (fail-closed).
+The hook cannot override a deny/ask permission rule (most-restrictive wins).
+
+settings.local.json wiring:
+  "hooks": { "PreToolUse": [ { "matcher": "Bash",
+    "hooks": [ { "type": "command", "timeout": 120,
+      "command": "\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/agent-permission-hook" } ] } ] }
 `
 
 func Run(root string, args []string) int {

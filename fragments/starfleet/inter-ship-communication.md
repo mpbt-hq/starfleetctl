@@ -49,3 +49,58 @@ tar -tzf artifacts.tar | starfleetctl agent-bus broadcast --stdin
 The storage layer itself has **no** size limit (verified at 20 MB+); only the
 argv path is bounded by the kernel. Prefer `--stdin` for anything bigger than
 ~100 KB so the send can't fail with `E2BIG`.
+
+### Control agent ("1st officer") model
+
+The default peer-to-peer model works for autonomous ship-to-ship communication.
+When a **human** needs to centrally steer workers and approve their tool calls,
+use the **control agent** model:
+
+- **Control agent** — a human-attended session, conventionally
+  `STARFLEET_SHIP_ID=control` (overridable via `$AGENT_CONTROLLER`).
+  Runs `.starfleet-ai/bin/starfleetctl agent-bus board` to watch the fleet and
+  `.starfleet-ai/bin/starfleetctl agent-bus asks` to see pending questions.
+- **Workers** — every other session. They route questions and tool-permission
+  prompts to the control agent and block locally for the answer.
+
+**Quickstart** — in the session you want to man as controller:
+
+```sh
+export STARFLEET_SHIP_ID=control
+.starfleet-ai/bin/starfleetctl agent-bus board   # who's online
+.starfleet-ai/bin/starfleetctl agent-bus asks    # pending questions
+```
+
+When a worker asks something, answer it:
+
+```sh
+.starfleet-ai/bin/starfleetctl agent-bus reply <qid> "your answer"
+.starfleet-ai/bin/starfleetctl agent-bus reply <qid> allow   # [perm] request
+.starfleet-ai/bin/starfleetctl agent-bus reply <qid> deny    # [perm] request
+```
+
+Any session can ask the controller:
+
+```sh
+.starfleet-ai/bin/starfleetctl agent-bus ask "should I force-push?"
+```
+
+**Tool-permission forwarding** — wire a worker's `PreToolUse` hook so every
+`Bash` permission prompt routes to the controller instead of blocking the
+worker. Add to that worker's `.claude/settings.local.json` (never to the
+shared `settings.json` — an absent controller would gate every session):
+
+```json
+"hooks": { "PreToolUse": [ { "matcher": "Bash",
+  "hooks": [ { "type": "command", "timeout": 120,
+    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/agent-permission-hook" } ] } ] }
+```
+
+Fail-safe: Claude Code's own hook timeout **fails open** (tool proceeds), so
+the hook enforces its **own shorter** timeout and returns first:
+- `$AGENT_PERM_TIMEOUT` (default 60s; keep below the hook's `timeout`),
+- `$AGENT_PERM_TIMEOUT_DECISION` = `deny` (default, fail-closed) | `ask`,
+- `$AGENT_CONTROLLER` (default `control`).
+
+The hook cannot override a `deny`/`ask` permission *rule* (most-restrictive
+wins), so it widens nothing — it only answers what would otherwise be a prompt.
