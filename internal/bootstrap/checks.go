@@ -214,11 +214,13 @@ func fixAgentsMD(b *Bootstrap) error {
 
 // verifyDashboardMD/fixDashboardMD: same idea as AGENTS.md above, but for
 // DASHBOARD.md's dashboard/themes/ + reindex system (internal/dashboard).
+// DASHBOARD.md is now a generated artifact under .starfleet-ai/ (not committed).
 func verifyDashboardMD(b *Bootstrap) (bool, string) {
-	if _, err := os.Stat(filepath.Join(b.Root, "DASHBOARD.md")); err == nil {
+	path := filepath.Join(b.Root, ".starfleet-ai", "DASHBOARD.md")
+	if _, err := os.Stat(path); err == nil {
 		return true, "present"
 	}
-	return false, "missing (no DASHBOARD.md at all)"
+	return false, "missing (no .starfleet-ai/DASHBOARD.md at all)"
 }
 
 func fixDashboardMD(b *Bootstrap) error {

@@ -43,10 +43,17 @@ func newScratchRoot(t *testing.T) string {
 	run(root, "config", "user.email", "test@test.com")
 	run(root, "config", "user.name", "Test")
 	run(root, "remote", "add", "origin", origin)
-	if err := os.WriteFile(filepath.Join(root, "DASHBOARD.md"), []byte("# DASHBOARD\n\ninitial\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".starfleet-ai"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	run(root, "add", "DASHBOARD.md")
+	if err := os.WriteFile(filepath.Join(root, ".starfleet-ai", "DASHBOARD.md"), []byte("# DASHBOARD\n\ninitial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// .starfleet-ai/ is a generated dir (like .bin/, .claude/hooks/) — ignore it
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("/.starfleet-ai/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(root, "add", ".gitignore")
 	run(root, "commit", "-q", "-m", "initial")
 	run(root, "push", "-q", "-u", "origin", "HEAD:master")
 
@@ -261,20 +268,12 @@ func TestDashboardRoundTrip(t *testing.T) {
 		t.Fatalf("write: exit %d, stderr=%q", resp.ExitCode, resp.Stderr)
 	}
 
-	got, err := os.ReadFile(filepath.Join(root, "DASHBOARD.md"))
+	got, err := os.ReadFile(filepath.Join(root, ".starfleet-ai", "DASHBOARD.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(got), "updated via bridged") {
 		t.Errorf("DASHBOARD.md not updated: %q", got)
-	}
-
-	resp, err = Call(sockPath, Request{Cmd: "dashboard", Args: []string{"commit", "-m", "test commit", "--no-push"}}, 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.ExitCode != 0 {
-		t.Fatalf("commit: exit %d, stderr=%q", resp.ExitCode, resp.Stderr)
 	}
 }
 
