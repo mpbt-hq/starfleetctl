@@ -175,7 +175,7 @@ export const plugin = async ({ client, $ }: any) => {
   setTimeout(() => {
     if (!tuiReady) {
       tuiReady = true
-      client.app.log({ body: { service: 'bus-poller', level: 'info', message: 'active (fallback)' } }).catch(() => {})
+      client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: 'active (fallback)' } }).catch(() => {})
     }
   }, 3000)
 
@@ -195,7 +195,7 @@ export const plugin = async ({ client, $ }: any) => {
       for (const msg of msgs) {
         if (submitted.has(msg.id)) continue
         submitted.add(msg.id)
-        client.app.log({ body: { service: 'bus-poller', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
+        client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
         await autoPong($, msg.id, msg.from, msg.text)
 
         const ok = await submit(`[${msg.id}] from ${msg.from}: ${msg.text}`)

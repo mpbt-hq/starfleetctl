@@ -5,6 +5,7 @@ package bootstrap
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -610,6 +611,45 @@ func fixOpencodePlugins(b *Bootstrap) error {
 			return err
 		}
 	}
+
+	// Remove a previously-installed plugin under its OLD name, so a rename
+	// doesn't leave two copies loaded at once (duplicate inbox injection).
+	// Keep this list in sync with any fragment renames in
+	// fragments/opencode-plugins/.
+	for _, stale := range []string{"agent-bus-poller.ts"} {
+		if err := os.Remove(filepath.Join(destDir, stale)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	// Register the embedded plugin(s) in .opencode/package.json, but only if
+	// the manifest is absent — don't clobber a workspace-local manifest.
+	pkgPath := filepath.Join(b.Root, ".opencode", "package.json")
+	if _, err := os.Stat(pkgPath); errors.Is(err, os.ErrNotExist) {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+				continue
+			}
+			name := strings.TrimSuffix(e.Name(), ".ts")
+			manifest := map[string]any{
+				"name":        name,
+				"version":     "1.0.0",
+				"type":        "module",
+				"main":        e.Name(),
+				"dependencies": map[string]string{"@opencode-ai/plugin": "*"},
+			}
+			data, err := json.MarshalIndent(manifest, "", "  ")
+			if err != nil {
+				return err
+			}
+			data = append(data, '\n')
+			if err := os.WriteFile(pkgPath, data, 0o644); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
 	return nil
 }
 

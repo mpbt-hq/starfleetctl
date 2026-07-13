@@ -11,7 +11,7 @@ owner: "starfleetctl"
 
 opencode has no `Monitor` tool (Claude Code only), so the background
 `agent-bus-monitor-loop` cannot surface directives as in-context events.
-Instead, the `.opencode/plugins/agent-bus-poller.ts` plugin injects new
+Instead, the `.opencode/plugins/starfleet-dispatch.ts` plugin injects new
 tell/broadcast directives into the system prompt at the start of each
 turn via the `experimental.chat.system.transform` hook. No manual check
 command is needed — new messages appear automatically in context.
