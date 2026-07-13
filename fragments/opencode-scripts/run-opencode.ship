@@ -45,13 +45,15 @@ fi
 
 if [ -z "$NAME" ]; then
     # Obtain next free ship name; fallback to random pid‑based name
-    NAME="$(scripts/ship-names assign 2>/dev/null)" || true
+    NAME="$("$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/starfleetctl" ship-names assign 2>/dev/null)" || true
     if [ -z "$NAME" ]; then
-        NAME="ws-$${$}"
+        NAME="ws-$$"
     fi
 fi
 
 export STARFLEET_SHIP_ID="$NAME"
+export STARFLEET_ROLE="ship"
+export STARFLEET_TARGET="${FLAGSHIP}"
 
 # Register initial heartbeat (no cleanup possible; agent‑bus TTL / prune will reap it)
 .starfleet-ai/bin/starfleetctl agent-bus status idle "opencode ship" >/dev/null 2>&1 || true

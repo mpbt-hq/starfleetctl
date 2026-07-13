@@ -13,6 +13,10 @@
 #
 
 export STARFLEET_SHIP_ID="Enterprise"
+export STARFLEET_ROLE="flagship"
+# No target — flagship is top of hierarchy within this workspace.
+# Downstream ships set STARFLEET_TARGET="Enterprise" to report here.
+unset STARFLEET_TARGET
 
 # Register initial heartbeat (agent‑bus TTL / prune reaps on exit)
 .starfleet-ai/bin/starfleetctl agent-bus status idle "flagship opencode session" >/dev/null 2>&1 || true
