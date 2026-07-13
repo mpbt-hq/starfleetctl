@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
@@ -25,12 +25,16 @@ function seenFile(): string {
 function loadSeen(): Set<string> {
   const s = new Set<string>()
   try {
-    const content = readFileSync(seenFile(), 'utf-8')
-    for (const line of content.split('\n')) {
-      const id = line.trim()
-      if (id) s.add(id)
+    for (const entry of readdirSync(SEEN_DIR)) {
+      try {
+        const content = readFileSync(join(SEEN_DIR, entry), 'utf-8')
+        for (const line of content.split('\n')) {
+          const id = line.trim()
+          if (id) s.add(id)
+        }
+      } catch { /* ignore individual file errors */ }
     }
-  } catch { /* ignore */ }
+  } catch { /* ignore missing dir */ }
   return s
 }
 
