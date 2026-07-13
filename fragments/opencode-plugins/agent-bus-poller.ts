@@ -281,6 +281,17 @@ export const plugin = async ({ client, $ }: any) => {
         sessionNeedsIdentity = true
         turnCount = 0
         writeHealth({ model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
+        // Label the TUI session/tab title with the ship name (formerly
+        // the standalone session-title.ts plugin).
+        const shipName = process.env.STARFLEET_SHIP_ID
+        if (shipName) {
+          try {
+            const sessionId = (event.properties?.info as { id?: string })?.id
+            if (sessionId) {
+              await client.session.update({ path: { id: sessionId }, body: { title: shipName } })
+            }
+          } catch { /* ignore */ }
+        }
       }
       // /clear, /new, /compact may emit session.cleared or session.reset
       // instead of session.created — re-inject fleet identity in all cases.
