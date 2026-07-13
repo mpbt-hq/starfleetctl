@@ -104,5 +104,10 @@ func Init(root string) (created []string, err error) {
 	if err := a.DoInstallStarfleet(agents.StarfleetSubdir); err != nil {
 		return created, fmt.Errorf("install starfleet fragments: %w", err)
 	}
+	// Install starfleet skills (concurrency, starfleetctl reference) into
+	// .claude/skills/ so they are available on-demand, not always-loaded.
+	if err := a.DoInstallStarfleetSkills(); err != nil {
+		return created, fmt.Errorf("install starfleet skills: %w", err)
+	}
 	return created, nil
 }

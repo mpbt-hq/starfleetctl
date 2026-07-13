@@ -25,6 +25,9 @@ const usage = `agents <command> [args…]
                                               (default subdir: "starfleet") — writes to
                                               agents.d/<slug>.md for each, always overwrites, then
                                               reindexes
+  install-starfleet-skills                   install embedded starfleet skills from the binary
+                                              (fragments/starfleet-skills/) — writes to
+                                              .claude/skills/<name>/ for each, always overwrites
 `
 
 // Run dispatches an `agents` invocation, given the resolved workspace root.
@@ -97,6 +100,8 @@ func Run(root string, args []string) int {
 			subdir = args[1]
 		}
 		cmdErr = a.DoInstallStarfleet(subdir)
+	case "install-starfleet-skills":
+		cmdErr = a.DoInstallStarfleetSkills()
 	case "commit":
 		slug, msg, push, perr := parseCommitArgs(args[1:])
 		if perr != nil {

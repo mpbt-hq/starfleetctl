@@ -104,15 +104,16 @@ func Checks() []Check {
 			Verify: verifyDashboardMD,
 			Fix:    fixDashboardMD,
 		},
-		{
-			Name:   "starfleetctl self-fragment (agents.d/starfleet/starfleetctl.md)",
-			Verify: verifySelfFragment,
-			Fix:    fixSelfFragment,
-		},
+
 		{
 			Name:   "starfleet fragments (agents.d/starfleet/)",
 			Verify: verifyStarfleetFragments,
 			Fix:    fixStarfleetFragments,
+		},
+		{
+			Name:   "starfleet skills (.claude/skills/)",
+			Verify: verifyStarfleetSkills,
+			Fix:    fixStarfleetSkills,
 		},
 		{
 			Name:   ".opencode/plugins/ directory",
@@ -145,49 +146,6 @@ func Checks() []Check {
 			Fix:    fixGitignoreClaudeHooks,
 		},
 	}
-}
-
-// selfFragmentOrder must match install-self's own CLI default (900) — kept
-// as a literal here rather than a shared constant across packages, same as
-// every other bootstrap check's specifics are self-contained.
-const selfFragmentOrder = 900
-
-// verifySelfFragment/fixSelfFragment: the "starfleetctl carries its own
-// instructions" mechanism (praetor directive m0089, 2026-07-06) — this
-// fragment is tool-owned and always overwritten on --fix (not just
-// created-if-missing like the other checks), so a starfleetctl update run
-// through `bootstrap --fix` also refreshes the instructions that came with
-// it. Verify distinguishes "missing" from "stale" (present but from an
-// older starfleetctl commit) by comparing against what install-self would
-// write right now — a byte-different existing file is still reported as
-// not-ok, unlike every other check here, precisely because this one is
-// meant to always track the current binary.
-func verifySelfFragment(b *Bootstrap) (bool, string) {
-	a, err := agents.New(b.Root)
-	if err != nil {
-		return false, err.Error()
-	}
-	path := filepath.Join(a.FragmentsDir(), agents.SelfSlug+".md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, "missing"
-	}
-	current, err := agents.RenderSelfFragment(selfFragmentOrder)
-	if err != nil {
-		return false, err.Error()
-	}
-	if string(data) == string(current) {
-		return true, "present, up to date"
-	}
-	return false, "present but stale (starfleetctl was updated since the last install-self)"
-}
-
-func fixSelfFragment(b *Bootstrap) error {
-	a, err := agents.New(b.Root)
-	if err != nil {
-		return err
-	}
-	return a.DoInstallSelf(selfFragmentOrder)
 }
 
 // verifyAgentsMD/fixAgentsMD delegate to internal/agents' own
@@ -493,6 +451,70 @@ func fixStarfleetFragments(b *Bootstrap) error {
 		return err
 	}
 	return a.DoInstallStarfleet(agents.StarfleetSubdir)
+}
+
+// verifyStarfleetSkills checks that every skill directory embedded under
+// fragments/starfleet-skills/ is installed to .claude/skills/<name>/ and
+// byte-identical to what the current binary would write.
+func verifyStarfleetSkills(b *Bootstrap) (bool, string) {
+	a, err := agents.New(b.Root)
+	if err != nil {
+		return false, err.Error()
+	}
+	skillsDir := filepath.Join(starfleetctl.FragmentsRoot, agents.StarfleetSkillsSubdir)
+	entries, err := fs.ReadDir(starfleetctl.Fragments, skillsDir)
+	if err != nil {
+		return true, "no embedded starfleet skills"
+	}
+	var missing, stale []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		skillName := e.Name()
+		skillDir := filepath.Join(skillsDir, skillName)
+		skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
+		if err != nil {
+			return false, err.Error()
+		}
+		for _, f := range skillEntries {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+				continue
+			}
+			current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
+			if err != nil {
+				return false, err.Error()
+			}
+			installedPath := filepath.Join(a.SkillsDir(), skillName, f.Name())
+			data, err := os.ReadFile(installedPath)
+			if err != nil {
+				missing = append(missing, skillName+"/"+f.Name())
+				continue
+			}
+			if string(data) != string(current) {
+				stale = append(stale, skillName+"/"+f.Name())
+			}
+		}
+	}
+	if len(missing) == 0 && len(stale) == 0 {
+		return true, fmt.Sprintf("%d skill dirs present, up to date", len(entries))
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(stale) > 0 {
+		parts = append(parts, fmt.Sprintf("stale: %s", strings.Join(stale, ", ")))
+	}
+	return false, strings.Join(parts, "; ")
+}
+
+func fixStarfleetSkills(b *Bootstrap) error {
+	a, err := agents.New(b.Root)
+	if err != nil {
+		return err
+	}
+	return a.DoInstallStarfleetSkills()
 }
 
 func readAllowList(path string) ([]string, error) {
