@@ -99,7 +99,16 @@ function isUserAbort(detail: string): boolean {
 export const plugin = async ({ client, $ }: any) => {
   mkdirSync(SEEN_DIR, { recursive: true })
 
-  // seed: alte Messages als gesehen markieren = kein Flood beim Startup
+  const heartbeatTimer = setInterval(() => {
+    try { $`.starfleet-ai/bin/starfleetctl agent-bus touch`.quiet() } catch { /* ignore */ }
+  }, HEARTBEAT_MS)
+
+  let tuiReady = false
+  let sessionNeedsIdentity = true // first turn after session creation
+  let submitted = new Set<string>() // in-memory dedup für Polling
+
+  // seed: mark all currently known/seen messages so poll() doesn't
+  // re-submit them on a fresh process start.
   const known = loadSeen()
   const inbox = await getInbox($)
   for (const msg of inbox) {
@@ -108,17 +117,13 @@ export const plugin = async ({ client, $ }: any) => {
       known.add(msg.id)
     }
   }
+  // sync submitted set with everything already seen across all ships
+  for (const id of known) {
+    submitted.add(id)
+  }
 
   try { await $`.starfleet-ai/bin/starfleetctl agent-bus prune`.quiet() } catch { /* ignore */ }
   try { await $`.starfleet-ai/bin/starfleetctl agent-bus status idle opencode ship`.quiet() } catch { /* ignore */ }
-
-  const heartbeatTimer = setInterval(() => {
-    try { $`.starfleet-ai/bin/starfleetctl agent-bus touch`.quiet() } catch { /* ignore */ }
-  }, HEARTBEAT_MS)
-
-  let tuiReady = false
-  let sessionNeedsIdentity = true // first turn after session creation
-  let submitted = new Set<string>() // in-memory dedup für Polling
 
   setTimeout(() => {
     if (!tuiReady) {
