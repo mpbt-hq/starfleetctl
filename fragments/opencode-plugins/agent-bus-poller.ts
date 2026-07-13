@@ -11,8 +11,11 @@ import { join } from 'node:path'
 
 const ROOT = process.cwd()
 const SEEN_DIR = join(ROOT, '_WORK_', 'agent-bus', 'monitor-seen')
+const SHIPS_DIR = join(ROOT, '_WORK_', 'agent-bus', 'ships')
+const HEALTH_DIR = join(ROOT, '_WORK_', 'agent-bus', 'health')
 const HEARTBEAT_MS = 300_000
 const POLL_MS = 3_000
+const BLOCKED_THRESHOLD_MS = 120_000 // 2 min without plugin run → blocked
 
 function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
@@ -47,6 +50,46 @@ function logEvent(msg: string): void {
     appendFileSync(join(ROOT, '_WORK_', 'agent-bus', 'events.log'),
       `${new Date().toISOString()}\tplugin\t${aid()}\t${msg}\n`)
   } catch { /* ignore */ }
+}
+
+// --- Health tracking ---
+// Three timestamps written to _WORK_/agent-bus/health/<SHIP_ID>.json:
+//   plugin_last_run  — when system.transform last fired (every turn)
+//   model_last_action — when the model last produced output (turn end / event)
+//   state            — derived: idle | working | blocked
+//
+// External watchdogs read this file to detect unresponsive ships.
+
+interface HealthData {
+  plugin_last_run: string   // ISO timestamp
+  model_last_action: string // ISO timestamp
+  state: 'idle' | 'working' | 'blocked'
+  pid: number
+}
+
+function healthFile(): string {
+  return join(HEALTH_DIR, `${aid()}.json`)
+}
+
+function writeHealth(patch: Partial<HealthData>): void {
+  try {
+    mkdirSync(HEALTH_DIR, { recursive: true })
+    let prev: Partial<HealthData> = {}
+    try { prev = JSON.parse(readFileSync(healthFile(), 'utf-8')) } catch { /* first write */ }
+    const now = new Date().toISOString()
+    const merged: HealthData = {
+      plugin_last_run: patch.plugin_last_run ?? prev.plugin_last_run ?? now,
+      model_last_action: patch.model_last_action ?? prev.model_last_action ?? now,
+      state: patch.state ?? prev.state ?? 'idle',
+      pid: patch.pid ?? prev.pid ?? process.pid,
+    }
+    writeFileSync(healthFile(), JSON.stringify(merged, null, 2) + '\n')
+  } catch { /* ignore */ }
+}
+
+function detectState(pluginLastRun: string): 'idle' | 'working' | 'blocked' {
+  const age = Date.now() - new Date(pluginLastRun).getTime()
+  return age > BLOCKED_THRESHOLD_MS ? 'blocked' : 'working'
 }
 
 // agent-bus inbox uses fixed-width columns:
@@ -106,6 +149,10 @@ export const plugin = async ({ client, $ }: any) => {
   let tuiReady = false
   let sessionNeedsIdentity = true // first turn after session creation
   let submitted = new Set<string>() // in-memory dedup für Polling
+  let turnCount = 0 // track turns for model_last_action
+
+  // Write initial health marker
+  writeHealth({ state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
 
   // seed: mark all currently known/seen messages so poll() doesn't
   // re-submit them on a fresh process start.
@@ -165,6 +212,7 @@ export const plugin = async ({ client, $ }: any) => {
   const cleanup = () => {
     clearInterval(heartbeatTimer)
     clearInterval(pollTimer)
+    writeHealth({ state: 'idle', pid: process.pid })
     try { $`.starfleet-ai/bin/starfleetctl agent-bus clear`.quiet() } catch { /* ignore */ }
   }
 
@@ -175,6 +223,17 @@ export const plugin = async ({ client, $ }: any) => {
       _input: any,
       output: { system: string[] },
     ) => {
+      turnCount++
+      // Health: every system.transform = plugin ran. If turnCount > 1,
+      // the model just finished an action (tool call / response) since
+      // the last transform → update model_last_action.
+      writeHealth({
+        plugin_last_run: new Date().toISOString(),
+        model_last_action: turnCount > 1 ? new Date().toISOString() : undefined,
+        state: 'working',
+        pid: process.pid,
+      })
+
       try { await $`.starfleet-ai/bin/starfleetctl agent-bus status working opencode ship`.quiet() } catch { /* ignore */ }
 
       // Fleet identity: injected on session.created / session.cleared /
@@ -220,13 +279,18 @@ export const plugin = async ({ client, $ }: any) => {
       if (event.type === 'session.created') {
         tuiReady = true
         sessionNeedsIdentity = true
+        turnCount = 0
+        writeHealth({ model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
       }
       // /clear, /new, /compact may emit session.cleared or session.reset
       // instead of session.created — re-inject fleet identity in all cases.
       if (event.type === 'session.cleared' || event.type === 'session.reset') {
         sessionNeedsIdentity = true
+        turnCount = 0
+        writeHealth({ model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
       }
       if (event.type === 'session.error') {
+        writeHealth({ state: 'blocked', pid: process.pid })
         const detail =
           (event.properties?.error as { message?: string; code?: string })?.message ||
           (event.properties?.error as { code?: string })?.code ||
