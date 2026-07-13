@@ -12,12 +12,46 @@ import (
 	"strings"
 )
 
-// EnsureBootstrapped creates the root AGENTS.md (fixed notice) and an empty
-// agents.d/index.md if either is entirely missing — the "should be created
-// fully automatically when needed" case (a truly from-scratch checkout).
-// Idempotent: does nothing if AGENTS.md already exists, regardless of its
-// content (never overwrites — if a human hand-wrote something else there,
-// that's their call to migrate, not this package's to clobber).
+// inlineMarker is the path of a marker file that, when present, selects
+// inline mode for the generated AGENTS.md (see DoReindex). Inline mode drops
+// the `@agents.d/index.md` import entirely and writes the full fragment set
+// straight into AGENTS.md — some agents (opencode) do not resolve `@`-imports,
+// so a self-contained file is the only way they receive the instructions.
+func (a *Agents) inlineMarker() string {
+	return filepath.Join(a.Root, ".starfleet-ai", "agents-inline")
+}
+
+// Inline reports whether reindex should produce a self-contained (inline)
+// AGENTS.md. Driven by the persistent .starfleet-ai/agents-inline marker, so
+// `new`/`write` (which call DoReindex) keep the workspace's chosen mode.
+func (a *Agents) Inline() bool {
+	_, err := os.Stat(a.inlineMarker())
+	return err == nil
+}
+
+// SetInline turns inline mode on (token != "") or off (token == ""), by
+// creating or removing the marker file. Reindex must be run afterwards to
+// rewrite AGENTS.md in the new mode.
+func (a *Agents) SetInline(on bool) error {
+	mk := a.inlineMarker()
+	if on {
+		if err := os.MkdirAll(filepath.Dir(mk), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(mk, []byte("1\n"), 0o644)
+	}
+	if err := os.Remove(mk); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// EnsureBootstrapped creates the root AGENTS.md and an agents.d/index.md if
+// either is entirely missing — the "should be created fully automatically
+// when needed" case (a truly from-scratch checkout). Idempotent: does
+// nothing if AGENTS.md already exists, regardless of its content (never
+// overwrites — if a human hand-wrote something else there, that's their
+// call to migrate, not this package's to clobber).
 func (a *Agents) EnsureBootstrapped() (created bool, err error) {
 	if _, err := os.Stat(a.File); err == nil {
 		return false, nil
@@ -105,7 +139,7 @@ func (a *Agents) DoWrite(slug, src string) error {
 	if err := os.WriteFile(a.fragmentPath(slug), data, 0o644); err != nil {
 		return err
 	}
-	return a.DoReindex()
+	return a.DoReindex(a.Inline())
 }
 
 // DoNew scaffolds a new fragment file with frontmatter, refusing to clobber
@@ -127,19 +161,23 @@ func (a *Agents) DoNew(slug, title string, order int, owner string) error {
 	if err := writeFragmentFile(path, m, "(fill in)\n"); err != nil {
 		return err
 	}
-	if err := a.DoReindex(); err != nil {
+	if err := a.DoReindex(a.Inline()); err != nil {
 		return err
 	}
 	fmt.Println(path)
 	return nil
 }
 
-// DoReindex regenerates agents.d/index.md's `@agents.d/<slug>.md` import
-// list from every fragment's frontmatter, sorted by (order, slug). Pure
-// function of the current fragment set — two ships racing a reindex
-// converge to the same byte-identical output. Bootstraps the root
+// DoReindex regenerates the fragment index. In the default mode it writes
+// agents.d/index.md as a list of `@agents.d/<slug>.md` imports (resolved by
+// Claude Code's @-import chain). In inline mode it additionally writes a
+// self-contained AGENTS.md — the fixed root notice followed by every
+// fragment's body in (order, slug) order — so agents that do not resolve
+// `@`-imports (e.g. opencode) still receive the full instructions. Pure
+// function of the current fragment set — two ships racing a reindex converge
+// to the same byte-identical output for a given mode. Bootstraps the root
 // AGENTS.md/index first if neither exists yet.
-func (a *Agents) DoReindex() error {
+func (a *Agents) DoReindex(inline bool) error {
 	if _, err := a.EnsureBootstrapped(); err != nil {
 		return err
 	}
@@ -147,12 +185,63 @@ func (a *Agents) DoReindex() error {
 	if err != nil {
 		return err
 	}
+
 	var b strings.Builder
 	b.WriteString(indexHeader)
-	for _, m := range metas {
-		fmt.Fprintf(&b, "@agents.d/%s.md\n", m.Slug)
+	if inline {
+		// Inline body carries only the import-list portion of index.md
+		// (informational; the real content lives in AGENTS.md below).
+		for _, m := range metas {
+			fmt.Fprintf(&b, "<!-- inline: agents.d/%s.md -->\n", m.Slug)
+		}
+	} else {
+		for _, m := range metas {
+			fmt.Fprintf(&b, "@agents.d/%s.md\n", m.Slug)
+		}
 	}
-	return os.WriteFile(a.IndexFile(), []byte(b.String()), 0o644)
+	if err := os.WriteFile(a.IndexFile(), []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+
+	if !inline {
+		// Default mode: the root AGENTS.md is the fixed notice whose only
+		// job is the one @agents.d/index.md import. Rewrite it so a switch
+		// back from inline mode restores the canonical file (otherwise the
+		// stale inline content would linger forever).
+		return os.WriteFile(a.File, []byte(rootNotice), 0o644)
+	}
+
+	// Inline mode: emit a single self-contained AGENTS.md (no @-imports).
+	// rootNotice ends with the "@agents.d/index.md" import line; drop that
+	// trailing import so the file is self-contained (the fragment bodies
+	// follow it below).
+	notice := rootNotice
+	if i := strings.LastIndex(notice, "@agents.d/index.md"); i >= 0 {
+		notice = notice[:i]
+	}
+	var ag strings.Builder
+	ag.WriteString(notice)
+	ag.WriteString("\n")
+	for i, m := range metas {
+		data, err := os.ReadFile(a.fragmentPath(m.Slug))
+		if err != nil {
+			return err
+		}
+		_, body, err := parseFragmentFile(data)
+		if err != nil {
+			return err
+		}
+		body = strings.TrimSpace(body)
+		if i > 0 {
+			ag.WriteString("\n---\n\n")
+		}
+		if m.Title != "" {
+			fmt.Fprintf(&ag, "## %s\n\n", m.Title)
+		}
+		ag.WriteString(body)
+		ag.WriteString("\n")
+	}
+	return os.WriteFile(a.File, []byte(ag.String()), 0o644)
 }
 
 // DoCommit stages, commits, and (unless push is false) pushes ONE fragment

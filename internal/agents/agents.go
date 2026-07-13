@@ -15,6 +15,13 @@
 // recursively up to 4 hops (verified against the official docs before
 // building this): CLAUDE.md -> AGENTS.md -> agents.d/index.md ->
 // agents.d/<slug>.md is 3 hops, comfortably within that limit.
+//
+// Some agents (notably opencode) do not resolve `@`-imports, so `reindex`
+// also supports an inline mode: with the .starfleet-ai/agents-inline marker
+// present (or `reindex --inline`), it writes a single self-contained
+// AGENTS.md — the fixed root notice followed by every fragment's body — with
+// no `@` at all. `agents reindex` (and `new`/`write`, which reindex) honor the
+// marker, so a workspace keeps its chosen mode.
 package agents
 
 import (
