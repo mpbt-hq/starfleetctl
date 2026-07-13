@@ -113,6 +113,7 @@ export const plugin = async ({ client, $ }: any) => {
   }, HEARTBEAT_MS)
 
   let tuiReady = false
+  let sessionNeedsIdentity = true // first turn after session creation
   let submitted = new Set<string>() // in-memory dedup für Polling
 
   setTimeout(() => {
@@ -167,6 +168,24 @@ export const plugin = async ({ client, $ }: any) => {
     ) => {
       try { await $`.starfleet-ai/bin/starfleetctl agent-bus status working opencode ship`.quiet() } catch { /* ignore */ }
 
+      // Fleet identity: injected once per session (on the first turn after
+      // session.created) to avoid per-turn token overhead.  Matches the
+      // --prompt that run-opencode.* passes at exec time.  Fully generic:
+      // identity is derived from STARFLEET_SHIP_ID, STARFLEET_ROLE, and
+      // STARFLEET_TARGET — no role names or fleet structure hardcoded here.
+      if (sessionNeedsIdentity) {
+        sessionNeedsIdentity = false
+        const shipId = process.env.STARFLEET_SHIP_ID || 'unknown'
+        const role = process.env.STARFLEET_ROLE || 'ship'
+        const target = process.env.STARFLEET_TARGET || ''
+        const parts = [`You are ${role} ${shipId}.`]
+        if (target) {
+          parts.push(`Report to ${target}.`)
+        }
+        parts.push('Re-read and follow the agent instructions in agents.d/index.md.')
+        output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
+      }
+
       const seen = loadSeen()
       const lines: string[] = []
       const msgs = await getInbox($)
@@ -191,6 +210,7 @@ export const plugin = async ({ client, $ }: any) => {
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
       if (event.type === 'session.created') {
         tuiReady = true
+        sessionNeedsIdentity = true
       }
       if (event.type === 'session.error') {
         const detail =
