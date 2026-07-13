@@ -10,7 +10,7 @@ owner: "starfleetctl"
 ## Inter-ship communication (agent-bus)
 
 Ships communicate autonomously via `starfleetctl agent-bus` (or a workspace-
-specific `.bin/starfleetctl agent-bus` wrapper). No central orchestrator is required —
+specific `.starfleet-ai/bin/starfleetctl agent-bus` wrapper). No central orchestrator is required —
 every ship reads its inbox, acts on directives, and responds.
 
 ### Standing rules
