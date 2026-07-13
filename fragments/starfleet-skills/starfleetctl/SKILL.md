@@ -32,7 +32,7 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 | `dashboard <cmd>` | DASHBOARD.md read/write/commit cycle |
 | `pr-claim <cmd>` | Advisory PR-branch lock + work log |
 | `ws-commit -m <msg> <paths>` | Atomic commit+push under clone lock |
-| `ship-names <cmd>` | Ship name registry (assign/release/list/gc) |
+| `ship-names <cmd>` | Ship name registry (assign/release/list/gc/shell-env) |
 | `with-clone-lock [cmd...]` | Serialize mutating work in a git working tree |
 
 ### GitHub interaction (read-only)

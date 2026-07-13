@@ -164,3 +164,33 @@ func (r *Registry) DoFlagship() error {
 	fmt.Println(Flagship)
 	return nil
 }
+
+// DoShellEnv implements `ship-names shell-env`: print shell code to stdout
+// that sets STARFLEET_SHIP_ID, prepends the ship name to PS1, and installs
+// an EXIT trap to release the reservation.  Designed to be consumed as:
+//
+//	eval "$(starfleetctl ship-names shell-env)"
+//
+// If STARFLEET_SHIP_ID is already set in the caller's environment, the
+// existing value is preserved (no reassignment) — matching the original
+// agent-bus-auto-id.sh "deliberately does NOT overwrite" semantics.
+func (r *Registry) DoShellEnv() error {
+	shipID := os.Getenv("STARFLEET_SHIP_ID")
+	if shipID == "" {
+		var err error
+		shipID, err = r.AssignName()
+		if err != nil {
+			return err
+		}
+	}
+
+	// Canonical path to this binary for the EXIT trap.
+	starfleetctl := filepath.Join(r.Root, ".starfleet-ai", "bin", "starfleetctl")
+
+	fmt.Printf("export STARFLEET_SHIP_ID='%s'\n", shipID)
+	fmt.Printf("PS1=\"(%s) ${PS1:-\\$ }\"\n", shipID)
+	fmt.Printf("trap '\"%s\" ship-names release \"%s\" >/dev/null 2>&1 || true' EXIT\n",
+		starfleetctl, shipID)
+
+	return nil
+}

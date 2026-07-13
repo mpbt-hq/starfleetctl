@@ -11,6 +11,7 @@ import (
 const usage = `ship-names assign [flagship]  pick an unused name (flagship = Enterprise)
 ship-names release <name>     free a reservation
 ship-names list [--json]      show all names and current status
+ship-names shell-env          output shell code to set up STARFLEET_SHIP_ID + PS1 + EXIT trap
 ship-names gc                 remove reservations with no live agent-bus entry
 ship-names flagship           print the flagship name (Enterprise)
 `
@@ -61,6 +62,8 @@ func Run(root string, args []string) int {
 		err = r.DoGC()
 	case "flagship":
 		err = r.DoFlagship()
+	case "shell-env":
+		err = r.DoShellEnv()
 	default:
 		fmt.Fprintf(os.Stderr, "ship-names: unknown command: %s  (try --help)\n", cmd)
 		return 1
