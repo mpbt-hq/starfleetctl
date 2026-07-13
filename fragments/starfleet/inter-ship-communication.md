@@ -30,6 +30,28 @@ every ship reads its inbox, acts on directives, and responds.
 4. **Keep the board current.** Run `starfleetctl agent-bus status <state> [note]` after
    starting or finishing work so the fleet sees who is idle/working/blocked.
 
+### Command reference
+
+All commands prefixed with `starfleetctl agent-bus`. Use `--json` on `board`/`inbox`/`msgs`/`asks` for machine-readable output.
+
+| Command | Purpose |
+|---------|---------|
+| `status <state> ["note"]` | Set own heartbeat (idle/working/blocked + optional note) |
+| `board` | Show all ships and their status |
+| `inbox` | List own unread directives (poller auto-injects these; manual call redundant in opencode) |
+| `ack <id>` | Mark a message as handled |
+| `tell <agent> <text…>` | Send a directive to one ship |
+| `broadcast <text…>` | Send a directive to all ships |
+| `ask "<question>"` | Ask the control agent a question (blocks until answered) |
+| `reply <qid> <answer>` | Answer a pending question (control side) |
+| `asks` | List pending questions (control side) |
+| `msgs` | List all messages (control side) |
+| `events [N]` | Show recent bus events |
+| `clear` | Remove own heartbeat on exit |
+| `prune` | Garbage-collect stale entries |
+
+For large payloads (>100 KB), pipe via `--stdin` instead of argv (see below).
+
 ### Large payloads — use `--stdin`, not argv
 
 `agent-bus tell` / `broadcast` deliver the message body either as command-line
