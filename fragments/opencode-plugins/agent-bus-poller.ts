@@ -168,12 +168,12 @@ export const plugin = async ({ client, $ }: any) => {
     ) => {
       try { await $`.starfleet-ai/bin/starfleetctl agent-bus status working opencode ship`.quiet() } catch { /* ignore */ }
 
-      // Fleet identity: injected once per session (on the first turn after
-      // session.created) to avoid per-turn token overhead.  Matches the
-      // --prompt that run-opencode.* passes at exec time.  Fully generic:
-      // identity is derived from STARFLEET_SHIP_ID, STARFLEET_ROLE, and
-      // STARFLEET_TARGET — no role names or fleet structure hardcoded here.
-      if (sessionNeedsIdentity) {
+      // Fleet identity: injected on session.created / session.cleared /
+      // session.reset (via sessionNeedsIdentity flag).  Safety-net: also
+      // re-inject if the marker is absent from the system context (covers
+      // edge cases where /clear fires no recognizable event).
+      const hasIdentity = output.system.some(l => l.includes('--- fleet identity ---'))
+      if (sessionNeedsIdentity || !hasIdentity) {
         sessionNeedsIdentity = false
         const shipId = process.env.STARFLEET_SHIP_ID || 'unknown'
         const role = process.env.STARFLEET_ROLE || 'ship'
@@ -210,6 +210,11 @@ export const plugin = async ({ client, $ }: any) => {
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
       if (event.type === 'session.created') {
         tuiReady = true
+        sessionNeedsIdentity = true
+      }
+      // /clear, /new, /compact may emit session.cleared or session.reset
+      // instead of session.created — re-inject fleet identity in all cases.
+      if (event.type === 'session.cleared' || event.type === 'session.reset') {
         sessionNeedsIdentity = true
       }
       if (event.type === 'session.error') {
