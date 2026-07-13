@@ -9,17 +9,22 @@
 # and run it; everything else pulls itself up automatically from there.
 #
 # What it does, in order:
-#   1. Clone starfleetctl (if not already present at the canonical path).
-#   2. Build it (`make`, per its own Makefile — plain Go, no dependencies
-#      beyond a working `go` toolchain).
+#   1. Clone starfleetctl into .starfleet-ai/src/starfleetctl (the single,
+#      canonical development clone — the same path starfleet-bootstrap uses,
+#      so there is never a second checkout).
+#   2. Build it (plain `go build` — pure Go, no dependency beyond a working
+#      `go` toolchain) and symlink the binary to .starfleet-ai/bin/starfleetctl.
 #   3. Hand off to its own `genesis-init` subcommand, which writes the
-#      mpbt-solution wiring (cf/starfleetctl/*, run-fetch/run-build wrappers,
-#      .bin/starfleetctl) and then runs the same checks `bootstrap --fix`
-#      does (AGENTS.md/agents.d, DASHBOARD.md, _WORK_ dirs,
-#      .claude/settings.json allowlist, the self-documenting fragment).
+#      starfleet-bootstrap script (for later updates) and then runs the same
+#      checks `bootstrap --fix` does (AGENTS.md/agents.d, DASHBOARD.md,
+#      _WORK_ dirs, .claude/settings.json allowlist, the self-documenting
+#      skill, opencode plugins/scripts, claude hooks).
 #
-# Deliberately dependency-free beyond git/go/make — no assumption that mpbt
-# or anything else is already set up, since the whole point is to work in a
+# Everything under .starfleet-ai/ is gitignored. Only this script (and the
+# starfleet-bootstrap it triggers genesis-init to write) is committed.
+#
+# Deliberately dependency-free beyond git/go — no assumption that mpbt or
+# anything else is already set up, since the whole point is to work in a
 # project that has nothing fleet-related yet. Safe to re-run: every step
 # below, and everything genesis-init itself does, is idempotent.
 #
@@ -29,30 +34,34 @@
 # Usage: ./genesis-setup [target-dir]   (target-dir defaults to cwd)
 set -e
 
-REPO_URL="${STARFLEETCTL_REPO_URL:-https://github.com/mpbt-hq/starfleetctl.git}"
+REPO_URL="${STARFLEETCTL_REPO_URL:-git@github.com:mpbt-hq/starfleetctl.git}"
 TARGET="${1:-.}"
-SRC="$TARGET/_WORK_/starfleetctl/sources/xlibre/starfleetctl"
+SRC="$TARGET/.starfleet-ai/src/starfleetctl"
+BIN="$TARGET/.starfleet-ai/bin/starfleetctl"
 
-for tool in git go make; do
+for tool in git go; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "genesis-setup: required tool not found: $tool" >&2
         exit 1
     }
 done
 
+mkdir -p "$TARGET/.starfleet-ai/src" "$TARGET/.starfleet-ai/bin"
+
 if [ -d "$SRC/.git" ]; then
     echo "genesis-setup: starfleetctl already cloned at $SRC — fetching latest"
     ( cd "$SRC" && git fetch origin && git merge --ff-only origin/master )
 else
     echo "genesis-setup: cloning starfleetctl from $REPO_URL"
-    mkdir -p "$(dirname "$SRC")"
     git clone "$REPO_URL" "$SRC"
 fi
 
 echo "genesis-setup: building starfleetctl"
-( cd "$SRC" && make )
+rm -f "$SRC/starfleetctl"
+( cd "$SRC" && go build -o starfleetctl ./cmd/starfleetctl )
+ln -sf ../src/starfleetctl/starfleetctl "$BIN"
 
 echo "genesis-setup: handing off to 'starfleetctl genesis-init $TARGET'"
-"$SRC/starfleetctl" genesis-init "$TARGET"
+"$BIN" genesis-init "$TARGET"
 
-echo "genesis-setup: done — see AGENTS.md / agents.d/starfleetctl.md for what's next"
+echo "genesis-setup: done — see AGENTS.md / the starfleetctl skill for what's next"
