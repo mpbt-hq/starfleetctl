@@ -30,7 +30,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --name)    shift; NAME="${1:-}" ;;
         -h|--help)
-            sed -n '3,/^NAME=/p' "$0" | sed 's/^# \{0,1\}//; /^NAME=/d'
+            sed -n '3,/^NAME=/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^NAME=/d'
             exit 0 ;;
         --) shift; break ;;
         *) break ;;
@@ -39,16 +39,29 @@ while [ "$#" -gt 0 ]; do
 done
 
 # Determine STARFLEET_SHIP_ID (ship name)
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 if [ -n "${STARFLEET_SHIP_ID:-}" ] && [ -z "$NAME" ]; then
     NAME="$STARFLEET_SHIP_ID"
 fi
 
 if [ -z "$NAME" ]; then
     # Obtain next free ship name; fallback to random pid‑based name
-    NAME="$("$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/starfleetctl" ship-names assign 2>/dev/null)" || true
+    STARFLEETCTL="$SCRIPT_DIR/starfleetctl"
+    ASSIGN_LOG="$WORKSPACE_ROOT/.starfleet-ai/var/log/ship-names-assign.log"
+    mkdir -p "$(dirname "$ASSIGN_LOG")" 2>/dev/null || true
+    NAME="$("$STARFLEETCTL" ship-names assign 2>>"$ASSIGN_LOG")" || true
     if [ -z "$NAME" ]; then
         NAME="ws-$$"
+        echo "[run-opencode.ship] WARNING: ship-names assign failed, using fallback: $NAME" >&2
+        echo "[run-opencode.ship] see $ASSIGN_LOG for details" >&2
     fi
+    # Ensure the assigned name is reserved (covers ws-<pid> from Go fallback
+    # where the Go code does not create a reservation file)
+    SHIPS_DIR="$WORKSPACE_ROOT/_WORK_/agent-bus/ships"
+    mkdir -p "$SHIPS_DIR" 2>/dev/null || true
+    [ -f "$SHIPS_DIR/$NAME" ] || echo "$$:$(date +%s)" > "$SHIPS_DIR/$NAME" 2>/dev/null || true
 fi
 
 export STARFLEET_SHIP_ID="$NAME"
@@ -56,7 +69,7 @@ export STARFLEET_ROLE="ship"
 export STARFLEET_TARGET="${FLAGSHIP}"
 
 # Register initial heartbeat (no cleanup possible; agent‑bus TTL / prune will reap it)
-.starfleet-ai/bin/starfleetctl agent-bus status idle "opencode ship" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/starfleetctl" agent-bus status idle "opencode ship" >/dev/null 2>&1 || true
 
 # (no background processes — plugins handle inbox/board monitoring)
 
@@ -64,7 +77,8 @@ export STARFLEET_TARGET="${FLAGSHIP}"
 MODEL=""
 [ -n "${STARFLEET_MODEL:-}" ] && MODEL="--model ${STARFLEET_MODEL}"
 
-WORKDIR=`pwd`
+WORKDIR="$WORKSPACE_ROOT"
 export OPENCODE_CONFIG_CONTENT="{\"username\":\"${STARFLEET_SHIP_ID}\"}"
+cd "$WORKSPACE_ROOT"
 #shellcheck disable=SC2086
 exec opencode ${MODEL} --prompt "agent instructions in ${WORKDIR}/agents.d/index.md -- You are fleet ship ${STARFLEET_SHIP_ID:-unknown}, report to flagship ${FLAGSHIP}." "$@"
