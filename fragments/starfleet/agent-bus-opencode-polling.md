@@ -1,4 +1,5 @@
 ---
+slug: starfleet/agent-bus-opencode-polling
 title: "Agent-bus opencode polling"
 order: 215
 owner: "starfleetctl"

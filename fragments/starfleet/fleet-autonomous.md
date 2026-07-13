@@ -1,4 +1,5 @@
 ---
+slug: starfleet/fleet-autonomous
 title: "Fleet-wide autonomy — execute and delegate tasks independently"
 order: 13
 owner: "starfleetctl"

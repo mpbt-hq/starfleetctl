@@ -1,4 +1,5 @@
 ---
+slug: starfleet/inter-ship-communication
 title: "Inter-ship communication (agent-bus)"
 order: 12
 owner: "starfleetctl"

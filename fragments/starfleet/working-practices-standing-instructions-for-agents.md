@@ -1,4 +1,5 @@
 ---
+slug: starfleet/working-practices-standing-instructions-for-agents
 title: "Working practices (standing instructions for agents)"
 order: 20
 owner: "starfleetctl"
