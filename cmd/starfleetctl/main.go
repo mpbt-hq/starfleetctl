@@ -26,9 +26,10 @@ import (
 	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/prclaim"
 	"github.com/metux/starfleetctl/internal/selfinstall"
-	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/session"
+	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/task"
+	"github.com/metux/starfleetctl/internal/telemetry"
 	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/worktree"
 	"github.com/metux/starfleetctl/internal/wscommit"
@@ -192,6 +193,8 @@ func main() {
 		os.Exit(wscommit.Run(root, os.Args[2:]))
 	case "ship-names":
 		os.Exit(shipnames.Run(root, os.Args[2:]))
+	case "telemetry":
+		os.Exit(telemetry.Run(root, os.Args[2:]))
 	case "pr-checkout":
 		os.Exit(ghpr.RunPRCheckout(root, os.Args[2:]))
 	case "backport-commit":
