@@ -37,6 +37,8 @@ Control agent:
   msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
+  health [--json] [--loop]  fleet liveness watchdog (reads health/<SHIP>.json;
+                            Go port of scripts/fleet-health)
 
 Large inline directives (>768 bytes, e.g. a full hard-reset broadcast) are
 auto-spilled into an attachment automatically: the inline text becomes a short
@@ -174,6 +176,8 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoEvents(n)
 	case "prune":
 		cmdErr = b.DoPrune()
+	case "health":
+		cmdErr = b.DoHealth(args[1:])
 	case "monitor-loop":
 		cmdErr = b.DoMonitorLoop()
 	case "fleet-watch":
