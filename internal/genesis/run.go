@@ -61,6 +61,11 @@ func Run(args []string) int {
 			fmt.Printf("  %s\n", c)
 		}
 	}
-	fmt.Println("genesis-init: done — fleet-management setup (AGENTS.md/agents.d, DASHBOARD.md, _WORK_ dirs, allowlist, self-fragment) is now in place")
+	fmt.Println()
+	fmt.Println("genesis-init: done — starfleetctl is wired up in this workspace.")
+	fmt.Println("  The bootstrap script is installed at ./starfleet-bootstrap; run it")
+	fmt.Println("  anytime (fresh clone or later) to pull/build the latest starfleetctl")
+	fmt.Println("  and refresh skills + agent config. Nothing else from genesis-init")
+	fmt.Println("  persists in the repo — only ./starfleet-bootstrap and what it generates.")
 	return 0
 }
