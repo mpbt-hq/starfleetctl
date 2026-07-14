@@ -26,8 +26,22 @@ type LaunchVars struct {
 }
 
 // runLaunch implements `session run <release> [flags...] [-- <args...>]`.
+// runLaunch implements `session run`. By default it launches a detached tmux
+// session directly (replacing scripts/agent-run); pass --print to instead emit
+// the shell-evaluable launch variables (legacy mode, for callers that want to
+// do the tmux/heartbeat step themselves).
 func runLaunch(root string, args []string) int {
-	vars, err := computeLaunch(root, args)
+	printVars := false
+	launchArgs := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--print" {
+			printVars = true
+			continue
+		}
+		launchArgs = append(launchArgs, a)
+	}
+
+	vars, err := computeLaunch(root, launchArgs)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -35,11 +49,31 @@ func runLaunch(root string, args []string) int {
 	if vars == nil {
 		return 1
 	}
-	fmt.Printf("STARFLEET_SHIP_ID=%s\n", shellQuote(vars.ShipID))
-	fmt.Printf("SESSION=%s\n", shellQuote(vars.Session))
-	fmt.Printf("RELEASE_FULL=%s\n", shellQuote(vars.ReleaseFull))
-	fmt.Printf("CLIENT=%s\n", shellQuote(vars.Client))
-	fmt.Printf("INNER_CMD=%s\n", shellQuote(vars.InnerCmd))
+
+	if printVars {
+		fmt.Printf("STARFLEET_SHIP_ID=%s\n", shellQuote(vars.ShipID))
+		fmt.Printf("SESSION=%s\n", shellQuote(vars.Session))
+		fmt.Printf("RELEASE_FULL=%s\n", shellQuote(vars.ReleaseFull))
+		fmt.Printf("CLIENT=%s\n", shellQuote(vars.Client))
+		fmt.Printf("INNER_CMD=%s\n", shellQuote(vars.InnerCmd))
+		return 0
+	}
+
+	if err := spawnSession(root, vars); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	rel := ""
+	if vars.ReleaseFull != "" {
+		rel = ", " + vars.ReleaseFull
+	}
+	fmt.Printf("agent-run: launched '%s' (%s%s) detached.\n", vars.ShipID, vars.Client, rel)
+	fmt.Printf("  tmux session : %s\n", vars.Session)
+	fmt.Printf("  attach       : starfleetctl session attach %s\n", vars.ShipID)
+	fmt.Printf("  view-only    : starfleetctl session attach --read-only %s\n", vars.ShipID)
+	fmt.Printf("  board        : starfleetctl agent-bus board\n")
+	fmt.Printf("  stop         : starfleetctl session stop %s\n", vars.ShipID)
 	return 0
 }
 
@@ -211,9 +245,37 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	}, nil
 }
 
-// doSpawn creates a tmux session and posts the initial heartbeat for the
-// given launch vars.  It calls computeLaunch internally, so it accepts the
-// same args as `session run`.
+// spawnSession creates the tmux session for the given launch vars and posts
+// the initial agent-bus heartbeat — the step scripts/agent-run used to do
+// itself. Refactored out of doSpawn so both `session run` and the autoscaler
+// share one implementation.
+func spawnSession(root string, vars *LaunchVars) error {
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", vars.Session, "-c", root, "bash", "-lc", vars.InnerCmd)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("tmux new-session: %w", err)
+	}
+
+	// Set the new ship's identity env BEFORE opening the bus, so the
+	// heartbeat posts under the launched ship's id (not the caller's).
+	// Order matters: agentbus.New captures ShipID from the environment.
+	os.Setenv("STARFLEET_SHIP_ID", vars.ShipID)
+	os.Setenv("STARFLEET_AGENT_HANDLE", vars.Session)
+	os.Setenv("AGENT_HANDLE", vars.Session)
+	if vars.ReleaseFull != "" {
+		os.Setenv("XLIBRE_RELEASE", vars.ReleaseFull)
+	}
+
+	// Post initial heartbeat (same format as the bash wrapper).
+	if bus, err := agentbus.New(root); err == nil {
+		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")")
+	}
+	return nil
+}
+
+// doSpawn creates a tmux session and posts the initial heartbeat for the given
+// launch args. It calls computeLaunch internally, so it accepts the same args
+// as `session run`. Used by the autoscaler; `session run` calls spawnSession
+// directly after computing its own vars.
 func doSpawn(root string, args []string) error {
 	vars, err := computeLaunch(root, args)
 	if err != nil {
@@ -222,24 +284,7 @@ func doSpawn(root string, args []string) error {
 	if vars == nil {
 		return fmt.Errorf("session already exists")
 	}
-
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", vars.Session, "-c", root, "bash", "-lc", vars.InnerCmd)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("tmux new-session: %w", err)
-	}
-
-	// Post initial heartbeat (same format as the bash wrapper).
-	if bus, err := agentbus.New(root); err == nil {
-		os.Setenv("STARFLEET_SHIP_ID", vars.ShipID)
-		os.Setenv("STARFLEET_AGENT_HANDLE", vars.Session)
-		os.Setenv("AGENT_HANDLE", vars.Session)
-		if vars.ReleaseFull != "" {
-			os.Setenv("XLIBRE_RELEASE", vars.ReleaseFull)
-		}
-		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")")
-	}
-
-	return nil
+	return spawnSession(root, vars)
 }
 
 // runStop implements `session stop <id>`.

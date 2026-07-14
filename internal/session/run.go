@@ -2,13 +2,14 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package session manages session lifecycle (attach, list, run, autoscale)
-// for the fleet.  See also scripts/agent-attach, scripts/agent-run, and
-// scripts/fleet-autoscale.
+// for the fleet — including the tmux launch/attach steps that scripts/agent-run
+// and scripts/agent-attach used to perform.  See also scripts/fleet-autoscale.
 package session
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -18,16 +19,17 @@ Fleet session lifecycle management.
 
 Commands:
   attach <id> [--read-only] [--independent]
-      Resolve <id> to a tmux session and print its name + mode (for use by
-      scripts/agent-attach).  <id> may be an exact tmux session, an agent
-      ID, a bus-handle, or a unique substring.
+      Resolve <id> to a running tmux session and attach the caller's terminal
+      to it (replaces scripts/agent-attach).  <id> may be an exact tmux
+      session, an agent ID, a bus-handle, or a unique substring.
   attach --list
       List running mpbt- tmux sessions and the agent-bus board.
   autoscale <command> [args...]
       On-demand fleet elasticity (status / need).  See 'session autoscale --help'.
   run <release> [flags...] [-- <args...>]
-      Print shell-evaluable variables for launching a detached tmux session
-      (used by scripts/agent-run).  See 'session run --help'.
+      Launch a detached tmux session for an agent/CLI and post the initial
+      heartbeat (replaces scripts/agent-run).  Pass --print to emit the
+      shell-evaluable launch variables instead.  See 'session run --help'.
   stop <id|session>
       Kill a tmux session, clear its agent-bus heartbeat, and release its
       ship name (used by scripts/agent-run --stop).
@@ -121,6 +123,41 @@ func runAttach(root string, args []string) int {
 		fmt.Fprintf(os.Stderr, "agent-attach: no running session matches '%s' (try: session attach --list)\n", id)
 		return 1
 	}
-	fmt.Printf("%s\t%s\n", session, mode)
+
+	if err := attachSession(session, mode); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	return 0
+}
+
+// attachSession connects the caller's terminal to a running tmux session,
+// replacing what scripts/agent-attach did via `exec tmux attach`. mode is one
+// of "shared" (rw attach), "ro" (read-only attach), "ind" (own grouped window
+// with an independent size).
+func attachSession(session, mode string) error {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return fmt.Errorf("tmux not found — install it (e.g. 'sudo apt install tmux')")
+	}
+	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return fmt.Errorf("agent-attach: not a terminal — attach from an interactive shell")
+	}
+
+	var targs []string
+	switch mode {
+	case "ro":
+		targs = []string{"attach", "-r", "-t", session}
+	case "ind":
+		targs = []string{"new-session", "-t", session, "-s", fmt.Sprintf("%s-view-%d", session, os.Getpid())}
+	default: // shared
+		targs = []string{"attach", "-t", session}
+	}
+
+	fmt.Printf("agent-attach: attaching to '%s' (mode: %s). Detach with Ctrl-b d; the agent keeps running.\n", session, mode)
+
+	cmd := exec.Command("tmux", targs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
