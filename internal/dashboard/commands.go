@@ -63,7 +63,12 @@ func (d *Dashboard) DoCommit(msg string, push bool) error {
 	}
 	defer lh.Close()
 
-	if err := run(d.Root, "git", "add", d.File); err != nil {
+	// d.File lives under .starfleet-ai/ which the workspace .gitignore
+	// excludes, so a plain `git add` refuses the (initially untracked) file.
+	// Force-add: committing DASHBOARD.md is the whole point of this command,
+	// and once tracked the path stays addable. Mirrors the bash original's
+	// `git add -f`.
+	if err := run(d.Root, "git", "add", "-f", d.File); err != nil {
 		return err
 	}
 
