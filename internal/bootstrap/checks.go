@@ -12,9 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	starfleetctl "github.com/metux/starfleetctl"
 	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/dashboard"
-	starfleetctl "github.com/metux/starfleetctl"
+	"github.com/metux/starfleetctl/internal/templates"
 )
 
 // Check is one idempotent bootstrap step: Verify reports whether it's
@@ -81,9 +82,9 @@ func Checks() []Check {
 			Fix:    fixDirs,
 		},
 		{
-			Name:   "ship-names.txt present (.starfleet-ai/etc/)",
+			Name:   "ship-names.txt present & non-empty (.starfleet-ai/etc/)",
 			Verify: verifyShipNamesFile,
-			Fix:    nil, // not auto-fixable: this is source data, not a directory
+			Fix:    fixShipNamesFile,
 		},
 		{
 			Name:   ".claude/settings.json: starfleetctl allowlist entries",
@@ -217,11 +218,29 @@ func fixDirs(b *Bootstrap) error {
 }
 
 func verifyShipNamesFile(b *Bootstrap) (bool, string) {
-	path := filepath.Join(b.Root, ".starfleet-ai", "etc", "ship-names.txt")
-	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
-		return true, "present"
+	path := filepath.Join(b.Root, templates.ShipNamesRel)
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return false, fmt.Sprintf("missing %s", path)
 	}
-	return false, fmt.Sprintf("missing %s (not auto-fixable — this is source data, not something bootstrap can invent; run genesis-init or copy from the symlink at scripts/ship-names.txt)", path)
+	if fi.Size() == 0 {
+		return false, fmt.Sprintf("empty %s (bootstrap --fix / genesis-init refills it from the embedded template)", path)
+	}
+	return true, "present, non-empty"
+}
+
+// fixShipNamesFile (re)creates the ship-name pool from the embedded template
+// when it's missing or empty. A non-empty pool is left untouched, so any
+// names a user has added locally are preserved.
+func fixShipNamesFile(b *Bootstrap) error {
+	dest := filepath.Join(b.Root, templates.ShipNamesRel)
+	if fi, err := os.Stat(dest); err == nil && fi.Size() > 0 {
+		return nil // present and non-empty — leave any local edits alone
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dest, templates.ShipNames, 0o644)
 }
 
 func verifySettingsAllowlist(b *Bootstrap) (bool, string) {
@@ -632,10 +651,10 @@ func fixOpencodePlugins(b *Bootstrap) error {
 			}
 			name := strings.TrimSuffix(e.Name(), ".ts")
 			manifest := map[string]any{
-				"name":        name,
-				"version":     "1.0.0",
-				"type":        "module",
-				"main":        e.Name(),
+				"name":         name,
+				"version":      "1.0.0",
+				"type":         "module",
+				"main":         e.Name(),
 				"dependencies": map[string]string{"@opencode-ai/plugin": "*"},
 			}
 			data, err := json.MarshalIndent(manifest, "", "  ")

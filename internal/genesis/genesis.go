@@ -23,6 +23,7 @@ import (
 
 	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/bootstrap"
+	templatespkg "github.com/metux/starfleetctl/internal/templates"
 )
 
 //go:embed all:templates
@@ -80,6 +81,21 @@ func Init(root string) (created []string, err error) {
 	})
 	if err != nil {
 		return created, err
+	}
+
+	// ship-names.txt is source data owned by starfleetctl. Write it if it's
+	// missing or empty — a 0-byte file is a broken install, not a valid user
+	// edit, so always repair it. Never overwrite a non-empty pool, so any
+	// names a user has appended to their local copy are preserved.
+	dest := filepath.Join(root, templatespkg.ShipNamesRel)
+	if fi, statErr := os.Stat(dest); statErr != nil || fi.Size() == 0 {
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return created, err
+		}
+		if err := os.WriteFile(dest, templatespkg.ShipNames, 0o644); err != nil {
+			return created, err
+		}
+		created = append(created, templatespkg.ShipNamesRel)
 	}
 
 	b := bootstrap.New(root)
