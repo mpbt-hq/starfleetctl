@@ -38,7 +38,7 @@ const helpText = `starfleetctl — fleet-coordination tool for the mpbt-workspac
 Usage:  starfleetctl <subcommand> [args...]
 
 Fleet management:
-  agent-bus         operate the session bus (read/write/ack/notify/status)
+  agent-bus         operate the session bus (read/write/ack/notify/status/health)
   bootstrap         verify/fix workspace structure (dirs, allowlist, fragments)
   bridged           manage bridged agent sessions (exec/status/log)
   dashboard         render the workspace dashboard
