@@ -28,11 +28,21 @@ Control agent:
   tell <agent> <text…>      queue a directive for one agent
   tell <agent> --stdin      read the directive body from stdin (bypasses
                             argv/ARG_MAX size limit for large messages)
+  tell <agent> --attach <f> attach file <f> as the body; inline text is a
+                            short summary (agent fetches full body via get)
   broadcast <text…>         queue a directive for ALL agents
   broadcast --stdin         read the broadcast body from stdin
+  broadcast --attach <f>    broadcast a file as the body (short summary inline)
+  get <id> [--out <path>]   print (or write) the attachment payload of <id>
   msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
+
+Large inline directives (>768 bytes, e.g. a full hard-reset broadcast) are
+auto-spilled into an attachment automatically: the inline text becomes a short
+"fetch: agent-bus get <id>" pointer and is marked [ATT] in inbox/msgs, so it
+can never be truncated by an agent display. Retrieve the full payload with
+'agent-bus get <id>'.
 
 --json on board/inbox/msgs/asks prints a JSON array instead of the
 human-formatted table — for scripts/agents, so no grep/awk/cut is needed.
@@ -111,25 +121,31 @@ func Run(root string, args []string) int {
 		}
 	case "tell":
 		if len(args) < 2 {
-			cmdErr = usageErr("agent-bus: tell needs <agent> [--stdin|<text…>]")
+			cmdErr = usageErr("agent-bus: tell needs <agent> [--stdin|--attach <file>|<text…>]")
 			break
 		}
 		target := args[1]
-		rest := args[2:]
-		useStdin := false
-		if len(rest) == 1 && rest[0] == "--stdin" {
-			useStdin = true
-			rest = nil
-		}
-		cmdErr = b.DoPost(target, rest, useStdin)
+		words, useStdin, attachPath := parsePostFlags(args[2:])
+		cmdErr = b.DoPost(target, words, useStdin, attachPath)
 	case "broadcast", "--all":
-		rest := args[1:]
-		useStdin := false
-		if len(rest) == 1 && rest[0] == "--stdin" {
-			useStdin = true
-			rest = nil
+		words, useStdin, attachPath := parsePostFlags(args[1:])
+		cmdErr = b.DoPost("all", words, useStdin, attachPath)
+	case "get":
+		id, out := "", ""
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--out":
+				if i+1 < len(args) {
+					out = args[i+1]
+					i++
+				}
+			default:
+				if id == "" {
+					id = args[i]
+				}
+			}
 		}
-		cmdErr = b.DoPost("all", rest, useStdin)
+		cmdErr = b.DoGet(id, out)
 	case "ask":
 		cmdErr = b.DoAsk(args[1:])
 	case "reply":
@@ -182,6 +198,27 @@ func arg(args []string, i int) string {
 		return args[i]
 	}
 	return ""
+}
+
+// parsePostFlags splits a `tell`/`broadcast` argument vector into the inline
+// words (summary/text), a --stdin flag, and an optional --attach <file> path.
+// Both flags may be combined; --attach makes the file the directive body while
+// the remaining words/stdin form the short inline summary.
+func parsePostFlags(args []string) (words []string, useStdin bool, attachPath string) {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--stdin":
+			useStdin = true
+		case "--attach":
+			if i+1 < len(args) {
+				attachPath = args[i+1]
+				i++
+			}
+		default:
+			words = append(words, args[i])
+		}
+	}
+	return
 }
 
 func reportErr(err error) int {

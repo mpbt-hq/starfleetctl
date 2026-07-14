@@ -246,7 +246,7 @@ func spawnShips(root string, spawn int, release, client, supervisor, permissionM
 			len(spawned), strings.Join(spawned, " "), release, supervisor, permPart, reason, callerID, total+len(spawned), max)
 
 		if bus, err := agentbus.New(root); err == nil {
-			_ = bus.DoPost("all", []string{bcastText}, false)
+			_ = bus.DoPost("all", []string{bcastText}, false, "")
 		}
 	}
 

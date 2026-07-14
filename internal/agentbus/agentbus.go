@@ -33,6 +33,7 @@ type Bus struct {
 	StatusDir string
 	MsgDir    string
 	AckDir    string
+	AttachDir string
 	Events    string
 }
 
@@ -75,9 +76,10 @@ func New(root string) (*Bus, error) {
 		StatusDir:  filepath.Join(busDir, "status"),
 		MsgDir:     filepath.Join(busDir, "msgs"),
 		AckDir:     filepath.Join(busDir, "acks"),
+		AttachDir:  filepath.Join(busDir, "attachments"),
 		Events:     filepath.Join(busDir, "events.log"),
 	}
-	for _, d := range []string{b.StatusDir, b.MsgDir, b.AckDir} {
+	for _, d := range []string{b.StatusDir, b.MsgDir, b.AckDir, b.AttachDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}

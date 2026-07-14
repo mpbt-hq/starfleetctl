@@ -4,6 +4,8 @@
 package agentbus
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -32,9 +34,24 @@ func (b *Bus) nextID() (string, error) {
 	return fmt.Sprintf("m%04d", n), nil
 }
 
-// post writes a new directive/question record and returns its id. Caller
-// must not hold the bus lock — post takes it itself, mirroring _post().
-func (b *Bus) post(target, text string) (string, error) {
+// attachThreshold is the inline directive size (in bytes) above which DoPost
+// automatically spills the body into an attachment and leaves only a short
+// fetch pointer inline. This keeps large directives (e.g. a full hard-reset
+// broadcast) from being silently truncated by an agent display that caps
+// inline text length — the agent fetches the full payload via
+// `agent-bus get <id>` instead.
+const attachThreshold = 768
+
+// attachPrefix marks the inline pointer that references an attachment file.
+// Format: [[attach:<fsafe-basename>:<size-bytes>:<sha256hex>]]
+// It survives clean() (no tabs/newlines) and the TSV text field intact.
+const attachPrefix = "[[attach:"
+
+// post writes a new directive/question record and returns its id. If payload
+// is non-empty it is stored as an attachment under AttachDir and the inline
+// text gains a fetch pointer, so the full body is retrievable via DoGet.
+// Caller must not hold the bus lock — post takes it itself, mirroring _post().
+func (b *Bus) post(target, summary, payload, basename string) (string, error) {
 	lock, err := b.lockBus()
 	if err != nil {
 		return "", err
@@ -44,12 +61,68 @@ func (b *Bus) post(target, text string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	text := clean(summary)
+	if payload != "" {
+		sha := sha256.Sum256([]byte(payload))
+		shx := hex.EncodeToString(sha[:])
+		aname := id + "__" + fsafe(basename)
+		if err := os.WriteFile(filepath.Join(b.AttachDir, aname), []byte(payload), 0o644); err != nil {
+			return "", err
+		}
+		if text == "" {
+			text = fmt.Sprintf("payload attached (%d bytes)", len(payload))
+		}
+		text += fmt.Sprintf(" — fetch: agent-bus get %s %s%s:%d:%s]]",
+			id, attachPrefix, fsafe(basename), len(payload), shx)
+	}
+
 	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\n", now(), isots(), b.ShipID, target, text)
 	if err := os.WriteFile(b.mfile(id), []byte(line), 0o644); err != nil {
 		return "", err
 	}
 	b.logEvent("directive", fmt.Sprintf("%s → %s: %s", id, target, text))
 	return id, nil
+}
+
+// DoGet prints (or writes to outPath) the attachment payload of message id.
+// If the message has no attachment, it returns an error.
+func (b *Bus) DoGet(id, outPath string) error {
+	if id == "" {
+		return usageErr("agent-bus: get needs <id> [--out <path>]")
+	}
+	matches, err := filepath.Glob(filepath.Join(b.AttachDir, fsafe(id)+"__*"))
+	if err != nil {
+		return err
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("agent-bus: no attachment for %s", id)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		return err
+	}
+	if outPath != "" {
+		return os.WriteFile(outPath, data, 0o644)
+	}
+	_, err = os.Stdout.Write(data)
+	return err
+}
+
+// hasAttachment reports whether a message's inline text references an
+// attachment (see attachPrefix).
+func hasAttachment(text string) bool {
+	return strings.Contains(text, attachPrefix)
+}
+
+// dispText returns the human-readable directive body, appending a "[ATT]"
+// marker when the full payload lives in an attachment the agent should fetch.
+func dispText(m msgRecord) string {
+	t := m.Text
+	if hasAttachment(t) {
+		t += " [ATT]"
+	}
+	return t
 }
 
 // DoStatus implements `agent-bus status <state> [note]`.
@@ -155,7 +228,7 @@ func (b *Bus) DoInbox() error {
 		if b.acked(m.ID, b.ShipID) {
 			a = "✓"
 		}
-		fmt.Printf("%-6s  %-7s  %-18s  %-4s  %s\n", m.ID, age(m.Epoch), m.From, a, m.Text)
+		fmt.Printf("%-6s  %-7s  %-18s  %-4s  %s\n", m.ID, age(m.Epoch), m.From, a, dispText(m))
 	}
 	if !found {
 		fmt.Printf("(inbox empty for '%s')\n", b.ShipID)
@@ -223,30 +296,63 @@ func (b *Bus) DoBoard() error {
 // command-line delivery of large directives (see the size-limit test,
 // 2026-07-09: tell works up to ~100KB via argv, fails at ~1MB with E2BIG;
 // the storage layer itself has no limit and handles 20MB+ fine).
-func (b *Bus) DoPost(target string, words []string, useStdin bool) error {
-	var text string
-	if useStdin {
-		data, err := io.ReadAll(os.Stdin)
+func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath string) error {
+	var summary, payload, basename string
+
+	if attachPath != "" {
+		data, err := os.ReadFile(attachPath)
 		if err != nil {
-			return fmt.Errorf("agent-bus: reading stdin: %w", err)
+			return fmt.Errorf("agent-bus: reading attachment: %w", err)
 		}
-		text = clean(string(data))
+		payload = string(data)
+		basename = filepath.Base(attachPath)
+		if useStdin {
+			s, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("agent-bus: reading stdin: %w", err)
+			}
+			summary = clean(string(s))
+		} else {
+			summary = clean(strings.Join(words, " "))
+		}
 	} else {
-		text = clean(strings.Join(words, " "))
+		var text string
+		if useStdin {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("agent-bus: reading stdin: %w", err)
+			}
+			text = clean(string(data))
+		} else {
+			text = clean(strings.Join(words, " "))
+		}
+		if len([]byte(text)) > attachThreshold && strings.TrimSpace(text) != "" {
+			// auto-spill: keep only a short fetch pointer inline, move the
+			// body into an attachment so an agent display can't truncate it.
+			payload = text
+			basename = "payload.txt"
+			summary = ""
+		} else {
+			summary = text
+		}
 	}
-	if text == "" {
+
+	if summary == "" && payload == "" {
 		return usageErr("agent-bus: directive needs text (via args or stdin)")
 	}
 	b.warnID()
-	id, err := b.post(target, text)
+	id, err := b.post(target, summary, payload, basename)
 	if err != nil {
 		return err
 	}
+	// id goes to stdout (captureable, as before); the human description
+	// goes to stderr so it doesn't pollute the captured id.
 	if target == "all" {
-		fmt.Printf("agent-bus: broadcast %s from '%s' → ALL: %s\n", id, b.ShipID, text)
+		fmt.Fprintf(os.Stderr, "agent-bus: broadcast %s from '%s' → ALL\n", id, b.ShipID)
 	} else {
-		fmt.Printf("agent-bus: directive %s from '%s' → %s: %s\n", id, b.ShipID, target, text)
+		fmt.Fprintf(os.Stderr, "agent-bus: directive %s from '%s' → %s\n", id, b.ShipID, target)
 	}
+	fmt.Printf("%s\n", id)
 	return nil
 }
 
@@ -312,7 +418,7 @@ func (b *Bus) DoReply(qid string, words []string) error {
 		return usageErr(fmt.Sprintf("agent-bus: no such question '%s'", qid))
 	}
 	b.warnID()
-	rid, err := b.post(qm.From, fmt.Sprintf("[re %s] %s", qid, ans))
+	rid, err := b.post(qm.From, fmt.Sprintf("[re %s] %s", qid, ans), "", "")
 	if err != nil {
 		return err
 	}
@@ -370,7 +476,7 @@ func (b *Bus) DoMsgs() error {
 				nacks++
 			}
 		}
-		fmt.Printf("%-6s  %-7s  %-16s  %-12s  %-6d  %s\n", m.ID, age(m.Epoch), m.From, m.Target, nacks, m.Text)
+		fmt.Printf("%-6s  %-7s  %-16s  %-12s  %-6d  %s\n", m.ID, age(m.Epoch), m.From, m.Target, nacks, dispText(m))
 	}
 	return nil
 }
@@ -454,7 +560,7 @@ func (b *Bus) DoPrune() error {
 // use from hook subcommands that must not blow away the whole process.
 func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error) {
 	b.warnID()
-	qid, err := b.post(ctrl, "[ask] "+question)
+	qid, err := b.post(ctrl, "[ask] "+question, "", "")
 	if err != nil {
 		return "", fmt.Errorf("post: %w", err)
 	}
