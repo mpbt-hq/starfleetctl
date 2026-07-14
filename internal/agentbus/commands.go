@@ -296,6 +296,15 @@ func (b *Bus) DoBoard() error {
 // command-line delivery of large directives (see the size-limit test,
 // 2026-07-09: tell works up to ~100KB via argv, fails at ~1MB with E2BIG;
 // the storage layer itself has no limit and handles 20MB+ fine).
+// Tell queues a directive for target with the given inline text — the
+// programmatic equivalent of `agent-bus tell <target> <text…>`, for callers
+// (e.g. task capture's commission-a-ship step) that shouldn't shell out. It
+// takes the bus lock itself and auto-spills oversized bodies into an
+// attachment, exactly like DoPost.
+func (b *Bus) Tell(target, text string) (string, error) {
+	return b.post(target, text, "", "tell")
+}
+
 func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath string) error {
 	var summary, payload, basename string
 
