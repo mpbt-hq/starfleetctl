@@ -26,8 +26,10 @@ type boardEntryJSON struct {
 	Stale      bool   `json:"stale"`
 }
 
-// DoBoardJSON implements `agent-bus board --json`.
-func (b *Bus) DoBoardJSON() error {
+// BoardEntries returns the same board data that `agent-bus board --json`
+// prints, as a slice — for programmatic callers (e.g. task capture's free-ship
+// picker) that need it without parsing stdout.
+func (b *Bus) BoardEntries() []boardEntryJSON {
 	recs := b.AllStatusRecords()
 	out := make([]boardEntryJSON, 0, len(recs))
 	for _, r := range recs {
@@ -42,7 +44,12 @@ func (b *Bus) DoBoardJSON() error {
 			Stale:      b.stale(r.Epoch),
 		})
 	}
-	return printJSON(out)
+	return out
+}
+
+// DoBoardJSON implements `agent-bus board --json`.
+func (b *Bus) DoBoardJSON() error {
+	return printJSON(b.BoardEntries())
 }
 
 type inboxEntryJSON struct {
