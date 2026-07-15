@@ -44,7 +44,7 @@ itself without the bootstrap script (useful for updates when the binary is alrea
 
 1. **One allowlist entry covers every subcommand.** Tools like Claude Code gate shell commands
    behind a per-command permission allowlist. ~30 separate bash scripts needed ~30 separate
-   allowlist entries (`Bash(scripts/foo)` + `Bash(scripts/foo *)` each); a single
+   allowlist entries; a single
    `Bash(scripts/starfleetctl)`/`Bash(scripts/starfleetctl *)` pair covers every subcommand this
    binary has now *and* every one it gains later. The trade-off, accepted deliberately: less
    granular — a bug in one subcommand isn't scoped out from the others by the allowlist.
@@ -120,13 +120,13 @@ same `_WORK_/agent-bus/` files without racing or misreading each other's state.
 | `ship-names <cmd>` | Star-Trek-topicd per-session identity registry: `assign [flagship]`, `release <name>`, `list [--json]`, `gc`, `flagship`, `shell-env` (outputs eval-able shell code to set `STARFLEET_SHIP_ID`, PS1 prefix, and EXIT trap — usage: `eval "$(starfleetctl ship-names shell-env)"`). |
 | `with-clone-lock [cmd...]` | Generic "serialize mutating work in this git working tree" primitive everything above is built on — acquires `<gitdir>/mpbt-clone.lock`, then execs the given command (or an interactive shell with none given) with the lock held. Works in *any* git working tree, not just an `mpbt-workspace` checkout. |
 | `hook claude monitor-hint` | Claude Code `SessionStart` hook helper: emits `hookSpecificOutput.additionalContext` JSON telling the assistant to unconditionally arm Monitor-tool watchers on its agent-bus inbox (and, for `Enterprise`, fleet-watch too). Wired as a `SessionStart` hook in `.claude/settings.json`. Quiet no-op when `$STARFLEET_SHIP_ID` is unset. |
-| `hook claude permission` | Claude Code `PreToolUse` hook helper: reads the tool-invocation JSON from stdin, asks the control agent (`$AGENT_CONTROLLER`) via agent-bus `ask`/`reply` for an allow/deny decision, blocks up to `$AGENT_PERM_TIMEOUT` (default 60s), and emits a `permissionDecision` JSON. Fail-closed (deny on timeout unless `$AGENT_PERM_TIMEOUT_DECISION=ask`). Used by `scripts/agent-permission-hook`. |
+| `hook claude permission` | Claude Code `PreToolUse` hook helper: reads the tool-invocation JSON from stdin, asks the control agent (`$AGENT_CONTROLLER`) via agent-bus `ask`/`reply` for an allow/deny decision, blocks up to `$AGENT_PERM_TIMEOUT` (default 60s), and emits a `permissionDecision` JSON. Fail-closed (deny on timeout unless `$AGENT_PERM_TIMEOUT_DECISION=ask`). Used by the `agent-permission-hook` PreToolUse hook (`.claude/hooks/agent-permission-hook`). |
 | `session attach <id> [--read-only] [--independent]` | Resolve an agent ID / handle / tmux session name / unique substring to a running tmux session and attach the caller's terminal to it (shared rw / read-only / independent grouped window). Replaces `scripts/agent-attach`. |
 | `session attach --list` | List running `mpbt-` tmux sessions and the agent-bus board in one call. |
 | `session run <release> [--client claude\|opencode\|shell] [--name <id>] [--tier <tier>] [--supervisor <name>] [--permission-mode <mode>] [-- <args>]` | Launch a detached tmux session for an agent/CLI and post the initial heartbeat (replaces `scripts/agent-run`). Pass `--print` to emit the shell-evaluable launch variables (`AGENT_ID`, `SESSION`, `RELEASE_FULL`, `CLIENT`, `INNER_CMD`) instead. |
 | `session stop <id\|session>` | Kill a tmux session, clear its agent-bus heartbeat, and release its ship name (replaces `scripts/agent-run --stop`). |
 | `session autoscale status [--max <cap>]` | Show current non-stale fleet size, idle count, and configured cap. |
-| `session autoscale need <N> --reason "<text>" [--release <rel>] [--client claude\|opencode] [--max <cap>] [--supervisor <name>] [--permission-mode <mode>] [--dry-run]` | On-demand fleet elasticity: spawn up to `<cap>` minus current fleet size, capped at what's needed after subtracting idle ships. Prints decision + audit log; real spawn also posts an agent-bus broadcast (`scripts/fleet-autoscale` delegates here). |
+| `session autoscale need <N> --reason "<text>" [--release <rel>] [--client claude\|opencode] [--max <cap>] [--supervisor <name>] [--permission-mode <mode>] [--dry-run]` | On-demand fleet elasticity: spawn up to `<cap>` minus current fleet size, capped at what's needed after subtracting idle ships. Prints decision + audit log; real spawn also posts an agent-bus broadcast (`session autoscale` delegates here). |
 
 ### GitHub interaction — read-only
 
@@ -177,7 +177,7 @@ separate decision gated on review, same as the read-only set was before it got t
   directory-poll loop, and that loop plus a held file handle) all worked fine under `Monitor` too.
   Directory-cache staleness, held-fd interference, and workspace-root resolution were all
   specifically ruled out; the actual cause is not understood. Until it is, the bash originals
-  (`scripts/agent-bus-monitor-loop`, `scripts/agent-bus-fleet-watch`) remain the only
+  (`agent-bus-monitor-loop`, `agent-bus-fleet-watch`) remain the only
   `Monitor`-tool-safe implementation. `agent-bus watch` (a `setsid`-detached background daemon, a
   different execution model entirely) was not tested against this failure mode.
 - **`github backport commit`'s path-remap fallback uses a literal string replace, not a regex, unlike the
