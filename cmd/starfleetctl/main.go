@@ -24,6 +24,7 @@ import (
 	"github.com/metux/starfleetctl/internal/genesis"
 	"github.com/metux/starfleetctl/internal/ghpr"
 	"github.com/metux/starfleetctl/internal/hook"
+	"github.com/metux/starfleetctl/internal/jsonutil"
 	"github.com/metux/starfleetctl/internal/prclaim"
 	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/session"
@@ -60,6 +61,7 @@ Bootstrap & setup:
 GitHub PR commands:
   pr-view             view a pull request
   pr-ci               show PR CI status
+  pr-job-logs          fetch CI logs for failing jobs of a PR
   pr-comment          comment on a PR
   pr-label            add/remove PR labels
   pr-request-reviewers request PR reviewers
@@ -74,6 +76,11 @@ GitHub PR commands:
   backport-commit     backport a commit to a release branch
   xx-make-pr          create a PR with commit-message conventions
   mk-agent-clone      create an isolated agent worktree clone
+
+Utilities:
+  json              JSON helper (validate/pretty/get) — no python3 needed
+  ci-cancel-stale   cancel still-running superseded CI runs
+  ci-prune          delete completed stale CI runs
 
 Run 'starfleetctl <subcommand> --help' for subcommand-specific help.
 `
@@ -126,6 +133,11 @@ func main() {
 		os.Exit(genesis.Run(os.Args[2:]))
 	}
 
+	// json is a stateless utility — no workspace root needed.
+	if os.Args[1] == "json" {
+		os.Exit(jsonutil.Run(os.Args[2:]))
+	}
+
 	// The ghpr (GitHub-interaction) subcommands are likewise standalone —
 	// stateless `gh` wrappers with no fleet-file/lock dependency on this
 	// checkout, so they must work from any cwd too, same reasoning as
@@ -135,6 +147,8 @@ func main() {
 		os.Exit(ghpr.RunPRView(os.Args[2:]))
 	case "pr-ci":
 		os.Exit(ghpr.RunPRCi(os.Args[2:]))
+	case "pr-job-logs":
+		os.Exit(ghpr.RunPRJobLogs(os.Args[2:]))
 	case "show-branch-file":
 		os.Exit(ghpr.RunShowBranchFile(os.Args[2:]))
 	case "backport-applies":
@@ -162,6 +176,10 @@ func main() {
 		os.Exit(ghpr.RunPRAppendBody(os.Args[2:]))
 	case "pr-amend-push":
 		os.Exit(ghpr.RunPRAmendPush(os.Args[2:]))
+	case "ci-cancel-stale":
+		os.Exit(ghpr.RunCICancelStale(os.Args[2:]))
+	case "ci-prune":
+		os.Exit(ghpr.RunCIPrune(os.Args[2:]))
 	case "xx-make-pr":
 		// Standalone invocation operates on cwd, exactly like the bash
 		// script (which reads make-pr.* from `git config` in whatever
@@ -238,25 +256,20 @@ func workspaceRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if isFile(filepath.Join(dir, "AGENTS.md")) && isDir(filepath.Join(dir, "scripts")) {
+		if isFile(filepath.Join(dir, "CLAUDE.md")) && isDir(filepath.Join(dir, "scripts")) {
 			return dir, nil
 		}
 		// Don't walk past a git repo/worktree boundary. A directory with its
 		// own .git (a directory for a normal repo, a file for a linked
-		// worktree) that lacks AGENTS.md + scripts/ is NOT this workspace —
+		// worktree) that lacks CLAUDE.md + scripts/ is NOT this workspace —
 		// continuing upward risks silently escaping into an unrelated outer
-		// checkout. Concretely hit 2026-07-06: a worktree of THIS repo under
-		// _WORK_/worktrees/mpbt-workspace/<name>/ (nested inside the real
-		// checkout) had its AGENTS.md removed mid-migration; without this
-		// guard, the walk continued past the worktree's own .git file and
-		// resolved to the outer shared checkout instead, which then nearly
-		// received a write meant for the isolated worktree.
+		// checkout.
 		if exists(filepath.Join(dir, ".git")) {
-			return "", fmt.Errorf("in a git working tree (%s) with no AGENTS.md + scripts/ — refusing to search further up past this repo/worktree boundary; set MPBT_WORKSPACE_ROOT if this is intentional", dir)
+			return "", fmt.Errorf("in a git working tree (%s) with no CLAUDE.md + scripts/ — refusing to search further up past this repo/worktree boundary; set MPBT_WORKSPACE_ROOT if this is intentional", dir)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("could not locate mpbt-workspace root (no AGENTS.md + scripts/ found walking up from cwd); set MPBT_WORKSPACE_ROOT")
+			return "", fmt.Errorf("could not locate mpbt-workspace root (no CLAUDE.md + scripts/ found walking up from cwd); set MPBT_WORKSPACE_ROOT")
 		}
 		dir = parent
 	}
