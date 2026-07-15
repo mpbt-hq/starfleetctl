@@ -22,11 +22,11 @@ cleared:
   section of `.starfleet-ai/agents.d/index.md` (or a topic doc) **within the session**, not at the end. Session context
   is wiped on session end; only what's written survives.
 - **Keep the dashboard current** — it's the cross-session "what's in flight / what got parked"
-  index. When you start, pause, or finish a theme (an initiative spanning more than one PR, or a
+  index. When you start, pause, or finish a topic (an initiative spanning more than one PR, or a
   decision still pending), update its entry **in the same session**. Use the CLI (`starfleetctl
   dashboard` subcommands) for every read and write — never edit the index file directly.
 - **Notice something worth a look while doing unrelated work → park it immediately.** A suspicious
-  code path, a possible follow-up cleanup, an untriaged idea — add a dashboard Parkplatz entry
+  code path, a possible follow-up cleanup, an untriaged idea — add a dashboard Parked entry
   right away rather than just mentioning it in the response and moving on.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the

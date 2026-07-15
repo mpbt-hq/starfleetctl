@@ -22,7 +22,7 @@ type FragmentMeta struct {
 }
 
 // unquoteYAML/quoteYAML: same minimal hand-rolled scheme as
-// internal/dashboard's theme frontmatter — flat key: "quoted value" pairs
+// internal/dashboard's topic frontmatter — flat key: "quoted value" pairs
 // only, no nested structures, so a real YAML dependency would be overkill.
 func unquoteYAML(v string) string {
 	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {

@@ -14,17 +14,17 @@ const usage = `dashboard <command> [args…]
   show                          print current DASHBOARD.md (implies pull)
   write <file|->                replace DASHBOARD.md's content (no commit)
   commit -m "<msg>" [--no-push] stage + commit (+ pull --rebase + push)
-  reindex                       regenerate the thin index from dashboard/themes/*.md
+  reindex                       regenerate the thin index from dashboard/topics/*.md
 
-  theme list [--json]                        every theme's slug/title/status
-  theme show <slug>                          print one theme file (implies pull)
-  theme write <slug> <file|->                replace one theme file (no commit)
-  theme new <slug> --title "<t>" [--status "<s>"] [--parked]
-                                              scaffold a new theme file
-  theme commit <slug> -m "<msg>" [--no-push] commit+push JUST that one file
+  topic list [--json]                        every topic's slug/title/status
+  topic show <slug>                          print one topic file (implies pull)
+  topic write <slug> <file|->                replace one topic file (no commit)
+  topic new <slug> --title "<t>" [--status "<s>"] [--parked]
+                                              scaffold a new topic file
+  topic commit <slug> -m "<msg>" [--no-push] commit+push JUST that one file
 `
 
-const themeUsage = `dashboard theme <command> [args…]
+const topicUsage = `dashboard topic <command> [args…]
   list [--json]
   show <slug>
   write <slug> <file|->
@@ -71,8 +71,8 @@ func Run(root string, args []string) int {
 		cmdErr = d.DoCommit(msg, push)
 	case "reindex":
 		cmdErr = d.DoReindex()
-	case "theme":
-		return runTheme(d, args[1:])
+	case "topic":
+		return runTopic(d, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "dashboard: unknown command: %s\n\n%s", args[0], usage)
 		return 2
@@ -84,9 +84,9 @@ func Run(root string, args []string) int {
 	return 0
 }
 
-func runTheme(d *Dashboard, args []string) int {
+func runTopic(d *Dashboard, args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Print(themeUsage)
+		fmt.Print(topicUsage)
 		if len(args) == 0 {
 			return 2
 		}
@@ -101,55 +101,55 @@ func runTheme(d *Dashboard, args []string) int {
 				jsonOut = true
 			}
 		}
-		cmdErr = d.DoThemeList(jsonOut)
+		cmdErr = d.DoTopicList(jsonOut)
 	case "show":
 		if len(args) != 2 {
-			fmt.Fprint(os.Stderr, themeUsage)
+			fmt.Fprint(os.Stderr, topicUsage)
 			return 2
 		}
-		cmdErr = d.DoThemeShow(args[1])
+		cmdErr = d.DoTopicShow(args[1])
 	case "write":
 		if len(args) != 3 {
-			fmt.Fprint(os.Stderr, themeUsage)
+			fmt.Fprint(os.Stderr, topicUsage)
 			return 2
 		}
-		cmdErr = d.DoThemeWrite(args[1], args[2])
+		cmdErr = d.DoTopicWrite(args[1], args[2])
 	case "new":
 		if len(args) < 2 {
-			fmt.Fprint(os.Stderr, themeUsage)
+			fmt.Fprint(os.Stderr, topicUsage)
 			return 2
 		}
 		slug := args[1]
-		title, status, category, perr := parseThemeNewArgs(args[2:])
+		title, status, category, perr := parseTopicNewArgs(args[2:])
 		if perr != nil {
-			fmt.Fprintln(os.Stderr, "dashboard theme new:", perr)
+			fmt.Fprintln(os.Stderr, "dashboard topic new:", perr)
 			return 2
 		}
-		cmdErr = d.DoThemeNew(slug, title, status, category)
+		cmdErr = d.DoTopicNew(slug, title, status, category)
 	case "commit":
 		if len(args) < 2 {
-			fmt.Fprint(os.Stderr, themeUsage)
+			fmt.Fprint(os.Stderr, topicUsage)
 			return 2
 		}
 		slug := args[1]
 		msg, push, perr := parseCommitArgs(args[2:])
 		if perr != nil {
-			fmt.Fprintln(os.Stderr, "dashboard theme commit:", perr)
+			fmt.Fprintln(os.Stderr, "dashboard topic commit:", perr)
 			return 2
 		}
-		cmdErr = d.DoThemeCommit(slug, msg, push)
+		cmdErr = d.DoTopicCommit(slug, msg, push)
 	default:
-		fmt.Fprintf(os.Stderr, "dashboard theme: unknown command: %s\n\n%s", args[0], themeUsage)
+		fmt.Fprintf(os.Stderr, "dashboard topic: unknown command: %s\n\n%s", args[0], topicUsage)
 		return 2
 	}
 	if cmdErr != nil {
-		fmt.Fprintln(os.Stderr, "dashboard theme:", cmdErr)
+		fmt.Fprintln(os.Stderr, "dashboard topic:", cmdErr)
 		return 1
 	}
 	return 0
 }
 
-func parseThemeNewArgs(args []string) (title, status, category string, err error) {
+func parseTopicNewArgs(args []string) (title, status, category string, err error) {
 	category = "active"
 	for i := 0; i < len(args); i++ {
 		switch args[i] {

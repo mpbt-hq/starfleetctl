@@ -178,7 +178,7 @@ func fixAgentsIndex(b *Bootstrap) error {
 }
 
 // verifyDashboardMD/fixDashboardMD: same idea as CLAUDE.md above, but for
-// DASHBOARD.md's dashboard/themes/ + reindex system (internal/dashboard).
+// DASHBOARD.md's dashboard/topics/ + reindex system (internal/dashboard).
 // DASHBOARD.md is now a generated artifact under .starfleet-ai/ (not committed).
 func verifyDashboardMD(b *Bootstrap) (bool, string) {
 	path := filepath.Join(b.Root, ".starfleet-ai", "DASHBOARD.md")
@@ -196,7 +196,7 @@ func fixDashboardMD(b *Bootstrap) error {
 	if _, err := d.EnsureBootstrapped(); err != nil {
 		return err
 	}
-	// Also run reindex to populate tables from theme files (idempotent)
+	// Also run reindex to populate tables from topic files (idempotent)
 	return d.DoReindex()
 }
 

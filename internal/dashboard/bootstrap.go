@@ -8,7 +8,7 @@ import "os"
 // minimalSkeleton is what DASHBOARD.md looks like on a checkout that has
 // never had one — just enough structure (the two headings DoReindex looks
 // for, plus the same footer note the hand-authored version carries) for
-// `dashboard theme new`/`reindex` to work immediately, no themes yet.
+// `dashboard topic new`/`reindex` to work immediately, no topics yet.
 const minimalSkeleton = `# DASHBOARD.md
 
 Cross-session "what's in flight / what got parked" index — lets parallel agents
@@ -18,29 +18,29 @@ half-started ideas from getting lost when a session ends.
 **Not individual PRs** (GitHub already tracks those via ` + "`gh pr list`" + `).
 
 Two sections:
-- **Aktive Themen** — anything with real state (a branch, a doc, an open decision).
-- **Parkplatz** — noticed-but-not-started, or started-then-set-aside.
+- **Active Topics** — anything with real state (a branch, a doc, an open decision).
+- **Parked** — noticed-but-not-started, or started-then-set-aside.
 
-Thin index — each row links to its own file under ` + "`dashboard/themes/`" + `. Use
-` + "`starfleetctl dashboard theme <cmd>`" + ` to read/write/commit individual themes;
+Thin index — each row links to its own file under ` + "`dashboard/topics/`" + `. Use
+` + "`starfleetctl dashboard topic <cmd>`" + ` to read/write/commit individual topics;
 this index itself is regenerated with
 ` + "`starfleetctl dashboard reindex`" + ` and should not normally be hand-edited.
 
 **Maintenance rule** (see ` + "`CLAUDE.md`" + ` "Working practices"): when you start,
-pause, or finish a theme, update its entry **in the same session**.
+pause, or finish a topic, update its entry **in the same session**.
 Ephemeral live-status (who's online right now) stays in
 ` + "`starfleetctl agent-bus board`" + ` / ` + "`starfleetctl pr-claim list`" + `.
 
-## Aktive Themen
+## Active Topics
 
-| Thema | Status | Datei |
+| Topic | Status | File |
 |---|---|---|
 
-## Parkplatz
+## Parked
 
-Angefangen/aufgefallen, aber (noch) nicht weiterverfolgt — kurze Notiz statt Verlust.
+Started/noticed, but (yet) not pursued further — a short note instead of losing it.
 
-| Thema | Notiert | Seit | Datei |
+| Topic | Noted by | Since | File |
 |---|---|---|---|
 
 ---
@@ -59,7 +59,7 @@ func (d *Dashboard) EnsureBootstrapped() (created bool, err error) {
 	if _, err := os.Stat(d.File); err == nil {
 		return false, nil
 	}
-	if err := os.MkdirAll(d.ThemesDir(), 0o755); err != nil {
+	if err := os.MkdirAll(d.TopicsDir(), 0o755); err != nil {
 		return false, err
 	}
 	if err := os.WriteFile(d.File, []byte(minimalSkeleton), 0o644); err != nil {

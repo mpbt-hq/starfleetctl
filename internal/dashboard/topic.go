@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Per-theme file support (DASHBOARD.md restructuring, directive m0048/m0073):
+// Per-topic file support (DASHBOARD.md restructuring, directive m0048/m0073):
 // DASHBOARD.md itself is a thin, mechanically-regenerated index; the actual
-// content for each theme lives in its own file under dashboard/themes/,
+// content for each topic lives in its own file under dashboard/topics/,
 // Markdown body with a small YAML-ish frontmatter block (mirroring Claude
 // Code's own per-user memory-file format — see DASHBOARD-RESTRUCTURE.md for
 // the full design rationale). This keeps concurrent ships from colliding on
-// one shared file: two ships editing two different themes touch two
+// one shared file: two ships editing two different topics touch two
 // different files, and only reindex (regenerating the thin index) touches
 // DASHBOARD.md itself, which is a pure function of the current file set —
 // two racing reindexes converge to the same byte-identical output.
@@ -25,8 +25,8 @@ import (
 	"strings"
 )
 
-// ThemeMeta is one theme file's frontmatter.
-type ThemeMeta struct {
+// TopicMeta is one topic file's frontmatter.
+type TopicMeta struct {
 	Slug         string
 	Title        string
 	Category     string // "active" or "parked"
@@ -37,12 +37,12 @@ type ThemeMeta struct {
 	MigratedFrom string
 }
 
-func (d *Dashboard) ThemesDir() string {
-	return filepath.Join(d.Root, "dashboard", "themes")
+func (d *Dashboard) TopicsDir() string {
+	return filepath.Join(d.Root, "dashboard", "topics")
 }
 
-func (d *Dashboard) themePath(slug string) string {
-	return filepath.Join(d.ThemesDir(), slug+".md")
+func (d *Dashboard) topicPath(slug string) string {
+	return filepath.Join(d.TopicsDir(), slug+".md")
 }
 
 // unquoteYAML strips a double-quoted YAML scalar's quoting/escaping; a bare
@@ -64,21 +64,21 @@ func quoteYAML(v string) string {
 	return `"` + v + `"`
 }
 
-// parseThemeFile splits a theme file into its frontmatter (parsed) and body.
-func parseThemeFile(data []byte) (ThemeMeta, string, error) {
+// parseTopicFile splits a topic file into its frontmatter (parsed) and body.
+func parseTopicFile(data []byte) (TopicMeta, string, error) {
 	s := string(data)
 	if !strings.HasPrefix(s, "---\n") {
-		return ThemeMeta{}, "", fmt.Errorf("missing frontmatter (no leading '---')")
+		return TopicMeta{}, "", fmt.Errorf("missing frontmatter (no leading '---')")
 	}
 	rest := s[len("---\n"):]
 	idx := strings.Index(rest, "\n---\n")
 	if idx < 0 {
-		return ThemeMeta{}, "", fmt.Errorf("unterminated frontmatter (no closing '---')")
+		return TopicMeta{}, "", fmt.Errorf("unterminated frontmatter (no closing '---')")
 	}
 	fm := rest[:idx]
 	body := strings.TrimPrefix(rest[idx+len("\n---\n"):], "\n")
 
-	var m ThemeMeta
+	var m TopicMeta
 	for _, line := range strings.Split(fm, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -112,7 +112,7 @@ func parseThemeFile(data []byte) (ThemeMeta, string, error) {
 	return m, body, nil
 }
 
-func writeThemeFile(path string, m ThemeMeta, body string) error {
+func writeTopicFile(path string, m TopicMeta, body string) error {
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "slug: %s\n", m.Slug)
@@ -134,25 +134,25 @@ func writeThemeFile(path string, m ThemeMeta, body string) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-// loadAllThemes reads every dashboard/themes/*.md file's frontmatter.
-func (d *Dashboard) loadAllThemes() ([]ThemeMeta, error) {
-	entries, err := os.ReadDir(d.ThemesDir())
+// loadAllTopics reads every dashboard/topics/*.md file's frontmatter.
+func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
+	entries, err := os.ReadDir(d.TopicsDir())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	var metas []ThemeMeta
+	var metas []TopicMeta
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(d.ThemesDir(), e.Name()))
+		data, err := os.ReadFile(filepath.Join(d.TopicsDir(), e.Name()))
 		if err != nil {
 			return nil, err
 		}
-		m, _, err := parseThemeFile(data)
+		m, _, err := parseTopicFile(data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", e.Name(), err)
 		}

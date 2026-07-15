@@ -143,7 +143,7 @@ ship's context automatically.
 | Command | Purpose |
 |---|---|
 | `agent-bus` | Status board + cross-session directives |
-| `dashboard` | Project theme tracking |
+| `dashboard` | Project topic tracking |
 | `pr-claim` | Advisory PR-branch locks |
 | `ws-commit` | Atomic commit+push under lock |
 | `ship-names` | Session identity registry |

@@ -37,7 +37,7 @@
 // DoWatch is a different execution model (setsid-detached background
 // daemon, not Monitor-tool-managed) and was never tested against the
 // original failure mode either way — untested, not confirmed safe or
-// unsafe. See DASHBOARD.md's starfleetctl row / the m0047 theme file for
+// unsafe. See DASHBOARD.md's starfleetctl row / the m0047 topic file for
 // the full writeup.
 package agentbus
 

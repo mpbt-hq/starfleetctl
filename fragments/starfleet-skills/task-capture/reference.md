@@ -12,13 +12,13 @@ starfleetctl task capture --title "<t>" [options]
 
 ## Description
 
-Captures a task into the workspace dashboard (as a `dashboard/themes/<slug>.md`
-theme entry, appearing under "Aktive Themen" in `DASHBOARD.md`) and optionally
+Captures a task into the workspace dashboard (as a `dashboard/topics/<slug>.md`
+topic entry, appearing under "Active Topics" in `DASHBOARD.md`) and optionally
 commissions a free ship to work it. **Never executes the task itself** — this is
 pure commandeering.
 
-The dashboard theme is created via the sanctioned `dashboard` package calls only;
-no raw filesystem access to theme files.
+The dashboard topic is created via the sanctioned `dashboard` package calls only;
+no raw filesystem access to topic files.
 
 ## Options
 
@@ -26,7 +26,7 @@ no raw filesystem access to theme files.
 |------|----------|-------------|
 | `--title "<t>"` | yes | Task title. Used for slug derivation and display. |
 | `--desc "<text>"` | no | Free-form task description / acceptance criteria. |
-| `--slug "<slug>"` | no | Override the auto-derived dashboard theme slug. |
+| `--slug "<slug>"` | no | Override the auto-derived dashboard topic slug. |
 | `--assign [<ship>]` | no | Commission a ship. Without arg: pick first idle, non-stale ship. With arg: commission that specific ship. |
 | `--no-push` | no | Stage + commit locally but do not push to origin. |
 | `-h`, `--help` | no | Show help. |
@@ -77,12 +77,12 @@ starfleetctl task capture --title "WIP: refactor dashboard" --no-push
 ## How it works (internally)
 
 1. `dashboard.New(root)` — initialize dashboard handle.
-2. `dashboard.DoThemeNew(slug, title, "offen", "")` — reserve slug (collision guard).
+2. `dashboard.DoTopicNew(slug, title, "open", "")` — reserve slug (collision guard).
 3. If `--assign`: `agentbus.BoardEntries()` → pick first `idle && !stale` ship.
-4. Build theme file content (frontmatter + body) with `kind: task`, `created-by`,
+4. Build topic file content (frontmatter + body) with `kind: task`, `created-by`,
    `created`, `assigned-to`, `status`.
-5. `dashboard.DoThemeWrite(slug, tmpFile)` — write via sanctioned path.
-6. `dashboard.DoThemeCommit(slug, "task: "+title, push)` — commit the theme.
+5. `dashboard.DoTopicWrite(slug, tmpFile)` — write via sanctioned path.
+6. `dashboard.DoTopicCommit(slug, "task: "+title, push)` — commit the topic.
 7. `dashboard.DoReindex()` + `dashboard.DoCommit("reindex: add task "+slug, push)`
    — refresh DASHBOARD.md index.
 8. If ship commissioned: `agentbus.Tell(ship, german directive)` — notify via
@@ -94,11 +94,11 @@ When a ship is commissioned, it receives a German-language directive via
 `agent-bus tell`:
 
 ```
-Neue Aufgabe für dich erfasst: <title> (Dashboard-Theme `<slug>`). Bitte dort
+Neue Aufgabe für dich erfasst: <title> (Dashboard-Topic `<slug>`). Bitte dort
 Details lesen und abarbeiten. Status danach via agent-bus melden.
 ```
 
 The receiving ship should:
-1. Read the dashboard theme via `starfleetctl dashboard theme show <slug>`.
+1. Read the dashboard topic via `starfleetctl dashboard topic show <slug>`.
 2. Execute the task.
 3. Report completion via `agent-bus tell` to the praetor/sender.

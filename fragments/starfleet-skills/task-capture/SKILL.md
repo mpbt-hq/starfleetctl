@@ -18,8 +18,8 @@ and forwards the printed summary. No judgement, no file editing.
 1. **Never execute the task.** Capturing is the whole job. The assigned ship
    does the work later.
 2. **No direct file access.** Never `Read`/`Edit`/`Write` `DASHBOARD.md` or
-   `dashboard/themes/*.md`. All access goes through `starfleetctl dashboard
-   theme …` (the helper already does this).
+   `dashboard/topics/*.md`. All access goes through `starfleetctl dashboard
+   topic …` (the helper already does this).
 3. **Messages to other ships / the praetor go in German** (agent-bus
    `tell`/`broadcast`). Code, commits, and doc files stay English.
 4. **Report back** to the sender (e.g. Enterprise) via `agent-bus tell` with
@@ -38,7 +38,7 @@ starfleetctl task capture --title "<short task title>" \
 - `--assign` with **no ship name** → picks the first `idle`, non-stale ship
   from the agent-bus board and commissions it.
 - `--assign <ship>` → commission that specific ship.
-- Without `--assign` → task is recorded as `offen` (open), no ship yet.
+- Without `--assign` → task is recorded as `open` (open), no ship yet.
 - `--no-push` → stage + commit locally but don't push to origin.
 
 The command prints `task-captured: slug=… status=… assigned-to=…` — forward
@@ -46,17 +46,17 @@ that to the sender.
 
 ## What the command does (so you can explain it)
 
-1. Reserves a dashboard theme slug (`task-<derived>` unless `--slug` given)
-   via `starfleetctl dashboard theme new` — refuses if the slug already exists
+1. Reserves a dashboard topic slug (`task-<derived>` unless `--slug` given)
+   via `starfleetctl dashboard topic new` — refuses if the slug already exists
    (collision guard).
 2. Optionally selects a free ship (idle + not stale) before writing.
-3. Writes the task as a `category: active` theme (shows in DASHBOARD.md's
-   "Aktive Themen") with task-specific frontmatter: `kind: task`,
+3. Writes the task as a `category: active` topic (shows in DASHBOARD.md's
+   "Active Topics") with task-specific frontmatter: `kind: task`,
    `created-by`, `created`, `assigned-to`, plus the description body.
-4. `starfleetctl dashboard theme commit` — commits + pushes just that one file.
+4. `starfleetctl dashboard topic commit` — commits + pushes just that one file.
 5. `starfleetctl dashboard reindex` + `dashboard commit` — refreshes the index.
 6. If a ship was chosen: `starfleetctl agent-bus tell <ship>` with a German
-   directive pointing at the dashboard theme.
+   directive pointing at the dashboard topic.
 
 ## Manual fallback (only if `starfleetctl task capture` is unavailable)
 
@@ -64,13 +64,13 @@ Use the same `starfleetctl` subcommands directly — never the files:
 
 ```sh
 SLUG="task-my-task"
-starfleetctl dashboard theme new "$SLUG" --title "<title>" --status "offen"
-# build the theme content (frontmatter + body) in a scratch file under _WORK_/.tmp
-starfleetctl dashboard theme write "$SLUG" _WORK_/.tmp/task.md
-starfleetctl dashboard theme commit "$SLUG" -m "task: <title>"
+starfleetctl dashboard topic new "$SLUG" --title "<title>" --status "open"
+# build the topic content (frontmatter + body) in a scratch file under _WORK_/.tmp
+starfleetctl dashboard topic write "$SLUG" _WORK_/.tmp/task.md
+starfleetctl dashboard topic commit "$SLUG" -m "task: <title>"
 starfleetctl dashboard reindex
 starfleetctl dashboard commit -m "reindex: add task $SLUG"
 # optional commission:
 SHIP=$(starfleetctl agent-bus board --json | <pick idle,non-stale>)
-starfleetctl agent-bus tell "$SHIP" "Neue Aufgabe für dich erfasst: <title> (Dashboard-Theme \`$SLUG\`). Bitte dort Details lesen und abarbeiten."
+starfleetctl agent-bus tell "$SHIP" "Neue Aufgabe für dich erfasst: <title> (Dashboard-Topic \`$SLUG\`). Bitte dort Details lesen und abarbeiten."
 ```

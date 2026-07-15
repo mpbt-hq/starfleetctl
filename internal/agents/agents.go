@@ -6,7 +6,7 @@
 // `@`-imports pointing to per-topic fragment files), and the actual
 // content lives in per-topic fragment files under .starfleet-ai/agents.d/,
 // each a Markdown body with a small frontmatter block — same shape and
-// rationale as internal/dashboard's theme system (DASHBOARD.md
+// rationale as internal/dashboard's topic system (DASHBOARD.md
 // restructuring, directive m0048/m0073): concurrent ships editing
 // different fragments touch different files, and only `reindex`
 // (a pure function of the current fragment set) touches the generated

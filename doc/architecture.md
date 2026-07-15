@@ -34,7 +34,7 @@ workspace/
 │       ├── pr-3162.tsv
 │       └── pr-3163.tsv
 ├── DASHBOARD.md            # Project status index
-└── dashboard/themes/       # Per-theme status files
+└── dashboard/topics/       # Per-topic status files
 ```
 
 ## Core Concepts

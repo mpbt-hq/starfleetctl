@@ -3,8 +3,8 @@
 //
 // Package task is the Go port of scripts/task-capture — pure commandeering
 // helper for the starfleet fleet. It captures a task into the workspace
-// dashboard (as a dashboard/themes/*.md theme entry) via the sanctioned
-// dashboard package calls ONLY, never touching the theme files as raw
+// dashboard (as a dashboard/topics/*.md topic entry) via the sanctioned
+// dashboard package calls ONLY, never touching the topic files as raw
 // filesystem paths, and it NEVER executes the task itself. Optionally it
 // commissions a free (idle, non-stale) ship by sending it an agent-bus
 // directive. See scripts/task-capture (the bash original) for the full
@@ -26,7 +26,7 @@ import (
 const usage = `task <command> [args…]
 
   capture --title "<t>" [options]   capture a task into the dashboard (as a
-                                    dashboard/themes/<slug>.md theme) and
+                                    dashboard/topics/<slug>.md topic) and
                                     optionally commission a free ship to work
                                     it. Never executes the task itself.
 
@@ -54,13 +54,13 @@ func Run(root string, args []string) int {
 
 const captureUsage = `task capture --title "<t>" [options]
 
-Captures a task into the dashboard (a dashboard/themes/<slug>.md theme entry,
-showing up under "Aktive Themen") and optionally commissions a free ship.
+Captures a task into the dashboard (a dashboard/topics/<slug>.md topic entry,
+showing up under "Active Topics") and optionally commissions a free ship.
 
 Options:
   --title "<t>"        Task title (required).
   --desc  "<text>"     Free-form task description / acceptance criteria.
-  --slug  "<slug>"     Override the auto-derived dashboard theme slug.
+  --slug  "<slug>"     Override the auto-derived dashboard topic slug.
   --assign [<ship>]    Commission a ship. With no arg, pick the first idle,
                        non-stale ship from the agent-bus board. With a ship
                        name, commission that specific ship.
@@ -93,12 +93,12 @@ func runCapture(root string, args []string) int {
 	}
 
 	// Reserve the slug (refuses if it already exists — collision guard).
-	if err := d.DoThemeNew(slug, title, "offen", ""); err != nil {
+	if err := d.DoTopicNew(slug, title, "open", ""); err != nil {
 		fmt.Fprintf(os.Stderr, "task capture: slug already exists: %s\n", slug)
 		return 3
 	}
 
-	status := "offen"
+	status := "open"
 	assignedTo := "—"
 
 	// Pick a free ship before we write the final frontmatter.
@@ -109,7 +109,7 @@ func runCapture(root string, args []string) int {
 			return 1
 		}
 		if ship == "" {
-			fmt.Fprintln(os.Stderr, "task capture: no free (idle, non-stale) ship available — capturing as offen")
+			fmt.Fprintln(os.Stderr, "task capture: no free (idle, non-stale) ship available — capturing as open")
 			assignMode = ""
 		} else {
 			assign = ship
@@ -118,27 +118,27 @@ func runCapture(root string, args []string) int {
 	}
 
 	if assignMode != "" {
-		status = "beauftragt"
+		status = "assigned"
 		assignedTo = assign
 	}
 
-	// Build the theme file content (frontmatter + body) and write it via the
+	// Build the topic file content (frontmatter + body) and write it via the
 	// sanctioned dashboard path (never hand-edit the file directly).
-	content := buildThemeFile(slug, title, status, assignedTo, desc)
-	if err := writeThemeContent(d, slug, content); err != nil {
+	content := buildTopicFile(slug, title, status, assignedTo, desc)
+	if err := writeTopicContent(d, slug, content); err != nil {
 		fmt.Fprintln(os.Stderr, "task capture:", err)
 		return 1
 	}
 
 	push := !noPush
-	if err := d.DoThemeCommit(slug, "task: "+title, push); err != nil {
+	if err := d.DoTopicCommit(slug, "task: "+title, push); err != nil {
 		fmt.Fprintln(os.Stderr, "task capture:", err)
 		return 1
 	}
 
-	// Reindex so the new task shows up in DASHBOARD.md's "Aktive Themen"
+	// Reindex so the new task shows up in DASHBOARD.md's "Active Topics"
 	// table, then commit the regenerated index (sanctioned path — never
-	// hand-edit it). Best-effort: a malformed sibling theme can break reindex
+	// hand-edit it). Best-effort: a malformed sibling topic can break reindex
 	// fleet-wide; the task itself is already captured + committed, so don't
 	// fail the whole command on a reindex/commit problem — just warn.
 	if err := d.DoReindex(); err != nil {
@@ -150,7 +150,7 @@ func runCapture(root string, args []string) int {
 	// Commission the ship (after the dashboard state is durable).
 	if assignMode != "" && assign != "" {
 		msg := "Neue Aufgabe für dich erfasst: " + title +
-			" (Dashboard-Theme `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
+			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
 		b, berr := agentbus.New(root)
 		if berr != nil {
 			fmt.Fprintln(os.Stderr, "task capture:", berr)
@@ -220,7 +220,7 @@ func parseCaptureArgs(args []string) (title, desc, slug, assign, assignMode stri
 	return
 }
 
-// deriveSlug turns a title into a dashboard theme slug: lowercase, ASCII
+// deriveSlug turns a title into a dashboard topic slug: lowercase, ASCII
 // alnum-only, dash-separated, namespaced with "task-". Non-ASCII (umlauts
 // etc.) collapse to a dash. Mirrors scripts/task-capture's slug derivation.
 func deriveSlug(title string) string {
@@ -258,9 +258,9 @@ func pickFreeShip(root string) (string, error) {
 	return "", nil
 }
 
-// buildThemeFile renders the theme file content (frontmatter + body), matching
+// buildTopicFile renders the topic file content (frontmatter + body), matching
 // scripts/task-capture's output exactly.
-func buildThemeFile(slug, title, status, assignedTo, desc string) string {
+func buildTopicFile(slug, title, status, assignedTo, desc string) string {
 	createdBy := os.Getenv("STARFLEET_SHIP_ID")
 	if createdBy == "" {
 		createdBy = "unknown"
@@ -284,9 +284,9 @@ func buildThemeFile(slug, title, status, assignedTo, desc string) string {
 	return b.String()
 }
 
-// writeThemeContent writes the generated theme content to a temp file and
+// writeTopicContent writes the generated topic content to a temp file and
 // commits it via the dashboard package's sanctioned write path.
-func writeThemeContent(d *dashboard.Dashboard, slug, content string) error {
+func writeTopicContent(d *dashboard.Dashboard, slug, content string) error {
 	tmpDir := filepath.Join(d.Root, "_WORK_", ".tmp")
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return err
@@ -304,5 +304,5 @@ func writeThemeContent(d *dashboard.Dashboard, slug, content string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return d.DoThemeWrite(slug, tmpName)
+	return d.DoTopicWrite(slug, tmpName)
 }

@@ -1,17 +1,17 @@
 # dashboard
 
-Project status tracking via theme files.
+Project status tracking via topic files.
 
 ## Synopsis
 
 ```
 starfleetctl dashboard <command> [args...]
-starfleetctl dashboard theme <command> [args...]
+starfleetctl dashboard topic <command> [args...]
 ```
 
 ## How It Works
 
-The dashboard is a thin index (`DASHBOARD.md`) that links to per-theme files under `dashboard/themes/`. Each theme tracks one initiative or topic. The index is regenerated from theme file frontmatter — two agents racing a `reindex` converge to the same output.
+The dashboard is a thin index (`DASHBOARD.md`) that links to per-topic files under `dashboard/topics/`. Each topic tracks one initiative or topic. The index is regenerated from topic file frontmatter — two agents racing a `reindex` converge to the same output.
 
 ## Commands
 
@@ -24,42 +24,42 @@ starfleetctl dashboard show
 # Pull latest from remote
 starfleetctl dashboard pull
 
-# Regenerate index from theme files
+# Regenerate index from topic files
 starfleetctl dashboard reindex
 
 # Write new content (no commit)
 echo "new content" | starfleetctl dashboard write -
 
 # Commit and push
-starfleetctl dashboard commit -m "update: added new theme"
+starfleetctl dashboard commit -m "update: added new topic"
 starfleetctl dashboard commit -m "update" --no-push
 ```
 
-### Theme Files
+### Topic Files
 
 ```sh
-# List all themes
-starfleetctl dashboard theme list
-starfleetctl dashboard theme list --json
+# List all topics
+starfleetctl dashboard topic list
+starfleetctl dashboard topic list --json
 
-# Show a theme's content
-starfleetctl dashboard theme show my-feature
+# Show a topic's content
+starfleetctl dashboard topic show my-feature
 
-# Write a theme file
-starfleetctl dashboard theme write my-feature new-content.md
-cat content.md | starfleetctl dashboard theme write my-feature -
+# Write a topic file
+starfleetctl dashboard topic write my-feature new-content.md
+cat content.md | starfleetctl dashboard topic write my-feature -
 
-# Create a new theme
-starfleetctl dashboard theme new my-feature --title "My Feature" --status "planned"
-starfleetctl dashboard theme new parked-idea --title "Idea" --status "noted" --parked
+# Create a new topic
+starfleetctl dashboard topic new my-feature --title "My Feature" --status "planned"
+starfleetctl dashboard topic new parked-idea --title "Idea" --status "noted" --parked
 
-# Commit a single theme (concurrent-safe)
-starfleetctl dashboard theme commit my-feature -m "progress: build passes"
+# Commit a single topic (concurrent-safe)
+starfleetctl dashboard topic commit my-feature -m "progress: build passes"
 ```
 
-## Theme File Format
+## Topic File Format
 
-Each theme file has YAML frontmatter:
+Each topic file has YAML frontmatter:
 
 ```markdown
 ---
@@ -70,7 +70,7 @@ status: "in progress"
 since: 2026-07-15
 ---
 
-Description of what this theme tracks...
+Description of what this topic tracks...
 ```
 
 ### Categories
@@ -80,4 +80,4 @@ Description of what this theme tracks...
 
 ## Concurrency
 
-`theme commit` locks only the one theme file's `git add`, so two agents committing different themes never collide. The full `dashboard commit` locks the entire workspace commit path.
+`topic commit` locks only the one topic file's `git add`, so two agents committing different topics never collide. The full `dashboard commit` locks the entire workspace commit path.

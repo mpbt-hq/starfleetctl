@@ -12,11 +12,11 @@ import (
 	"strings"
 )
 
-// DoThemeList prints every theme's slug/title/status (or, with jsonOut, a
+// DoTopicList prints every topic's slug/title/status (or, with jsonOut, a
 // JSON array) — the "what's tracked" overview, same spirit as `pr-claim
 // --list`/`ship-names list`.
-func (d *Dashboard) DoThemeList(jsonOut bool) error {
-	metas, err := d.loadAllThemes()
+func (d *Dashboard) DoTopicList(jsonOut bool) error {
+	metas, err := d.loadAllTopics()
 	if err != nil {
 		return err
 	}
@@ -52,13 +52,13 @@ func (d *Dashboard) DoThemeList(jsonOut bool) error {
 	return nil
 }
 
-// DoThemeShow prints one theme file's full content (frontmatter + body),
+// DoTopicShow prints one topic file's full content (frontmatter + body),
 // pulling first like DoShow.
-func (d *Dashboard) DoThemeShow(slug string) error {
+func (d *Dashboard) DoTopicShow(slug string) error {
 	if err := d.sync(runQuiet); err != nil {
 		return err
 	}
-	data, err := os.ReadFile(d.themePath(slug))
+	data, err := os.ReadFile(d.topicPath(slug))
 	if err != nil {
 		return err
 	}
@@ -66,9 +66,9 @@ func (d *Dashboard) DoThemeShow(slug string) error {
 	return err
 }
 
-// DoThemeWrite replaces one theme file's content (raw, frontmatter and all)
+// DoTopicWrite replaces one topic file's content (raw, frontmatter and all)
 // from src ("-" for stdin). Does NOT commit.
-func (d *Dashboard) DoThemeWrite(slug, src string) error {
+func (d *Dashboard) DoTopicWrite(slug, src string) error {
 	var r io.Reader
 	if src == "-" {
 		r = os.Stdin
@@ -84,49 +84,49 @@ func (d *Dashboard) DoThemeWrite(slug, src string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(d.ThemesDir(), 0o755); err != nil {
+	if err := os.MkdirAll(d.TopicsDir(), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(d.themePath(slug), data, 0o644)
+	return os.WriteFile(d.topicPath(slug), data, 0o644)
 }
 
-// DoThemeNew scaffolds a new theme file with frontmatter, refusing to
+// DoTopicNew scaffolds a new topic file with frontmatter, refusing to
 // clobber an existing one.
-func (d *Dashboard) DoThemeNew(slug, title, status, category string) error {
+func (d *Dashboard) DoTopicNew(slug, title, status, category string) error {
 	if category == "" {
 		category = "active"
 	}
-	path := d.themePath(slug)
+	path := d.topicPath(slug)
 	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("theme already exists: %s", path)
+		return fmt.Errorf("topic already exists: %s", path)
 	}
 	if _, err := d.EnsureBootstrapped(); err != nil {
 		return err
 	}
-	m := ThemeMeta{Slug: slug, Title: title, Category: category, Status: status, DocRef: "—"}
+	m := TopicMeta{Slug: slug, Title: title, Category: category, Status: status, DocRef: "—"}
 	if category == "parked" {
 		m.NotedBy = status
 		m.Since = ""
 	}
-	if err := writeThemeFile(path, m, "(fill in)\n"); err != nil {
+	if err := writeTopicFile(path, m, "(fill in)\n"); err != nil {
 		return err
 	}
 	fmt.Println(path)
 	return nil
 }
 
-// DoThemeCommit stages, commits, and (unless noPush) pushes ONE theme file —
+// DoTopicCommit stages, commits, and (unless noPush) pushes ONE topic file —
 // the concurrency win over whole-file DoCommit: two ships committing two
-// different theme files never collide on this path. Same shared clone lock
+// different topic files never collide on this path. Same shared clone lock
 // as DoCommit, scoped to one file's `git add`.
-func (d *Dashboard) DoThemeCommit(slug, msg string, push bool) error {
+func (d *Dashboard) DoTopicCommit(slug, msg string, push bool) error {
 	lh, err := d.lock()
 	if err != nil {
 		return err
 	}
 	defer lh.Close()
 
-	path := d.themePath(slug)
+	path := d.topicPath(slug)
 	if err := run(d.Root, "git", "add", path); err != nil {
 		return err
 	}
@@ -149,12 +149,12 @@ func (d *Dashboard) DoThemeCommit(slug, msg string, push bool) error {
 }
 
 var (
-	reAktiveHeading    = regexp.MustCompile(`(?m)^## Aktive Themen\s*$`)
-	reParkplatzHeading = regexp.MustCompile(`(?m)^## Parkplatz\s*$`)
+	reActiveHeading = regexp.MustCompile(`(?m)^## Active Topics\s*$`)
+	reParkedHeading = regexp.MustCompile(`(?m)^## Parked\s*$`)
 )
 
-// DoReindex regenerates DASHBOARD.md's "Aktive Themen"/"Parkplatz" thin
-// index tables from every dashboard/themes/*.md file's frontmatter, leaving
+// DoReindex regenerates DASHBOARD.md's "Active Topics"/"Parked" thin
+// index tables from every dashboard/topics/*.md file's frontmatter, leaving
 // everything else in the file (preamble prose, the trailing "Not tracked
 // here" footer) untouched. Pure function of the current file set: two
 // ships racing a reindex converge to the same byte-identical output.
@@ -162,7 +162,7 @@ func (d *Dashboard) DoReindex() error {
 	if _, err := d.EnsureBootstrapped(); err != nil {
 		return err
 	}
-	metas, err := d.loadAllThemes()
+	metas, err := d.loadAllTopics()
 	if err != nil {
 		return err
 	}
@@ -172,14 +172,14 @@ func (d *Dashboard) DoReindex() error {
 	}
 	content := string(data)
 
-	locAktive := reAktiveHeading.FindStringIndex(content)
-	locParkplatz := reParkplatzHeading.FindStringIndex(content)
-	if locAktive == nil || locParkplatz == nil {
-		return fmt.Errorf("dashboard reindex: could not find '## Aktive Themen'/'## Parkplatz' headings in %s", d.File)
+	locActive := reActiveHeading.FindStringIndex(content)
+	locParked := reParkedHeading.FindStringIndex(content)
+	if locActive == nil || locParked == nil {
+		return fmt.Errorf("dashboard reindex: could not find '## Active Topics'/'## Parked' headings in %s", d.File)
 	}
-	preamble := content[:locAktive[0]]
-	// footer: everything from the next "\n---\n" after Parkplatz's heading onward
-	tail := content[locParkplatz[0]:]
+	preamble := content[:locActive[0]]
+	// footer: everything from the next "\n---\n" after Parked's heading onward
+	tail := content[locParked[0]:]
 	footerIdx := strings.Index(tail, "\n---\n")
 	var footer string
 	if footerIdx >= 0 {
@@ -190,23 +190,23 @@ func (d *Dashboard) DoReindex() error {
 
 	var b strings.Builder
 	b.WriteString(preamble)
-	b.WriteString("## Aktive Themen\n\n")
-	b.WriteString("| Thema | Status | Datei |\n|---|---|---|\n")
+	b.WriteString("## Active Topics\n\n")
+	b.WriteString("| Topic | Status | File |\n|---|---|---|\n")
 	for _, m := range metas {
 		if m.Category != "active" {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | [`dashboard/themes/%s.md`](dashboard/themes/%s.md) |\n",
+		b.WriteString(fmt.Sprintf("| %s | %s | [`dashboard/topics/%s.md`](dashboard/topics/%s.md) |\n",
 			stripMD(m.Title), oneLiner(m.Status, 140), m.Slug, m.Slug))
 	}
-	b.WriteString("\n## Parkplatz\n\n")
-	b.WriteString("Angefangen/aufgefallen, aber (noch) nicht weiterverfolgt — kurze Notiz statt Verlust.\n\n")
-	b.WriteString("| Thema | Notiert | Seit | Datei |\n|---|---|---|---|\n")
+	b.WriteString("\n## Parked\n\n")
+	b.WriteString("Started/noticed, but (yet) not pursued further — a short note instead of losing it.\n\n")
+	b.WriteString("| Topic | Noted by | Since | File |\n|---|---|---|---|\n")
 	for _, m := range metas {
 		if m.Category != "parked" {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | [`dashboard/themes/%s.md`](dashboard/themes/%s.md) |\n",
+		b.WriteString(fmt.Sprintf("| %s | %s | %s | [`dashboard/topics/%s.md`](dashboard/topics/%s.md) |\n",
 			stripMD(m.Title), m.NotedBy, m.Since, m.Slug, m.Slug))
 	}
 	b.WriteString("\n")
