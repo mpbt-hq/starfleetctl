@@ -169,7 +169,7 @@ func (a *Agents) DoNew(slug, title string, order int, owner string) error {
 // Pure function of the current fragment set — two ships racing a reindex
 // converge to the same byte-identical output. Bootstraps the index first
 // if it doesn't exist yet.
-func (a *Agents) DoReindex(_ bool) error {
+func (a *Agents) DoReindex(inline bool) error {
 	if _, err := a.EnsureBootstrapped(); err != nil {
 		return err
 	}
@@ -180,15 +180,45 @@ func (a *Agents) DoReindex(_ bool) error {
 
 	var b strings.Builder
 	b.WriteString(indexHeader)
+
+	if !inline {
+		for _, m := range metas {
+			fmt.Fprintf(&b, "@%s\n", a.fragmentImportPath(m))
+		}
+		if err := os.WriteFile(a.IndexFile(), []byte(b.String()), 0o644); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Inline mode: drop the @-imports and embed every fragment's full content
+	// (frontmatter + body) into the index. Some agents (opencode) don't
+	// resolve @-imports, so a self-contained file is the only way they
+	// receive the instructions.
 	for _, m := range metas {
-		importPath := a.fragmentImportPath(m)
-		fmt.Fprintf(&b, "@%s\n", importPath)
+		content, rerr := a.readFragmentContent(m)
+		if rerr != nil {
+			return rerr
+		}
+		fmt.Fprintf(&b, "\n<!-- begin inlined fragment: %s -->\n", m.Slug)
+		b.WriteString(content)
+		fmt.Fprintf(&b, "\n<!-- end inlined fragment: %s -->\n", m.Slug)
 	}
 	if err := os.WriteFile(a.IndexFile(), []byte(b.String()), 0o644); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// readFragmentContent returns a fragment file's raw content (frontmatter +
+// body) for inlining into the generated index.
+func (a *Agents) readFragmentContent(m FragmentMeta) (string, error) {
+	data, err := os.ReadFile(a.fragmentPath(m.Slug))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // DoCommit stages, commits, and (unless push is false) pushes ONE fragment
@@ -227,6 +257,8 @@ func (a *Agents) DoCommit(slug, msg string, push bool) error {
 	if err != nil {
 		return err
 	}
-	_ = run(a.Root, "git", "pull", "--rebase", "--autostash")
+	if err := run(a.Root, "git", "pull", "--rebase", "--autostash"); err != nil {
+		return fmt.Errorf("agents: pull --rebase failed, NOT pushing (local state may be stale): %w", err)
+	}
 	return run(a.Root, "git", "push", "origin", branch)
 }

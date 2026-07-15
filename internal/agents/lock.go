@@ -4,26 +4,21 @@
 package agents
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/flock"
 )
 
-// lockHandle is a held exclusive lock on <gitdir>/mpbt-clone.lock — the SAME
-// file scripts/with-clone-lock / internal/dashboard use, so a Go agents
-// commit and a concurrent bash/Go actor on this clone serialize against
-// each other instead of both mutating the index/HEAD at once.
-type lockHandle struct{ f *os.File }
-
-func (a *Agents) lock() (*lockHandle, error) {
+// lock acquires the shared clone lock, honoring LOCK_WAIT (seconds, default
+// 600) like bash's with-clone-lock does with `flock -w`. It is the SAME file
+// scripts/with-clone-lock / internal/dashboard / internal/wscommit use, so a
+// Go agents commit and a concurrent bash/Go actor on this clone serialize
+// against each other instead of both mutating the index/HEAD at once.
+func (a *Agents) lock() (*flock.Handle, error) {
 	path := filepath.Join(a.GitDir, "mpbt-clone.lock")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return nil, err
-	}
 
 	wait := 600 * time.Second
 	if v := os.Getenv("LOCK_WAIT"); v != "" {
@@ -32,30 +27,8 @@ func (a *Agents) lock() (*lockHandle, error) {
 		}
 	}
 
-	deadline := time.Now().Add(wait)
-	for {
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			holder, _ := os.ReadFile(path)
-			f.Close()
-			return nil, fmt.Errorf("agents: could not acquire clone lock within %s\nagents: current holder ->\n%s", wait, holder)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-
-	holder := fmt.Sprintf("pid=%d user=%s cmd=starfleetctl-agents\n", os.Getpid(), os.Getenv("USER"))
-	_ = f.Truncate(0)
-	_, _ = f.WriteAt([]byte(holder), 0)
-
-	return &lockHandle{f: f}, nil
-}
-
-func (l *lockHandle) Close() error {
-	if l == nil || l.f == nil {
-		return nil
-	}
-	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
-	return l.f.Close()
+	return flock.Lock(path, flock.Options{
+		Timeout:     wait,
+		HolderLabel: "starfleetctl-agents",
+	})
 }

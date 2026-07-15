@@ -144,7 +144,9 @@ func (d *Dashboard) DoTopicCommit(slug, msg string, push bool) error {
 	if err != nil {
 		return err
 	}
-	_ = run(d.Root, "git", "pull", "--rebase", "--autostash")
+	if err := run(d.Root, "git", "pull", "--rebase", "--autostash"); err != nil {
+		return fmt.Errorf("dashboard: pull --rebase failed, NOT pushing (local state may be stale): %w", err)
+	}
 	return run(d.Root, "git", "push", "origin", branch)
 }
 

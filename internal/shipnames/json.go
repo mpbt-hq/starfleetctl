@@ -39,7 +39,11 @@ func (r *Registry) DoListJSON() error {
 
 func entryFor(r *Registry, name string, flagship bool) shipEntryJSON {
 	e := shipEntryJSON{Name: name, Flagship: flagship}
-	data, err := os.ReadFile(r.shipFile(name))
+	path, perr := r.shipFile(name)
+	if perr != nil {
+		return e
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return e
 	}

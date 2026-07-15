@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/metux/starfleetctl/internal/fsutil"
 	"github.com/metux/starfleetctl/internal/identity"
 )
 
@@ -104,8 +105,12 @@ func clean(s string) string {
 	return string(b)
 }
 
-func (c *Claims) cfile(pr string) string {
-	return filepath.Join(c.ClaimDir, "pr-"+pr+".tsv")
+func (c *Claims) cfile(pr string) (string, error) {
+	safe, ok := fsutil.Safe(pr)
+	if !ok {
+		return "", fmt.Errorf("pr-claim: invalid PR id %q", pr)
+	}
+	return filepath.Join(c.ClaimDir, "pr-"+safe+".tsv"), nil
 }
 
 func (c *Claims) stale(epoch int64) bool {

@@ -28,7 +28,11 @@ func RunPRView(args []string) int {
 		fmt.Fprint(os.Stderr, prViewUsage)
 		return 2
 	}
-	pr := args[0]
+	pr, err := validPR(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
 	fields := "number,title,state"
 	if len(args) >= 2 {
 		fields = args[1]

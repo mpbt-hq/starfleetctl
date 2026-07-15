@@ -78,7 +78,11 @@ func (b *Bus) post(target, summary, payload, basename string) (string, error) {
 	}
 
 	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\n", now(), isots(), b.ShipID, target, text)
-	if err := os.WriteFile(b.mfile(id), []byte(line), 0o644); err != nil {
+	mpath, err := b.mfile(id)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(mpath, []byte(line), 0o644); err != nil {
 		return "", err
 	}
 	b.logEvent("directive", fmt.Sprintf("%s → %s: %s", id, target, text))
@@ -241,7 +245,11 @@ func (b *Bus) DoAck(id, note string) error {
 	if id == "" {
 		return usageErr("agent-bus: ack needs <id> (see 'agent-bus inbox')")
 	}
-	if _, err := os.Stat(b.mfile(id)); err != nil {
+	mpath, err := b.mfile(id)
+	if err != nil {
+		return usageErr(fmt.Sprintf("agent-bus: %v", err))
+	}
+	if _, err := os.Stat(mpath); err != nil {
 		return usageErr(fmt.Sprintf("agent-bus: no such directive '%s'", id))
 	}
 	lock, err := b.lockBus()
@@ -249,7 +257,11 @@ func (b *Bus) DoAck(id, note string) error {
 		return err
 	}
 	defer lock.Close()
-	f, err := os.Create(b.ackmark(id, b.ShipID))
+	apath, err := b.ackmark(id, b.ShipID)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(apath)
 	if err != nil {
 		return err
 	}
@@ -422,7 +434,11 @@ func (b *Bus) DoReply(qid string, words []string) error {
 	if qid == "" || ans == "" {
 		return usageErr("agent-bus: reply needs <qid> <answer…>")
 	}
-	qm, ok := parseMsgFile(qid, b.mfile(qid))
+	qpath, err := b.mfile(qid)
+	if err != nil {
+		return usageErr(fmt.Sprintf("agent-bus: %v", err))
+	}
+	qm, ok := parseMsgFile(qid, qpath)
 	if !ok {
 		return usageErr(fmt.Sprintf("agent-bus: no such question '%s'", qid))
 	}
@@ -435,9 +451,12 @@ func (b *Bus) DoReply(qid string, words []string) error {
 	if err != nil {
 		return err
 	}
-	f, ferr := os.Create(b.ackmark(qid, b.ShipID))
-	if ferr == nil {
-		f.Close()
+	apath, aerr := b.ackmark(qid, b.ShipID)
+	if aerr == nil {
+		f, ferr := os.Create(apath)
+		if ferr == nil {
+			f.Close()
+		}
 	}
 	lock.Close()
 	fmt.Printf("agent-bus: replied to %s (asker '%s') via %s\n", qid, qm.From, rid)
@@ -546,7 +565,9 @@ func (b *Bus) DoPrune() error {
 			}
 		}
 		if !keep {
-			os.Remove(b.mfile(m.ID))
+			if mpath, err := b.mfile(m.ID); err == nil {
+				os.Remove(mpath)
+			}
 			entries, _ := os.ReadDir(b.AckDir)
 			for _, e := range entries {
 				if strings.HasPrefix(e.Name(), m.ID+"__") {
@@ -582,16 +603,19 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error
 				continue
 			}
 			if strings.HasPrefix(m.Text, prefix) {
-				lock, err := b.lockBus()
-				if err != nil {
-					return "", err
-				}
-				f, ferr := os.Create(b.ackmark(m.ID, b.ShipID))
+			lock, err := b.lockBus()
+			if err != nil {
+				return "", err
+			}
+			apath, aerr := b.ackmark(m.ID, b.ShipID)
+			if aerr == nil {
+				f, ferr := os.Create(apath)
 				if ferr == nil {
 					f.Close()
 				}
-				lock.Close()
-				return strings.TrimPrefix(m.Text, prefix), nil
+			}
+			lock.Close()
+			return strings.TrimPrefix(m.Text, prefix), nil
 			}
 		}
 		if time.Now().After(deadline) {

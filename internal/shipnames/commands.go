@@ -18,7 +18,10 @@ func (r *Registry) DoAssignFlagship() error {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
 		return err
 	}
-	path := r.shipFile(Flagship)
+	path, err := r.shipFile(Flagship)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("flagship (%s) already reserved", Flagship)
 	}
@@ -58,7 +61,10 @@ func (r *Registry) AssignName() (string, error) {
 		return "", err
 	}
 	for _, name := range names {
-		path := r.shipFile(name)
+		path, err := r.shipFile(name)
+		if err != nil {
+			continue
+		}
 		if _, err := os.Stat(path); err != nil {
 			if err := writeReservation(path); err != nil {
 				return "", err
@@ -79,7 +85,11 @@ func (r *Registry) DoRelease(name string) error {
 	if name == "" {
 		return fmt.Errorf("release: name required")
 	}
-	_ = os.Remove(r.shipFile(name)) // rm -f: missing file is not an error
+	path, err := r.shipFile(name)
+	if err != nil {
+		return err
+	}
+	_ = os.Remove(path) // rm -f: missing file is not an error
 	return nil
 }
 
@@ -89,8 +99,13 @@ func (r *Registry) DoList() error {
 	fmt.Printf("  %-22s  %s\n", "NAME", "STATUS")
 	fmt.Printf("  %-22s  %s\n", "----", "------")
 
-	if _, err := os.Stat(r.shipFile(Flagship)); err == nil {
-		fmt.Printf("  %-22s  ACTIVE (flagship)\n", Flagship)
+	flagPath, ferr := r.shipFile(Flagship)
+	if ferr == nil {
+		if _, err := os.Stat(flagPath); err == nil {
+			fmt.Printf("  %-22s  ACTIVE (flagship)\n", Flagship)
+		} else {
+			fmt.Printf("  %-22s  free\n", Flagship)
+		}
 	} else {
 		fmt.Printf("  %-22s  free\n", Flagship)
 	}
@@ -100,7 +115,11 @@ func (r *Registry) DoList() error {
 		return err
 	}
 	for _, name := range names {
-		path := r.shipFile(name)
+		path, perr := r.shipFile(name)
+		if perr != nil {
+			fmt.Printf("  %-22s  free\n", name)
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Printf("  %-22s  free\n", name)
@@ -150,7 +169,9 @@ func (r *Registry) DoGC() error {
 	for _, name := range names {
 		statusFile := filepath.Join(r.StatusDir, name+".tsv")
 		if _, err := os.Stat(statusFile); err != nil {
-			_ = os.Remove(r.shipFile(name))
+			if path, perr := r.shipFile(name); perr == nil {
+				_ = os.Remove(path)
+			}
 			fmt.Printf("ship-names: gc: released stale reservation '%s'\n", name)
 			removed++
 		}

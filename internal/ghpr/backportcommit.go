@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -116,8 +115,6 @@ func RunBackportCommit(root string, args []string) int {
 	// 4. submit the PR from inside the agent clone (xx-make-pr reads cwd config)
 	return RunXXMakePR(dest, []string{newSHA})
 }
-
-var prNumberRE = regexp.MustCompile(`^#?[0-9]+$`)
 
 // applyViaPathRemap implements the cherry-pick fallback: locate each file
 // touched by sha by basename on dest's current branch, remap the diff's

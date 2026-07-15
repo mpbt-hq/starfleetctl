@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/metux/starfleetctl/internal/fsutil"
 	"github.com/metux/starfleetctl/internal/identity"
 )
 
@@ -138,16 +139,32 @@ func (b *Bus) sfile(agent string) string {
 	return filepath.Join(b.StatusDir, fsafe(agent)+".tsv")
 }
 
-func (b *Bus) mfile(id string) string {
-	return filepath.Join(b.MsgDir, id+".tsv")
+func (b *Bus) mfile(id string) (string, error) {
+	safe, ok := fsutil.Safe(id)
+	if !ok {
+		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
+	}
+	return filepath.Join(b.MsgDir, safe+".tsv"), nil
 }
 
-func (b *Bus) ackmark(id, agent string) string {
-	return filepath.Join(b.AckDir, id+"__"+fsafe(agent))
+func (b *Bus) ackmark(id, agent string) (string, error) {
+	idSafe, ok := fsutil.Safe(id)
+	if !ok {
+		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
+	}
+	agentSafe, ok := fsutil.Safe(agent)
+	if !ok {
+		return "", fmt.Errorf("agent-bus: invalid agent id %q", agent)
+	}
+	return filepath.Join(b.AckDir, idSafe+"__"+agentSafe), nil
 }
 
 func (b *Bus) acked(id, agent string) bool {
-	_, err := os.Stat(b.ackmark(id, agent))
+	path, err := b.ackmark(id, agent)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
 	return err == nil
 }
 
@@ -175,7 +192,11 @@ func age(epoch int64) string {
 // the message has acknowledged it. Used to auto-delete messages when
 // all live targets have acked (so old messages don't resurface on restart).
 func (b *Bus) allTargetsAcked(id string, live map[string]bool) bool {
-	m, ok := parseMsgFile(id, b.mfile(id))
+	path, err := b.mfile(id)
+	if err != nil {
+		return false
+	}
+	m, ok := parseMsgFile(id, path)
 	if !ok {
 		return false
 	}

@@ -32,7 +32,11 @@ func readFirstLine(path string) (string, error) {
 }
 
 func (c *Claims) readClaim(pr string) (claimRecord, bool) {
-	line, err := readFirstLine(c.cfile(pr))
+	path, err := c.cfile(pr)
+	if err != nil {
+		return claimRecord{}, false
+	}
+	line, err := readFirstLine(path)
 	if err != nil {
 		return claimRecord{}, false
 	}
@@ -45,9 +49,13 @@ func (c *Claims) readClaim(pr string) (claimRecord, bool) {
 }
 
 func (c *Claims) writeClaim(pr, note string) error {
+	path, err := c.cfile(pr)
+	if err != nil {
+		return err
+	}
 	line := now()
 	content := strconv.FormatInt(line, 10) + "\t" + isots() + "\t" + c.ShipID + "\t" + clean(note) + "\n"
-	return os.WriteFile(c.cfile(pr), []byte(content), 0o644)
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 // allClaims lists pr-*.tsv claims sorted like bash glob expansion.
@@ -77,5 +85,9 @@ func (c *Claims) allClaims() []claimRecord {
 }
 
 func (c *Claims) removeClaim(pr string) error {
-	return os.Remove(c.cfile(pr))
+	path, err := c.cfile(pr)
+	if err != nil {
+		return err
+	}
+	return os.Remove(path)
 }

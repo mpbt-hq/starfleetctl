@@ -35,8 +35,12 @@ func RunPRSetBody(args []string) int {
 // setPRBody implements the actual PATCH, shared with RunPRAppendBody so the
 // latter doesn't need to shell out to its own binary the way the bash
 // version re-invokes scripts/pr-set-body as a subprocess.
-func setPRBody(pr, file string) int {
-	pr = strings.TrimPrefix(pr, "#")
+func setPRBody(prArg, file string) int {
+	pr, err := validPR(prArg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
 
 	if _, err := os.Stat(file); err != nil {
 		fmt.Fprintf(os.Stderr, "pr-set-body: no such file: %s\n", file)

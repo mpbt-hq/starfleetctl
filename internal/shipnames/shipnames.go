@@ -11,8 +11,11 @@
 package shipnames
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/metux/starfleetctl/internal/fsutil"
 )
 
 const Flagship = "Enterprise"
@@ -40,8 +43,12 @@ func New(root string) *Registry {
 	}
 }
 
-func (r *Registry) shipFile(name string) string {
-	return filepath.Join(r.ShipsDir, name)
+func (r *Registry) shipFile(name string) (string, error) {
+	safe, ok := fsutil.Safe(name)
+	if !ok {
+		return "", fmt.Errorf("ship-names: invalid name %q", name)
+	}
+	return filepath.Join(r.ShipsDir, safe), nil
 }
 
 // readNames returns the candidate ship names from NamesFile, in file order,

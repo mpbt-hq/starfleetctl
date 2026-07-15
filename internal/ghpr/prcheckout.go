@@ -32,7 +32,11 @@ func RunPRCheckout(root string, args []string) int {
 		fmt.Fprint(os.Stderr, prCheckoutUsage)
 		return 2
 	}
-	pr := strings.TrimPrefix(args[0], "#")
+	pr, err := validPR(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
 	name := "repair"
 	if len(args) >= 2 {
 		name = args[1]
