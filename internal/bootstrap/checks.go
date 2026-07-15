@@ -73,6 +73,10 @@ const opencodeScriptsSubdir = "opencode-scripts"
 // Claude Code hook scripts (e.g. agent-permission-hook).
 const claudeHooksSubdir = "claude-hooks"
 
+// claudeScriptsSubdir is the subdirectory in embedded fragments that holds
+// Claude Code launcher scripts (run-claude.flagship, run-claude.ship).
+const claudeScriptsSubdir = "claude-scripts"
+
 // Checks returns the full, ordered set of bootstrap checks.
 func Checks() []Check {
 	return []Check{
@@ -97,7 +101,7 @@ func Checks() []Check {
 			Fix:    fixSettingsPermissionHook,
 		},
 		{
-			Name:   "AGENTS.md + agents.d/index.md",
+			Name:   "CLAUDE.md + .starfleet-ai/agents.d/index.md",
 			Verify: verifyAgentsMD,
 			Fix:    fixAgentsMD,
 		},
@@ -133,6 +137,11 @@ func Checks() []Check {
 			Fix:    fixOpencodeScripts,
 		},
 		{
+			Name:   "claude launcher scripts (.starfleet-ai/bin/)",
+			Verify: verifyClaudeScripts,
+			Fix:    fixClaudeScripts,
+		},
+		{
 			Name:   "claude hooks directory (.claude/hooks/)",
 			Verify: verifyClaudeHooksDir,
 			Fix:    fixClaudeHooksDir,
@@ -150,17 +159,19 @@ func Checks() []Check {
 	}
 }
 
-// verifyAgentsMD/fixAgentsMD delegate to internal/agents' own
-// EnsureBootstrapped — this is the "should be created fully automatically
-// when needed" requirement: a truly from-scratch checkout gets a minimal,
-// permanently-fixed root AGENTS.md (see internal/agents' doc comment for
-// why it's structured as an @agents.d/index.md import) rather than bootstrap
-// needing to know anything about that package's internals.
+// verifyAgentsMD/fixAgentsMD ensure the root CLAUDE.md exists and contains
+// the starfleet fragment pointer (@.starfleet-ai/agents.d/index.md).
+// Two cases: existing file gets the pointer appended if missing; missing file
+// is generated and .gitignore'd.
 func verifyAgentsMD(b *Bootstrap) (bool, string) {
-	if _, err := os.Stat(filepath.Join(b.Root, "AGENTS.md")); err == nil {
-		return true, "present"
+	data, err := os.ReadFile(filepath.Join(b.Root, "CLAUDE.md"))
+	if err != nil {
+		return false, "missing (no CLAUDE.md at all)"
 	}
-	return false, "missing (no AGENTS.md at all)"
+	if strings.Contains(string(data), "@.starfleet-ai/agents.d/index.md") {
+		return true, "present (pointer found)"
+	}
+	return false, "present but missing starfleet pointer"
 }
 
 func fixAgentsMD(b *Bootstrap) error {
@@ -417,8 +428,9 @@ func fixSettingsAllowlist(b *Bootstrap) error {
 
 // verifyStarfleetFragments checks that every .md file embedded under
 // fragments/starfleet/ in the starfleetctl binary is installed to
-// agents.d/<slug>.md and byte-identical to what the current binary would
-// write. This is a bulk, always-overwrite check like the self-fragment.
+// .starfleet-ai/agents.d/starfleet/<slug>.md and byte-identical to what the
+// current binary would write. This is a bulk, always-overwrite check like the
+// self-fragment.
 func verifyStarfleetFragments(b *Bootstrap) (bool, string) {
 	a, err := agents.New(b.Root)
 	if err != nil {
@@ -442,7 +454,12 @@ func verifyStarfleetFragments(b *Bootstrap) (bool, string) {
 		if err != nil {
 			return false, err.Error()
 		}
-		installedPath := a.FragmentsDir() + string(os.PathSeparator) + meta.Slug + ".md"
+		// slug is "starfleet/<name>" — installed under StarfleetFragmentsDir()
+		fname := meta.Slug
+		if i := strings.LastIndex(fname, "/"); i >= 0 {
+			fname = fname[i+1:]
+		}
+		installedPath := filepath.Join(a.StarfleetFragmentsDir(), fname+".md")
 		data, err := os.ReadFile(installedPath)
 		if err != nil {
 			missing = append(missing, meta.Slug)
@@ -726,6 +743,71 @@ func fixOpencodeScripts(b *Bootstrap) error {
 			continue
 		}
 		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodeScriptsSubdir, e.Name()))
+		if err != nil {
+			return err
+		}
+		destPath := filepath.Join(destDir, e.Name())
+		if err := os.WriteFile(destPath, data, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// verifyClaudeScripts checks that every embedded claude launcher script is
+// installed to .starfleet-ai/bin/ and byte-identical.
+func verifyClaudeScripts(b *Bootstrap) (bool, string) {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeScriptsSubdir))
+	if err != nil {
+		return true, "no embedded claude scripts"
+	}
+	var missing, stale []string
+	destDir := filepath.Join(b.Root, ".starfleet-ai", "bin")
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeScriptsSubdir, e.Name()))
+		if err != nil {
+			return false, err.Error()
+		}
+		installedPath := filepath.Join(destDir, e.Name())
+		data, err := os.ReadFile(installedPath)
+		if err != nil {
+			missing = append(missing, e.Name())
+			continue
+		}
+		if string(data) != string(current) {
+			stale = append(stale, e.Name())
+		}
+	}
+	if len(missing) == 0 && len(stale) == 0 {
+		return true, fmt.Sprintf("%d/%d present, up to date", len(entries), len(entries))
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(stale) > 0 {
+		parts = append(parts, fmt.Sprintf("stale: %s", strings.Join(stale, ", ")))
+	}
+	return false, strings.Join(parts, "; ")
+}
+
+func fixClaudeScripts(b *Bootstrap) error {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeScriptsSubdir))
+	if err != nil {
+		return nil
+	}
+	destDir := filepath.Join(b.Root, ".starfleet-ai", "bin")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeScriptsSubdir, e.Name()))
 		if err != nil {
 			return err
 		}

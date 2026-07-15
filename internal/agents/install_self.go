@@ -38,7 +38,7 @@ func (a *Agents) DoInstallSelf(order int) error {
 		return fmt.Errorf("install starfleet skills: %w", err)
 	}
 	// Clean up legacy agents.d fragment if present
-	legacyPath := a.fragmentPath(SelfSlug)
+	legacyPath := filepath.Join(a.FragmentsDir(), SelfSlug+".md")
 	if _, err := os.Stat(legacyPath); err == nil {
 		os.Remove(legacyPath)
 		return a.DoReindex(a.Inline())
@@ -81,7 +81,7 @@ func RenderStarfleetFragment(subdir, name string) ([]byte, error) {
 }
 
 // DoInstallStarfleet installs every .md file from the embedded
-// fragments/<subdir>/ directory into agents.d/<slug>.md, always
+// fragments/<subdir>/ directory into .starfleet-ai/agents.d/<slug>.md, always
 // overwriting existing files (they are tool-owned). Then reindexes.
 // Used by both the CLI command and genesis-init.
 func (a *Agents) DoInstallStarfleet(subdir string) error {

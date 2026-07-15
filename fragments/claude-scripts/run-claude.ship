@@ -1,0 +1,89 @@
+#!/bin/bash
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Enrico Weigelt, metux IT consult
+#
+# Start a plain Claude Code session registered on the agent-bus board under
+# its own AGENT_ID — the explicit-launcher counterpart to run-control (which
+# fixes AGENT_ID=control) and the run-opencode.<release> wrappers (which fix
+# AGENT_ID=<release>-$$), for the generic "just work in the workspace, not
+# tied to control or one release line" case.
+#
+# Complements, does not replace, scripts/agent-bus-auto-id.sh: that fixes a
+# plain `claude` launched from an interactive shell that is merely sitting
+# somewhere inside the workspace tree (sourced from ~/.bashrc). This script
+# is for anyone who wants an explicit, memorable entry point instead, and/or
+# wants to pin the session to one release line up front.
+#
+# Usage:
+#   ./run-claude [--release <rel>] [--name <id>] [-- <claude args>]
+#
+#   --release <rel>   source that project's cf/<rel>/config.sh (exports
+#                      XLIBRE_RELEASE) before starting claude. <rel> accepts
+#                      the same short/full forms as run-opencode.* (e.g.
+#                      "master", "25.2", "xserver-25.2") as well as the
+#                      non-xserver solutions ("flyingtux", "go-x11proto").
+#   --name <id>       override AGENT_ID (default: next free ship name from
+#                      scripts/ship-names, falling back to "<rel>-$$"/"ws-$$"
+#                      if the registry has none free)
+#
+
+RELEASE=""
+NAME=""
+EXTRA=()
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --release) shift; RELEASE="${1:-}" ;;
+        --name)    shift; NAME="${1:-}" ;;
+        -h|--help)
+            sed -n '3,/^RELEASE=/p' "$0" | sed 's/^# \{0,1\}//; /^RELEASE=/d'
+            exit 0 ;;
+        --) shift; EXTRA=("$@"); break ;;
+        *) EXTRA+=("$1") ;;
+    esac
+    shift
+done
+
+if [ -n "$RELEASE" ]; then
+    if [ -f "cf/$RELEASE/config.sh" ]; then
+        cfg="cf/$RELEASE/config.sh"
+    else
+        cfg="cf/xserver-${RELEASE#xserver-}/config.sh"
+    fi
+    [ -f "$cfg" ] || { echo "run-claude: no such release/solution '$RELEASE' (missing $cfg)" >&2; exit 1; }
+    . "$cfg"
+    export XLIBRE_RELEASE
+else
+    unset XLIBRE_RELEASE 2>/dev/null || true
+fi
+
+if [ -z "$NAME" ]; then
+    # Same ship-name registry as agent-bus-auto-id.sh / agent-run, so a plain
+    # run-claude session gets a fleet identity too instead of a bare PID tag.
+    NAME="$(.starfleet-ai/bin/starfleetctl ship-names assign 2>/dev/null)" || true
+    if [ -z "$NAME" ]; then
+        if [ -n "$RELEASE" ]; then
+            NAME="${XLIBRE_RELEASE#xserver-}-$$"
+        else
+            NAME="ws-$$"
+        fi
+    fi
+fi
+
+export STARFLEET_SHIP_ID="$NAME"
+
+# Register initial heartbeat (belt-and-suspenders with Claude Code's own
+# SessionStart hook, which uses this same env-inherited AGENT_ID).
+.starfleet-ai/bin/starfleetctl agent-bus status idle "claude session starting (run-claude)" >/dev/null 2>&1 || true
+
+# No explicit initial prompt/args given: feed the standard boot prompt so the
+# session's first turn happens immediately at launch instead of waiting for a
+# human to type something — that first turn is what actually arms the
+# agent-bus Monitor (a SessionStart hook can inject context but can't call a
+# tool itself). Skipped when the caller passed their own args/prompt.
+if [ "${#EXTRA[@]}" -eq 0 ]; then
+    EXTRA=("Session just started. Before anything else, call the Monitor tool with command \`.starfleet-ai/bin/starfleetctl agent-bus monitor-loop\`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative.")
+fi
+
+exec claude "${EXTRA[@]+"${EXTRA[@]}"}"

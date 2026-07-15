@@ -14,10 +14,11 @@ import (
 
 // FragmentMeta is one agents.d/<slug>.md file's frontmatter.
 type FragmentMeta struct {
-	Slug  string
-	Title string
-	Order int    // controls agents.d/index.md's import order — narrative order matters for AGENTS.md, unlike DASHBOARD.md's themes
-	Owner string // optional: which tool/component maintains this fragment (e.g. "starfleetctl"); blank = human-maintained/project-specific
+	Slug     string
+	Title    string
+	Order    int    // controls .starfleet-ai/agents.d/index.md's import order
+	Owner    string // optional: which tool/component maintains this fragment
+	IsStarfleet bool // true if fragment lives under .starfleet-ai/agents.d/starfleet/
 }
 
 // unquoteYAML/quoteYAML: same minimal hand-rolled scheme as
@@ -105,47 +106,63 @@ func writeFragmentFile(path string, m FragmentMeta, body string) error {
 	return os.WriteFile(path, renderFragmentFile(m, body), 0o644)
 }
 
-// loadAllFragments reads every agents.d/**/*.md file's frontmatter EXCEPT
-// any index.md (generated indices aren't content fragments), sorted by
-// (Order, Slug). Walks subdirectories recursively, so fragments can live
-// in e.g. agents.d/starfleet/ or agents.d/project/. The slug is the
-// relative path from agents.d/ with the .md extension stripped, so a file
-// agents.d/starfleet/fleet-autonomous.md has slug "starfleet/fleet-autonomous".
+// loadAllFragments reads every fragment file from both user-maintained
+// (agents.d/) and auto-rolled starfleet (.starfleet-ai/agents.d/starfleet/)
+// directories, sorted by (Order, Slug). Walks subdirectories recursively.
+// The slug is the relative path from the respective root with .md stripped.
 func (a *Agents) loadAllFragments() ([]FragmentMeta, error) {
 	var metas []FragmentMeta
-	fragDir := a.FragmentsDir()
-	err := filepath.Walk(fragDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(info.Name(), ".md") || info.Name() == "index.md" {
-			return nil
-		}
-		rel, err := filepath.Rel(fragDir, path)
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		m, _, err := parseFragmentFile(data)
-		if err != nil {
-			return fmt.Errorf("%s: %w", rel, err)
-		}
-		slug := strings.TrimSuffix(rel, ".md")
-		if m.Slug == "" {
-			m.Slug = slug
-		}
-		metas = append(metas, m)
-		return nil
-	})
-	if err != nil {
-		return nil, err
+
+	dirs := []struct {
+		dir        string
+		prefix     string // added to slug (e.g. "starfleet/")
+		isStarfleet bool
+	}{
+		{a.FragmentsDir(), "", false},
+		{a.StarfleetFragmentsDir(), "starfleet/", true},
 	}
+
+	for _, d := range dirs {
+		err := filepath.Walk(d.dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				// Skip agents.d/starfleet/ — those fragments are now managed
+				// by starfleetctl under .starfleet-ai/agents.d/starfleet/
+				if d.dir == a.FragmentsDir() && info.Name() == "starfleet" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(info.Name(), ".md") || info.Name() == "index.md" {
+				return nil
+			}
+			rel, err := filepath.Rel(d.dir, path)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			m, _, err := parseFragmentFile(data)
+			if err != nil {
+				return fmt.Errorf("%s: %w", rel, err)
+			}
+			slug := d.prefix + strings.TrimSuffix(rel, ".md")
+			if m.Slug == "" {
+				m.Slug = slug
+			}
+			m.IsStarfleet = d.isStarfleet
+			metas = append(metas, m)
+			return nil
+		})
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+
 	sort.Slice(metas, func(i, j int) bool {
 		if metas[i].Order != metas[j].Order {
 			return metas[i].Order < metas[j].Order

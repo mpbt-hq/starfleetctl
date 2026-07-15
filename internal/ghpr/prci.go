@@ -221,7 +221,7 @@ func RunPRCi(args []string) int {
 		if knownFlakeRe.MatchString(c.name()) {
 			fmt.Println("  ⚠ note: some failing lanes match known flakes (BSD/Solaris VM boot, xephyr-glamor XTS")
 			fmt.Println("    timeout, go-xts race). Confirm vs a sibling run / rerun before assuming breakage —")
-			fmt.Printf("    see AGENTS.md 'PR repair workflow'. Get logs with: scripts/pr-job-logs %s\n", pr)
+			fmt.Printf("    see AGENTS.md 'PR repair workflow'. Get logs with: starfleetctl pr-job-logs %s\n", pr)
 			break
 		}
 	}
