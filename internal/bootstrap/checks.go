@@ -101,9 +101,9 @@ func Checks() []Check {
 			Fix:    fixSettingsPermissionHook,
 		},
 		{
-			Name:   "CLAUDE.md + .starfleet-ai/agents.d/index.md",
-			Verify: verifyAgentsMD,
-			Fix:    fixAgentsMD,
+			Name:   ".starfleet-ai/agents.d/index.md",
+			Verify: verifyAgentsIndex,
+			Fix:    fixAgentsIndex,
 		},
 		{
 			Name:   "DASHBOARD.md",
@@ -159,22 +159,16 @@ func Checks() []Check {
 	}
 }
 
-// verifyAgentsMD/fixAgentsMD ensure the root CLAUDE.md exists and contains
-// the starfleet fragment pointer (@.starfleet-ai/agents.d/index.md).
-// Two cases: existing file gets the pointer appended if missing; missing file
-// is generated and .gitignore'd.
-func verifyAgentsMD(b *Bootstrap) (bool, string) {
-	data, err := os.ReadFile(filepath.Join(b.Root, "CLAUDE.md"))
-	if err != nil {
-		return false, "missing (no CLAUDE.md at all)"
+// verifyAgentsIndex/fixAgentsIndex ensure .starfleet-ai/agents.d/index.md exists.
+func verifyAgentsIndex(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, ".starfleet-ai", "agents.d", "index.md")
+	if _, err := os.Stat(path); err == nil {
+		return true, "present"
 	}
-	if strings.Contains(string(data), "@.starfleet-ai/agents.d/index.md") {
-		return true, "present (pointer found)"
-	}
-	return false, "present but missing starfleet pointer"
+	return false, "missing (no .starfleet-ai/agents.d/index.md)"
 }
 
-func fixAgentsMD(b *Bootstrap) error {
+func fixAgentsIndex(b *Bootstrap) error {
 	a, err := agents.New(b.Root)
 	if err != nil {
 		return err

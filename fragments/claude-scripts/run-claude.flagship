@@ -28,7 +28,14 @@ while [ "$#" -gt 0 ]; do
 done
 
 export STARFLEET_SHIP_ID="Enterprise"
+export CLAUDE_CODE_DISABLE_CLAUDE_MDS=1
 unset XLIBRE_RELEASE 2>/dev/null || true
+
+INSTRUCTIONS_FILE=".starfleet-ai/agents.d/index.md"
+SYSTEM_PROMPT=""
+if [ -f "$INSTRUCTIONS_FILE" ]; then
+    SYSTEM_PROMPT="$(cat "$INSTRUCTIONS_FILE")"
+fi
 
 # No explicit initial prompt/args given: feed the standard boot prompt so the
 # session's first turn happens immediately at launch instead of waiting for a
@@ -49,4 +56,4 @@ fi
 # too, but that uses the env-inherited AGENT_ID=Enterprise — belt-and-suspenders).
 .starfleet-ai/bin/starfleetctl agent-bus status idle "flagship session starting" >/dev/null 2>&1 || true
 
-exec claude "${EXTRA[@]+"${EXTRA[@]}"}"
+exec claude --append-system-prompt "$SYSTEM_PROMPT" "${EXTRA[@]+"${EXTRA[@]}"}"

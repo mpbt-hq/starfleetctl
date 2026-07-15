@@ -19,7 +19,7 @@ starfleetctl is deployed into a workspace via the **genesis → bootstrap** two-
    ```
    starfleetctl genesis-init .
    ```
-   This also runs `bootstrap --fix` to set up CLAUDE.md, DASHBOARD.md, allowlist entries,
+   This also runs `bootstrap --fix` to set up .starfleet-ai/agents.d/index.md, DASHBOARD.md, allowlist entries,
    `_WORK_/` directories, agent fragments, and opencode plugins/scripts.
 
 2. **Phase B (bootstrap):** The committed `starfleet-bootstrap` script clones or pulls the
@@ -88,7 +88,7 @@ Run it from the workspace root (or any subdirectory — it discovers the root by
 Every subcommand that touches the workspace's shared coordination files (the "fleet
 coordination" group below) needs to know the workspace root: it's resolved from
 `$MPBT_WORKSPACE_ROOT` if set, otherwise by walking up from the current directory looking for an
-`CLAUDE.md` next to a `scripts/` directory (the same landmarks a human would look for) — so it
+`.starfleet-ai/agents.d/index.md` next to a `scripts/` directory (the same landmarks a human would look for) — so it
 works run from the workspace root or any subdirectory of it. The GitHub-interaction subcommands and
 `with-clone-lock` don't need any of that; they work from any `cwd`.
 
@@ -108,7 +108,7 @@ same `_WORK_/agent-bus/` files without racing or misreading each other's state.
 | Subcommand | Purpose |
 |---|---|
 | `agent-bus <cmd>` | Cross-session status board + directive bus. Worker side: `status <state> ["note"]`, `inbox [--json]`, `ack <id>`, `ask "<q>"`, `clear`. Control side: `board [--json]`, `tell <agent> <text>`, `broadcast <text>`, `reply <qid> <answer>`, `asks`, `msgs [--json]`, `events [N]`, `prune`. `--json` on `board`/`inbox`/`msgs`/`asks` prints a JSON array instead of the human table. `tell`/`broadcast` also accept `--stdin` to read the message body from stdin, bypassing the OS `ARG_MAX` limit on argv (use it for payloads > ~100 KB). Also has `monitor-loop`/`fleet-watch`/`watch` polling loops — **see [Known limitations](#known-limitations-and-parity-notes)**, they are not wired into any production polling harness. |
-| `dashboard <cmd>` | Read/write/commit cycle for `mpbt-workspace`'s `DASHBOARD.md` (the thin, regenerated index): `pull`, `show`, `write <file\|->`, `commit -m "<msg>" [--no-push]`, `reindex` (rebuild the index from every `dashboard/themes/*.md` file's frontmatter). `dashboard theme <cmd>` is the per-theme-file counterpart, the only sanctioned way to read/write `dashboard/themes/*.md` (agents must not touch it via `Read`/`Edit`/`Write` directly — see `mpbt-workspace`'s `CLAUDE.md`): `theme list [--json]`, `theme show <slug>`, `theme write <slug> <file\|->`, `theme new <slug> --title "<t>" [--status "<s>"] [--parked]`, `theme commit <slug> -m "<msg>" [--no-push]` (commits+pushes just that one file, correctly `git add`s it whether already tracked or brand new). |
+| `dashboard <cmd>` | Read/write/commit cycle for `mpbt-workspace`'s `DASHBOARD.md` (the thin, regenerated index): `pull`, `show`, `write <file\|->`, `commit -m "<msg>" [--no-push]`, `reindex` (rebuild the index from every `dashboard/themes/*.md` file's frontmatter). `dashboard theme <cmd>` is the per-theme-file counterpart, the only sanctioned way to read/write `dashboard/themes/*.md` (agents must not touch it via `Read`/`Edit`/`Write` directly — see `mpbt-workspace`'s `.starfleet-ai/agents.d/index.md`): `theme list [--json]`, `theme show <slug>`, `theme write <slug> <file\|->`, `theme new <slug> --title "<t>" [--status "<s>"] [--parked]`, `theme commit <slug> -m "<msg>" [--no-push]` (commits+pushes just that one file, correctly `git add`s it whether already tracked or brand new). |
 | `pr-claim <cmd>` | Advisory cross-agent PR-branch lock + shared work log, keyed by PR number: `pr-claim <pr#> ["what"]`, `--list [--json]`, `--release <pr#>`, `--release-all`, `--steal <pr#> ["what"]`, `--who <pr#>`. |
 | `ws-commit` | `ws-commit -m "<msg>" <path> [<path>...]` (or `-a` for all tracked changes, `--no-push` to skip the push) — commit+push under the shared clone lock, so concurrent sessions don't race the same working tree's index/HEAD. |
 | `ship-names <cmd>` | Star-Trek-themed per-session identity registry: `assign [flagship]`, `release <name>`, `list [--json]`, `gc`, `flagship`, `shell-env` (outputs eval-able shell code to set `STARFLEET_SHIP_ID`, PS1 prefix, and EXIT trap — usage: `eval "$(starfleetctl ship-names shell-env)"`). |

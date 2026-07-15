@@ -72,6 +72,13 @@ if [ -z "$NAME" ]; then
 fi
 
 export STARFLEET_SHIP_ID="$NAME"
+export CLAUDE_CODE_DISABLE_CLAUDE_MDS=1
+
+INSTRUCTIONS_FILE=".starfleet-ai/agents.d/index.md"
+SYSTEM_PROMPT=""
+if [ -f "$INSTRUCTIONS_FILE" ]; then
+    SYSTEM_PROMPT="$(cat "$INSTRUCTIONS_FILE")"
+fi
 
 # Register initial heartbeat (belt-and-suspenders with Claude Code's own
 # SessionStart hook, which uses this same env-inherited AGENT_ID).
@@ -86,4 +93,4 @@ if [ "${#EXTRA[@]}" -eq 0 ]; then
     EXTRA=("Session just started. Before anything else, call the Monitor tool with command \`.starfleet-ai/bin/starfleetctl agent-bus monitor-loop\`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative.")
 fi
 
-exec claude "${EXTRA[@]+"${EXTRA[@]}"}"
+exec claude --append-system-prompt "$SYSTEM_PROMPT" "${EXTRA[@]+"${EXTRA[@]}"}"

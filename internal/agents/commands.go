@@ -13,16 +13,16 @@ import (
 )
 
 // inlineMarker is the path of a marker file that, when present, selects
-// inline mode for the generated CLAUDE.md (see DoReindex). Inline mode drops
+// inline mode for the generated .starfleet-ai/agents.d/index.md (see DoReindex). Inline mode drops
 // the `@.starfleet-ai/agents.d/index.md` import entirely and writes the full fragment set
-// straight into CLAUDE.md — some agents (opencode) do not resolve `@`-imports,
+// straight into .starfleet-ai/agents.d/index.md — some agents (opencode) do not resolve `@`-imports,
 // so a self-contained file is the only way they receive the instructions.
 func (a *Agents) inlineMarker() string {
 	return filepath.Join(a.Root, ".starfleet-ai", "agents-inline")
 }
 
 // Inline reports whether reindex should produce a self-contained (inline)
-// CLAUDE.md. Driven by the persistent .starfleet-ai/agents-inline marker, so
+// .starfleet-ai/agents.d/index.md. Driven by the persistent .starfleet-ai/agents-inline marker, so
 // `new`/`write` (which call DoReindex) keep the workspace's chosen mode.
 func (a *Agents) Inline() bool {
 	_, err := os.Stat(a.inlineMarker())
@@ -31,7 +31,7 @@ func (a *Agents) Inline() bool {
 
 // SetInline turns inline mode on (token != "") or off (token == ""), by
 // creating or removing the marker file. Reindex must be run afterwards to
-// rewrite CLAUDE.md in the new mode.
+// rewrite .starfleet-ai/agents.d/index.md in the new mode.
 func (a *Agents) SetInline(on bool) error {
 	mk := a.inlineMarker()
 	if on {
@@ -46,13 +46,13 @@ func (a *Agents) SetInline(on bool) error {
 	return nil
 }
 
-// EnsureBootstrapped ensures the root CLAUDE.md exists and contains the
+// EnsureBootstrapped ensures the root .starfleet-ai/agents.d/index.md exists and contains the
 // starfleet fragment pointer, and that .starfleet-ai/agents.d/index.md exists.
 //
 // Two cases:
-//   - CLAUDE.md exists: insert the @-pointer if missing (idempotent — never
+//   - .starfleet-ai/agents.d/index.md exists: insert the @-pointer if missing (idempotent — never
 //     overwrites existing content).
-//   - CLAUDE.md absent: create the auto-generated file and add CLAUDE.md to
+//   - .starfleet-ai/agents.d/index.md absent: create the auto-generated file and add .starfleet-ai/agents.d/index.md to
 //     .gitignore (the file is a generated artifact, not user content).
 func (a *Agents) EnsureBootstrapped() (created bool, err error) {
 	if err := os.MkdirAll(filepath.Dir(a.IndexFile()), 0o755); err != nil {
@@ -62,28 +62,9 @@ func (a *Agents) EnsureBootstrapped() (created bool, err error) {
 		if err := os.WriteFile(a.IndexFile(), []byte(indexHeader), 0o644); err != nil {
 			return false, err
 		}
+		return true, nil
 	}
-
-	data, err := os.ReadFile(a.File)
-	if err == nil {
-		// CLAUDE.md exists — only append the pointer if missing.
-		if hasStarfleetPointer(data) {
-			return false, nil
-		}
-		if err := appendGitignorePath(a.Root, "CLAUDE.md"); err != nil {
-			return false, err
-		}
-		return false, os.WriteFile(a.File, append(data, []byte(starfleetPointer)...), 0o644)
-	}
-
-	// CLAUDE.md absent — generate and gitignore.
-	if err := appendGitignorePath(a.Root, "CLAUDE.md"); err != nil {
-		return false, err
-	}
-	if err := os.WriteFile(a.File, []byte(rootNotice), 0o644); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false, nil
 }
 
 // DoList prints every fragment's slug/title/order (or, with jsonOut, a JSON
@@ -159,7 +140,7 @@ func (a *Agents) DoWrite(slug, src string) error {
 }
 
 // DoNew scaffolds a new fragment file with frontmatter, refusing to clobber
-// an existing one, then reindexes (and bootstraps the root CLAUDE.md/index
+// an existing one, then reindexes (and bootstraps the root .starfleet-ai/agents.d/index.md/index
 // first if this is the very first fragment ever created). Slugs may contain
 // "/" to place the fragment in a subdirectory (e.g. "starfleet/my-topic").
 func (a *Agents) DoNew(slug, title string, order int, owner string) error {
@@ -184,16 +165,11 @@ func (a *Agents) DoNew(slug, title string, order int, owner string) error {
 	return nil
 }
 
-// DoReindex regenerates the fragment index. In the default mode it writes
-// .starfleet-ai/agents.d/index.md as a list of `@.starfleet-ai/agents.d/<slug>.md` imports
-// (resolved by Claude Code's @-import chain). In inline mode it additionally writes a
-// self-contained CLAUDE.md — the fixed root notice followed by every
-// fragment's body in (order, slug) order — so agents that do not resolve
-// `@`-imports (e.g. opencode) still receive the full instructions. Pure
-// function of the current fragment set — two ships racing a reindex converge
-// to the same byte-identical output for a given mode. Bootstraps the root
-// CLAUDE.md/index first if neither exists yet.
-func (a *Agents) DoReindex(inline bool) error {
+// DoReindex regenerates the fragment index (.starfleet-ai/agents.d/index.md).
+// Pure function of the current fragment set — two ships racing a reindex
+// converge to the same byte-identical output. Bootstraps the index first
+// if it doesn't exist yet.
+func (a *Agents) DoReindex(_ bool) error {
 	if _, err := a.EnsureBootstrapped(); err != nil {
 		return err
 	}
@@ -204,71 +180,20 @@ func (a *Agents) DoReindex(inline bool) error {
 
 	var b strings.Builder
 	b.WriteString(indexHeader)
-	if inline {
-		for _, m := range metas {
-			importPath := a.fragmentImportPath(m)
-			fmt.Fprintf(&b, "<!-- inline: %s -->\n", importPath)
-		}
-	} else {
-		for _, m := range metas {
-			importPath := a.fragmentImportPath(m)
-			fmt.Fprintf(&b, "@%s\n", importPath)
-		}
+	for _, m := range metas {
+		importPath := a.fragmentImportPath(m)
+		fmt.Fprintf(&b, "@%s\n", importPath)
 	}
 	if err := os.WriteFile(a.IndexFile(), []byte(b.String()), 0o644); err != nil {
 		return err
 	}
 
-	if !inline {
-		// Default mode: ensure the root CLAUDE.md contains the @-pointer
-		// to .starfleet-ai/agents.d/index.md. If the file exists, never
-		// overwrite it — only append the pointer if missing. If absent,
-		// create it with the standard rootNotice (EnsureBootstrapped handles
-		// both cases + gitignore).
-		if _, err := a.EnsureBootstrapped(); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Inline mode: emit a single self-contained CLAUDE.md (no @-imports).
-	// rootNotice ends with the "@.starfleet-ai/agents.d/index.md" import line; drop that
-	// trailing import so the file is self-contained (the fragment bodies
-	// follow it below).
-	notice := rootNotice
-	if i := strings.LastIndex(notice, "@.starfleet-ai/agents.d/index.md"); i >= 0 {
-		notice = notice[:i]
-	}
-	var ag strings.Builder
-	ag.WriteString(notice)
-	ag.WriteString("\n")
-	for i, m := range metas {
-		data, err := os.ReadFile(a.fragmentPath(m.Slug))
-		if err != nil {
-			return err
-		}
-		_, body, err := parseFragmentFile(data)
-		if err != nil {
-			return err
-		}
-		body = strings.TrimSpace(body)
-		if i > 0 {
-			ag.WriteString("\n---\n\n")
-		}
-		if m.Title != "" {
-			fmt.Fprintf(&ag, "## %s\n\n", m.Title)
-		}
-		ag.WriteString(body)
-		ag.WriteString("\n")
-	}
-	return os.WriteFile(a.File, []byte(ag.String()), 0o644)
+	return nil
 }
 
 // DoCommit stages, commits, and (unless push is false) pushes ONE fragment
-// file (or, with slug == "", the root CLAUDE.md + .starfleet-ai/agents.d/index.md
-// together — the only two files this package ever writes outside a single
-// fragment). Same shared clone lock as every other Go git-mutating command
-// here.
+// file (or, with slug == "", the .starfleet-ai/agents.d/index.md file).
+// Same shared clone lock as every other Go git-mutating command here.
 func (a *Agents) DoCommit(slug, msg string, push bool) error {
 	lh, err := a.lock()
 	if err != nil {
@@ -278,7 +203,7 @@ func (a *Agents) DoCommit(slug, msg string, push bool) error {
 
 	var paths []string
 	if slug == "" {
-		paths = []string{a.File, a.IndexFile()}
+		paths = []string{a.IndexFile()}
 	} else {
 		paths = []string{a.fragmentPath(slug)}
 	}
