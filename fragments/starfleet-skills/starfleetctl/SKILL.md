@@ -30,7 +30,7 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 |---|---|
 | `agent-bus <cmd>` | Status board + directive bus (status/board/tell/broadcast/ack/inbox) |
 | `dashboard <cmd>` | DASHBOARD.md read/write/commit cycle |
-| `pr-claim <cmd>` | Advisory PR-branch lock + work log |
+| `github pr claim <cmd>` | Advisory PR-branch lock + work log |
 | `ws-commit -m <msg> <paths>` | Atomic commit+push under clone lock |
 | `ship-names <cmd>` | Ship name registry (assign/release/list/gc/shell-env) |
 | `with-clone-lock [cmd...]` | Serialize mutating work in a git working tree |
@@ -39,25 +39,25 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 
 | Subcommand | Purpose |
 |---|---|
-| `pr-view <pr#>` | PR metadata via gh |
-| `pr-ci <pr#\|URL>` | CI status classified by conclusion |
-| `show-branch-file <ref> <path>` | Print file at any ref via GitHub API |
-| `backport-applies <path> <grep-ERE>` | Check applicability across release lines |
+| `github pr view <pr#>` | PR metadata via gh |
+| `github pr ci <pr#\|URL>` | CI status classified by conclusion |
+| `github pr show-branch-file <ref> <path>` | Print file at any ref via GitHub API |
+| `github backport applies <path> <grep-ERE>` | Check applicability across release lines |
 
 ### GitHub interaction (mutating)
 
 | Subcommand | Purpose |
 |---|---|
-| `pr-comment <pr#> <body-file>` | Post PR comment |
-| `pr-label <pr#> add\|remove` | Add/remove labels |
-| `pr-set-body <pr#> <body-file>` | Replace PR body |
-| `pr-checkout <pr#>` | Isolated clone for PR repair |
-| `pr-amend-push <clone-dir>` | Amend + force-push |
-| `backport-commit <release> <commit>` | One-shot backport |
-| `xx-make-pr <commits>` | Submit PR from commits |
+| `github pr comment <pr#> <body-file>` | Post PR comment |
+| `github pr label <pr#> add\|remove` | Add/remove labels |
+| `github pr set-body <pr#> <body-file>` | Replace PR body |
+| `github pr checkout <pr#>` | Isolated clone for PR repair |
+| `github pr amend-push <clone-dir>` | Amend + force-push |
+| `github backport commit <release> <commit>` | One-shot backport |
+| `github pr make <commits>` | Submit PR from commits |
 
 ## Known limitations
 
 - `agent-bus monitor-loop`/`fleet-watch` known broken under Claude Code's `Monitor` tool (workaround: bash originals)
-- `backport-commit` path-remap uses `strings.ReplaceAll` not regex (simplification, no real impact)
-- `xx-make-pr` marker-leak bug fixed 2026-07-07 (both Go and bash)
+- `github backport commit` path-remap uses `strings.ReplaceAll` not regex (simplification, no real impact)
+- `github pr make` marker-leak bug fixed 2026-07-07 (both Go and bash)

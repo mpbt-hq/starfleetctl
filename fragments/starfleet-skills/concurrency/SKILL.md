@@ -14,18 +14,18 @@ Full reference: **`reference.md`** in this skill's directory. This skill is the 
 
 - **Different working trees cannot clobber each other.** Parallelize across independent workspaces freely.
 - **The hazard:** two actors mutating the **same** clone at once — git has no native working-tree lock.
-- **PR-branch ownership:** separate clones isolate files, but every clone pushes to the **same GitHub PR branch**. Use `starfleetctl pr-claim` before mutating a PR.
+- **PR-branch ownership:** separate clones isolate files, but every clone pushes to the **same GitHub PR branch**. Use `starfleetctl github pr claim` before mutating a PR.
 
 ## Quick setup
 
 ```bash
 # Agent-owned clone (preferred)
-starfleetctl mk-agent-clone <branch> [name]
+starfleetctl github pr mk-agent-clone <branch> [name]
 
 # PR claiming
-starfleetctl pr-claim <pr#> "what you're doing"
+starfleetctl github pr claim <pr#> "what you're doing"
 # ... work ...
-starfleetctl pr-claim --release <pr#>
+starfleetctl github pr claim --release <pr#>
 
 # Per-task worktree
 scripts/worktree add <repo> [name]

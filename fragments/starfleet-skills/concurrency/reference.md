@@ -9,7 +9,7 @@ follow from that.
   clone at once. Git has no native working-tree lock — concurrent `checkout` / `add` / `commit`
   / `rebase` will silently corrupt each other's state.
 
-### Two agents on the same PR — claim it first (`starfleetctl pr-claim`)
+### Two agents on the same PR — claim it first (`starfleetctl github pr claim`)
 
 Separate clones isolate *files*, but every clone pushes to the **same GitHub PR branch**. So two
 agents repairing the **same PR** in two clones is still a conflict: their force-pushes clobber each
@@ -20,12 +20,12 @@ PR-branch ownership does.
 
 ```bash
 export AGENT_ID=<short-unique-name>      # e.g. repair-3132
-starfleetctl pr-claim <pr#> "what you're doing"
+starfleetctl github pr claim <pr#> "what you're doing"
 # ... work ...
-starfleetctl pr-claim --release <pr#>    # when done
+starfleetctl github pr claim --release <pr#>    # when done
 ```
 
-- `starfleetctl pr-claim --list` is the shared work log.
+- `starfleetctl github pr claim --list` is the shared work log.
 - Advisory: it only guards actors that also call it.
 - Claims are keyed by PR#, serialized via `flock`, stored gitignored, and go stale after a
   configurable TTL (default 1h). Use `--steal <pr#>` to take over a stale claim from a dead agent.
@@ -34,7 +34,7 @@ starfleetctl pr-claim --release <pr#>    # when done
 
 ### Central control plane — one agent monitors/steers the others (`starfleetctl agent-bus`)
 
-`pr-claim` coordinates *ownership of one PR branch*; `agent-bus` is the broader **control plane**
+`github pr claim` coordinates *ownership of one PR branch*; `agent-bus` is the broader **control plane**
 so a flagship agent — or a future dashboard / voice UI / MCP bus — can see what every independent
 session is doing and steer it. All parties read/write the same gitignored files, serialized via
 `flock`, so it works across **totally independent** sessions, not just spawned subagents.
@@ -72,7 +72,7 @@ Ships spawned by `starfleetctl fleet-autoscale` are a distinct, lower **tier**:
 **Preferred: agents work in their own dedicated clones.** Create an agent-owned clone:
 
 ```bash
-starfleetctl mk-agent-clone <branch> [name]
+starfleetctl github pr mk-agent-clone <branch> [name]
 # -> _WORK_/agent/<name>/<repo>  (gitignored)
 ```
 

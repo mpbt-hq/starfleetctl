@@ -115,7 +115,7 @@ same `_WORK_/agent-bus/` files without racing or misreading each other's state.
 |---|---|
 | `agent-bus <cmd>` | Cross-session status board + directive bus. Worker side: `status <state> ["note"]`, `inbox [--json]`, `ack <id>`, `ask "<q>"`, `clear`. Control side: `board [--json]`, `tell <agent> <text>`, `broadcast <text>`, `reply <qid> <answer>`, `asks`, `msgs [--json]`, `events [N]`, `prune`. `--json` on `board`/`inbox`/`msgs`/`asks` prints a JSON array instead of the human table. `tell`/`broadcast` also accept `--stdin` to read the message body from stdin, bypassing the OS `ARG_MAX` limit on argv (use it for payloads > ~100 KB). Also has `monitor-loop`/`fleet-watch`/`watch` polling loops — **see [Known limitations](#known-limitations-and-parity-notes)**, they are not wired into any production polling harness. |
 | `dashboard <cmd>` | Read/write/commit cycle for `mpbt-workspace`'s `DASHBOARD.md` (the thin, regenerated index): `pull`, `show`, `write <file\|->`, `commit -m "<msg>" [--no-push]`, `reindex` (rebuild the index from every `dashboard/topics/*.md` file's frontmatter). `dashboard topic <cmd>` is the per-topic-file counterpart, the only sanctioned way to read/write `dashboard/topics/*.md` (agents must not touch it via `Read`/`Edit`/`Write` directly — see `mpbt-workspace`'s `.starfleet-ai/agents.d/index.md`): `topic list [--json]`, `topic show <slug>`, `topic write <slug> <file\|->`, `topic new <slug> --title "<t>" [--status "<s>"] [--parked]`, `topic commit <slug> -m "<msg>" [--no-push]` (commits+pushes just that one file, correctly `git add`s it whether already tracked or brand new). |
-| `pr-claim <cmd>` | Advisory cross-agent PR-branch lock + shared work log, keyed by PR number: `pr-claim <pr#> ["what"]`, `--list [--json]`, `--release <pr#>`, `--release-all`, `--steal <pr#> ["what"]`, `--who <pr#>`. |
+| `github pr claim <cmd>` | Advisory cross-agent PR-branch lock + shared work log, keyed by PR number: `github pr claim <pr#> ["what"]`, `--list [--json]`, `--release <pr#>`, `--release-all`, `--steal <pr#> ["what"]`, `--who <pr#>`. |
 | `ws-commit` | `ws-commit -m "<msg>" <path> [<path>...]` (or `-a` for all tracked changes, `--no-push` to skip the push) — commit+push under the shared clone lock, so concurrent sessions don't race the same working tree's index/HEAD. |
 | `ship-names <cmd>` | Star-Trek-topicd per-session identity registry: `assign [flagship]`, `release <name>`, `list [--json]`, `gc`, `flagship`, `shell-env` (outputs eval-able shell code to set `STARFLEET_SHIP_ID`, PS1 prefix, and EXIT trap — usage: `eval "$(starfleetctl ship-names shell-env)"`). |
 | `with-clone-lock [cmd...]` | Generic "serialize mutating work in this git working tree" primitive everything above is built on — acquires `<gitdir>/mpbt-clone.lock`, then execs the given command (or an interactive shell with none given) with the lock held. Works in *any* git working tree, not just an `mpbt-workspace` checkout. |
@@ -134,19 +134,18 @@ Stateless wrappers around the `gh` CLI (which owns auth/config) — parsing/form
 natively in Go instead of `jq`/`grep`/`sed`. All default to the repo in the current directory; override
 with the `REPO` environment variable.
 
-**Grouped form:** every command below is also reachable as `starfleetctl github <group> <verb>` —
-`pr` (`view`, `ci`, `job-logs`, `comment`, `label`, `request-reviewers`, `set-body`, `append-body`,
-`amend-push`, `checkout`, `claim`, `show-branch-file`, `show-conflict`, `mk-agent-clone`, `make`),
-`ci` (`cancel-stale`, `prune`), `backport` (`applies`, `commit`). The flat names listed here remain
-available as aliases for now.
+**Grouped form:** all GitHub subcommands are reachable as `starfleetctl github <group> <verb>` —
+`github pr <view|ci|job-logs|comment|label|request-reviewers|set-body|append-body|amend-push|checkout|claim|show-branch-file|show-conflict|mk-agent-clone|make>`,
+`github ci <cancel-stale|prune>`, `github backport <applies|commit>`. The legacy flat names
+(`pr-view`, `pr-ci`, …) remain available as aliases during the transition.
 
 | Subcommand | Purpose |
 |---|---|
-| `pr-view <pr#> [json-fields]` | `gh pr view --json <fields>` (default fields: `number,title,state`). |
-| `pr-ci <pr#\|URL> [--json]` | CI status classified **by conclusion, not raw count** — the underlying CI matrix is fail-fast, so one real `FAILURE` cancels every still-running sibling; a big "N failing" number is usually mostly collateral `CANCELLED` jobs. Prints pass/fail/cancelled/pending/skip buckets, the actual failures, a verdict line, and a known-CI-flake hint. `--json` prints the raw `statusCheckRollup`. |
-| `show-branch-file <ref> <path> [symbol]` | Print a repo file (or, with `[symbol]`, just the region after a literal-substring match, `grep -A`-style with multi-hit/merged-context semantics) at any ref via the GitHub contents API — no local clone needed. Auto-retries with a leading path segment toggled, for repos that reorganized their directory layout between branches. |
-| `backport-applies <master-path> <grep-ERE> [release ...]` | Run an extended-regex marker search across several release branches at once (built on `show-branch-file`) — e.g. classify each branch as vulnerable / already-fixed / not-applicable in one call. Defaults to release lines `25.2 25.1 25.0`. |
-| `show-pr-conflict` | List all open PRs whose `mergeable` status is `CONFLICTING`. |
+| `github pr view <pr#> [json-fields]` | `gh pr view --json <fields>` (default fields: `number,title,state`). |
+| `github pr ci <pr#\|URL> [--json]` | CI status classified **by conclusion, not raw count** — the underlying CI matrix is fail-fast, so one real `FAILURE` cancels every still-running sibling; a big "N failing" number is usually mostly collateral `CANCELLED` jobs. Prints pass/fail/cancelled/pending/skip buckets, the actual failures, a verdict line, and a known-CI-flake hint. `--json` prints the raw `statusCheckRollup`. |
+| `github pr show-branch-file <ref> <path> [symbol]` | Print a repo file (or, with `[symbol]`, just the region after a literal-substring match, `grep -A`-style with multi-hit/merged-context semantics) at any ref via the GitHub contents API — no local clone needed. Auto-retries with a leading path segment toggled, for repos that reorganized their directory layout between branches. |
+| `github backport applies <master-path> <grep-ERE> [release ...]` | Run an extended-regex marker search across several release branches at once (built on `github pr show-branch-file`) — e.g. classify each branch as vulnerable / already-fixed / not-applicable in one call. Defaults to release lines `25.2 25.1 25.0`. |
+| `github pr show-conflict` | List all open PRs whose `mergeable` status is `CONFLICTING`. |
 
 ### GitHub interaction — mutating
 
@@ -158,15 +157,15 @@ separate decision gated on review, same as the read-only set was before it got t
 
 | Subcommand | Purpose |
 |---|---|
-| `pr-comment <pr#> <body-file> [--bot-review]` | Post a PR comment; `--bot-review` prepends a fixed disclosure banner naming the `$STARFLEET_SHIP_ID` that posted it. |
-| `pr-label <pr#> add\|remove <label...>` / `pr-label <pr#> set-review passed\|changes-requested` | Add/remove labels via the REST API (works around a broken `gh pr edit` on some repos); `set-review` swaps two mutually-exclusive review-outcome labels atomically. |
-| `pr-request-reviewers <pr#> <login> [login...]` | Request reviewers via the REST API. |
-| `pr-set-body <pr#> <body-file>` | Replace a PR's body via the REST API. |
-| `pr-append-body <pr#> <text-file>` | Fetch a PR's current body, append the given text, write it back. |
-| `pr-checkout <pr#> [agent-name]` | Set up an isolated local clone checked out to a PR's head branch — handles both same-repo and cross-fork PRs (wires a dedicated `fork` remote when needed) — and prints the clone directory on stdout. |
-| `pr-amend-push <clone-dir> [files...]` | Fold local edits into a PR's existing commit (`--amend --no-edit`, keeping the original message/trailers) and force-with-lease push it back. |
-| `backport-commit <release> <commit-ish\|PR#> [agent-name]` | One-shot backport: refresh/create an isolated agent clone for the target release, cherry-pick the given commit (falling back to a path-remapped apply if the source tree reorganized between branches), then hand off to `xx-make-pr`. |
-| `xx-make-pr [options] <commit> [<commit>...]` | Submit one or more commits from the current branch as a PR against a configured upstream (via `git config`'s `make-pr.*` keys in the working directory), then mark only the incubator's copies of those commits with the resulting PR number (never the pushed/merged PR branch) and rebase the source branch. `--branch <name>` sets an explicit PR branch name. |
+| `github pr comment <pr#> <body-file> [--bot-review]` | Post a PR comment; `--bot-review` prepends a fixed disclosure banner naming the `$STARFLEET_SHIP_ID` that posted it. |
+| `github pr label <pr#> add\|remove <label...>` / `github pr label <pr#> set-review passed\|changes-requested` | Add/remove labels via the REST API (works around a broken `gh pr edit` on some repos); `set-review` swaps two mutually-exclusive review-outcome labels atomically. |
+| `github pr request-reviewers <pr#> <login> [login...]` | Request reviewers via the REST API. |
+| `github pr set-body <pr#> <body-file>` | Replace a PR's body via the REST API. |
+| `github pr append-body <pr#> <text-file>` | Fetch a PR's current body, append the given text, write it back. |
+| `github pr checkout <pr#> [agent-name]` | Set up an isolated local clone checked out to a PR's head branch — handles both same-repo and cross-fork PRs (wires a dedicated `fork` remote when needed) — and prints the clone directory on stdout. |
+| `github pr amend-push <clone-dir> [files...]` | Fold local edits into a PR's existing commit (`--amend --no-edit`, keeping the original message/trailers) and force-with-lease push it back. |
+| `github backport commit <release> <commit-ish\|PR#> [agent-name]` | One-shot backport: refresh/create an isolated agent clone for the target release, cherry-pick the given commit (falling back to a path-remapped apply if the source tree reorganized between branches), then hand off to `github pr make`. |
+| `github pr make [options] <commit> [<commit>...]` | Submit one or more commits from the current branch as a PR against a configured upstream (via `git config`'s `make-pr.*` keys in the working directory), then mark only the incubator's copies of those commits with the resulting PR number (never the pushed/merged PR branch) and rebase the source branch. `--branch <name>` sets an explicit PR branch name. |
 
 ## Known limitations and parity notes
 
@@ -181,13 +180,13 @@ separate decision gated on review, same as the read-only set was before it got t
   (`scripts/agent-bus-monitor-loop`, `scripts/agent-bus-fleet-watch`) remain the only
   `Monitor`-tool-safe implementation. `agent-bus watch` (a `setsid`-detached background daemon, a
   different execution model entirely) was not tested against this failure mode.
-- **`backport-commit`'s path-remap fallback uses a literal string replace, not a regex, unlike the
+- **`github backport commit`'s path-remap fallback uses a literal string replace, not a regex, unlike the
   bash original.** The bash script's directory-reorg remap runs the old/new path pair through
   `sed`, so a `.` in a path is technically a basic-regex wildcard there; this port uses
   `strings.ReplaceAll` instead. Behaviourally identical for every real path in the source tree this
   targets (plain `word/word/word.c` names, no regex metacharacters) — flagged here as a disclosed,
   deliberate simplification rather than a silent behavior change.
-- **`xx-make-pr`'s marker-leak bug is fixed (2026-07-07), in both this port and the bash original.**
+- **`github pr make`'s marker-leak bug is fixed (2026-07-07), in both this port and the bash original.**
   The old default "rebase" mode's PR-number-marker rewrite touched the *pushed* PR branch itself,
   not just the source/incubator branch — leaked onto merged upstream commits (PR #3162). Both
   implementations now always mark only the incubator branch, via a scripted `GIT_SEQUENCE_EDITOR`
