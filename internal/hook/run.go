@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"github.com/metux/starfleetctl/internal/identity"
+	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
 // Usage string shown for `starfleetctl hook --help`.
@@ -109,7 +110,7 @@ func runOpencode(root string, args []string) int {
 
 // monitorHint generates the SessionStart additionalContext JSON telling the
 // Claude Code assistant to unconditionally arm Monitor-tool watchers on its
-// agent-bus inbox (and, for Enterprise, fleet-watch too). Quietly exits with
+// agent-bus inbox (and, for the flagship, fleet-watch too). Quietly exits with
 // no output when $STARFLEET_SHIP_ID is unset, matching the bash original.
 func monitorHint() int {
 	shipID := identity.ShipID()
@@ -118,7 +119,7 @@ func monitorHint() int {
 	}
 
 	var context string
-	if shipID == "Enterprise" {
+	if shipID == shipnames.Flagship {
 		context = fmt.Sprintf(
 			"Fleet directive auto-surfacing: you are agent-bus identity %s (the flagship/control session). "+
 				"Before doing anything else this session (including before responding to the user's first message), "+

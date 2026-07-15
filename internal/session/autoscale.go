@@ -97,7 +97,7 @@ func runAutoscaleNeed(root string, args []string) int {
 	release := "master"
 	client := "claude"
 	max := defaultMax
-	supervisor := "Enterprise"
+	supervisor := shipnames.Flagship
 	permissionMode := "dontAsk"
 	dry := false
 

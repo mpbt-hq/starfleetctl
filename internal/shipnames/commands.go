@@ -12,7 +12,7 @@ import (
 )
 
 // DoAssignFlagship implements `ship-names assign flagship`: reserve
-// Enterprise specifically, unlocked (matches bash — only the general
+// the flagship name specifically, unlocked (matches bash — only the general
 // assignment path takes .assign.lock).
 func (r *Registry) DoAssignFlagship() error {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
