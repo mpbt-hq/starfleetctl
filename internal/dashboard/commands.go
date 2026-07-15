@@ -63,38 +63,15 @@ func (d *Dashboard) DoCommit(msg string, push bool) error {
 	}
 	defer lh.Close()
 
-	// d.File lives under .starfleet-ai/ which the workspace .gitignore
-	// excludes, so a plain `git add` refuses the (initially untracked) file.
-	// Force-add: committing DASHBOARD.md is the whole point of this command,
-	// and once tracked the path stays addable. Mirrors the bash original's
-	// `git add -f`.
-	if err := run(d.Root, "git", "add", "-f", d.File); err != nil {
-		return err
-	}
-
-	// `git diff --cached --quiet` exits 0 when nothing is staged.
-	if err := run(d.Root, "git", "diff", "--cached", "--quiet", "--", d.File); err == nil {
-		fmt.Println("dashboard: nothing staged — nothing to commit")
-		return nil
-	}
-
-	if err := run(d.Root, "git", "commit", "-m", msg); err != nil {
-		return err
-	}
-
-	if !push {
-		return nil
-	}
-
-	branch, err := d.branch()
-	if err != nil {
-		return err
-	}
-	// Best-effort, mirrors ws-commit's `|| true`: a concurrent push landing
-	// between our commit and push is integrated race-free since we hold the
-	// clone lock; a genuine rebase conflict still surfaces on the push below.
-	_ = run(d.Root, "git", "pull", "--rebase", "--autostash")
-	return run(d.Root, "git", "push", "origin", branch)
+	// d.File is DASHBOARD.md, a generated artifact under .starfleet-ai/ that
+	// the workspace .gitignore excludes. It is regenerated on demand
+	// (bootstrap + every dashboard operation) and is intentionally NOT
+	// committed (see bootstrap/checks.go). So there is nothing for this
+	// command to stage or commit. Previously a `git add -f` force-tracked it,
+	// which contradicted that design; that has been removed, and this command
+	// is now a deliberate no-op for DASHBOARD.md.
+	fmt.Println("dashboard: DASHBOARD.md is generated state — intentionally not committed; nothing to do")
+	return nil
 }
 
 // sync runs `git pull --rebase --autostash` (no explicit remote/branch —
