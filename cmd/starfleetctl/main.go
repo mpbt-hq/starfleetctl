@@ -22,10 +22,8 @@ import (
 	"github.com/metux/starfleetctl/internal/bridged"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/genesis"
-	"github.com/metux/starfleetctl/internal/ghpr"
 	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/jsonutil"
-	"github.com/metux/starfleetctl/internal/prclaim"
 	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
@@ -58,29 +56,19 @@ Bootstrap & setup:
   self-install      clone/pull starfleetctl source, build, and symlink into .starfleet-ai/bin/
   agents            install/update starfleet agent fragments and skills
 
-GitHub PR commands:
-  pr-view             view a pull request
-  pr-ci               show PR CI status
-  pr-job-logs          fetch CI logs for failing jobs of a PR
-  pr-comment          comment on a PR
-  pr-label            add/remove PR labels
-  pr-request-reviewers request PR reviewers
-  pr-set-body         set PR body text
-  pr-append-body      append text to PR body
-  pr-checkout         checkout a PR into an agent clone
-  pr-amend-push       amend and force-push a PR branch
-  pr-claim            claim/unclaim a PR
-  show-branch-file    show a file from a branch
-  show-pr-conflict    show merge conflict details for a PR
-  backport-applies    check if a commit applies to a release branch
-  backport-commit     backport a commit to a release branch
-  xx-make-pr          create a PR with commit-message conventions
-  mk-agent-clone      create an isolated agent worktree clone
+GitHub commands (grouped under 'github'):
+  github pr          view|ci|job-logs|comment|label|request-reviewers|
+                     set-body|append-body|amend-push|checkout|claim|
+                     show-branch-file|show-conflict|mk-agent-clone|make
+  github ci          cancel-stale|prune
+  github backport    applies|commit
+  github issue       (not yet wired)
+  github release     (not yet wired)
+  Legacy flat aliases (pr-view, pr-ci, pr-claim, backport-applies, ci-cancel-stale,
+  xx-make-pr, …) still work for now — they delegate into 'github'.
 
 Utilities:
   json              JSON helper (validate/pretty/get) — no python3 needed
-  ci-cancel-stale   cancel still-running superseded CI runs
-  ci-prune          delete completed stale CI runs
 
 Run 'starfleetctl <subcommand> --help' for subcommand-specific help.
 `
@@ -150,60 +138,55 @@ func main() {
 		os.Exit(jsonutil.Run(os.Args[2:]))
 	}
 
-	// The ghpr (GitHub-interaction) subcommands are likewise standalone —
-	// stateless `gh` wrappers with no fleet-file/lock dependency on this
-	// checkout, so they must work from any cwd too, same reasoning as
-	// with-clone-lock above.
+	// The GitHub-interaction subcommands are now grouped under `github …`
+	// (see cmd/starfleetctl/github.go). The legacy flat names below remain as
+	// aliases that delegate into that dispatcher, so existing skills/scripts
+	// keep working during the transition. Each verb resolves its own root
+	// (via workspaceRoot) internally where needed, so they are safe here in
+	// the stateless block.
 	switch os.Args[1] {
-	case "pr-view":
-		os.Exit(ghpr.RunPRView(os.Args[2:]))
-	case "pr-ci":
-		os.Exit(ghpr.RunPRCi(os.Args[2:]))
-	case "pr-job-logs":
-		os.Exit(ghpr.RunPRJobLogs(os.Args[2:]))
-	case "show-branch-file":
-		os.Exit(ghpr.RunShowBranchFile(os.Args[2:]))
-	case "backport-applies":
-		os.Exit(ghpr.RunBackportApplies(os.Args[2:]))
-	case "show-pr-conflict":
-		os.Exit(ghpr.RunShowPRConflict(os.Args[2:]))
+	case "github":
+		os.Exit(RunGithub(os.Args[2:]))
 
-	// Phase 2 mutating subset (DASHBOARD.md "starfleetctl" row) — same
-	// stateless-wrapper reasoning as the read-only group above: pr-comment,
-	// pr-label, pr-request-reviewers, pr-set-body and pr-append-body are
-	// pure `gh api`/`gh pr` wrappers with no fleet-file dependency;
-	// pr-amend-push operates entirely on a clone dir given as an argument.
-	// NOT cut over to "preferred" anywhere (.starfleet-ai/agents.d/index.md/.claude/settings.json
-	// unchanged) — parity-proving only this session, per the standing rule
-	// that a mutating command needs an explicit praetor go-ahead first.
+	// --- legacy flat aliases (delegate to `github`) ---
+	case "pr-view":
+		os.Exit(RunGithub(append([]string{"pr", "view"}, os.Args[2:]...)))
+	case "pr-ci":
+		os.Exit(RunGithub(append([]string{"pr", "ci"}, os.Args[2:]...)))
+	case "pr-job-logs":
+		os.Exit(RunGithub(append([]string{"pr", "job-logs"}, os.Args[2:]...)))
+	case "show-branch-file":
+		os.Exit(RunGithub(append([]string{"pr", "show-branch-file"}, os.Args[2:]...)))
+	case "backport-applies":
+		os.Exit(RunGithub(append([]string{"backport", "applies"}, os.Args[2:]...)))
+	case "show-pr-conflict":
+		os.Exit(RunGithub(append([]string{"pr", "show-conflict"}, os.Args[2:]...)))
 	case "pr-comment":
-		os.Exit(ghpr.RunPRComment(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"pr", "comment"}, os.Args[2:]...)))
 	case "pr-label":
-		os.Exit(ghpr.RunPRLabel(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"pr", "label"}, os.Args[2:]...)))
 	case "pr-request-reviewers":
-		os.Exit(ghpr.RunPRRequestReviewers(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"pr", "request-reviewers"}, os.Args[2:]...)))
 	case "pr-set-body":
-		os.Exit(ghpr.RunPRSetBody(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"pr", "set-body"}, os.Args[2:]...)))
 	case "pr-append-body":
-		os.Exit(ghpr.RunPRAppendBody(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"pr", "append-body"}, os.Args[2:]...)))
 	case "pr-amend-push":
-		os.Exit(ghpr.RunPRAmendPush(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"pr", "amend-push"}, os.Args[2:]...)))
 	case "ci-cancel-stale":
-		os.Exit(ghpr.RunCICancelStale(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"ci", "cancel-stale"}, os.Args[2:]...)))
 	case "ci-prune":
-		os.Exit(ghpr.RunCIPrune(os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"ci", "prune"}, os.Args[2:]...)))
 	case "xx-make-pr":
-		// Standalone invocation operates on cwd, exactly like the bash
-		// script (which reads make-pr.* from `git config` in whatever
-		// directory it's run from). backport-commit below calls
-		// ghpr.RunXXMakePR directly with an explicit clone dir instead of
-		// going through this cwd-based path.
-		dir, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "starfleetctl:", err)
-			os.Exit(1)
-		}
-		os.Exit(ghpr.RunXXMakePR(dir, os.Args[2:]))
+		os.Exit(RunGithub(append([]string{"pr", "make"}, os.Args[2:]...)))
+	case "pr-claim":
+		os.Exit(RunGithub(append([]string{"pr", "claim"}, os.Args[2:]...)))
+	case "pr-checkout":
+		os.Exit(RunGithub(append([]string{"pr", "checkout"}, os.Args[2:]...)))
+	case "backport-commit":
+		os.Exit(RunGithub(append([]string{"backport", "commit"}, os.Args[2:]...)))
+	case "mk-agent-clone":
+		os.Exit(RunGithub(append([]string{"pr", "mk-agent-clone"}, os.Args[2:]...)))
 	}
 
 	root, err := workspaceRoot()
@@ -217,22 +200,14 @@ func main() {
 		os.Exit(agentbus.Run(root, os.Args[2:]))
 	case "dashboard":
 		os.Exit(dashboard.Run(root, os.Args[2:]))
-	case "pr-claim":
-		os.Exit(prclaim.Run(root, os.Args[2:]))
 	case "ws-commit":
 		os.Exit(wscommit.Run(root, os.Args[2:]))
 	case "ship-names":
 		os.Exit(shipnames.Run(root, os.Args[2:]))
 	case "telemetry":
 		os.Exit(telemetry.Run(root, os.Args[2:]))
-	case "pr-checkout":
-		os.Exit(ghpr.RunPRCheckout(root, os.Args[2:]))
-	case "backport-commit":
-		os.Exit(ghpr.RunBackportCommit(root, os.Args[2:]))
 	case "agents":
 		os.Exit(agents.Run(root, os.Args[2:]))
-	case "mk-agent-clone":
-		os.Exit(ghpr.RunMkAgentClone(root, os.Args[2:]))
 	case "bridged":
 		os.Exit(bridged.Run(root, os.Args[2:]))
 	case "hook":

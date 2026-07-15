@@ -134,6 +134,12 @@ Stateless wrappers around the `gh` CLI (which owns auth/config) — parsing/form
 natively in Go instead of `jq`/`grep`/`sed`. All default to the repo in the current directory; override
 with the `REPO` environment variable.
 
+**Grouped form:** every command below is also reachable as `starfleetctl github <group> <verb>` —
+`pr` (`view`, `ci`, `job-logs`, `comment`, `label`, `request-reviewers`, `set-body`, `append-body`,
+`amend-push`, `checkout`, `claim`, `show-branch-file`, `show-conflict`, `mk-agent-clone`, `make`),
+`ci` (`cancel-stale`, `prune`), `backport` (`applies`, `commit`). The flat names listed here remain
+available as aliases for now.
+
 | Subcommand | Purpose |
 |---|---|
 | `pr-view <pr#> [json-fields]` | `gh pr view --json <fields>` (default fields: `number,title,state`). |
