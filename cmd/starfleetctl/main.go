@@ -133,6 +133,18 @@ func main() {
 		os.Exit(genesis.Run(os.Args[2:]))
 	}
 
+	// bootstrap verifies/fixes workspace structure — by definition it may
+	// run BEFORE CLAUDE.md exists (that's what it creates), so it must NOT
+	// go through workspaceRoot(); cwd is the workspace root.
+	if os.Args[1] == "bootstrap" {
+		dir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "starfleetctl:", err)
+			os.Exit(1)
+		}
+		os.Exit(bootstrap.Run(dir, os.Args[2:]))
+	}
+
 	// json is a stateless utility — no workspace root needed.
 	if os.Args[1] == "json" {
 		os.Exit(jsonutil.Run(os.Args[2:]))
@@ -217,8 +229,6 @@ func main() {
 		os.Exit(ghpr.RunPRCheckout(root, os.Args[2:]))
 	case "backport-commit":
 		os.Exit(ghpr.RunBackportCommit(root, os.Args[2:]))
-	case "bootstrap":
-		os.Exit(bootstrap.Run(root, os.Args[2:]))
 	case "agents":
 		os.Exit(agents.Run(root, os.Args[2:]))
 	case "mk-agent-clone":
