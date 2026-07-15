@@ -12,10 +12,9 @@ independent, concurrent AI-agent sessions ("ships") working on the same codebase
 heartbeats, cross-session directives, PR-branch locking, shared-doc commits, and read/write access
 to GitHub PRs — into one binary, one subcommand per script.
 
-It grew out of [`mpbt-workspace`](https://github.com/X11Libre/mpbt-workspace) (a build
-orchestrator + fleet-coordination workspace for the [XLibre](https://github.com/X11Libre) X server
-project), where the original bash scripts still live under `scripts/*` and remain the reference
-implementation for anything not yet ported here.
+It grew out of `mpbt-workspace` (a build orchestrator + fleet-coordination workspace), where the
+original bash scripts still live under `scripts/*` and remain the reference implementation for
+anything not yet ported here.
 
 ## Deployment
 
@@ -132,7 +131,7 @@ same `_WORK_/agent-bus/` files without racing or misreading each other's state.
 ### GitHub interaction — read-only
 
 Stateless wrappers around the `gh` CLI (which owns auth/config) — parsing/formatting is done
-natively in Go instead of `jq`/`grep`/`sed`. All default to the `X11Libre/xserver` repo; override
+natively in Go instead of `jq`/`grep`/`sed`. All default to the repo in the current directory; override
 with the `REPO` environment variable.
 
 | Subcommand | Purpose |
