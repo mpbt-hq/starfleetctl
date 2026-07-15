@@ -102,3 +102,147 @@ The receiving ship should:
 1. Read the dashboard topic via `starfleetctl dashboard topic show <slug>`.
 2. Execute the task.
 3. Report completion via `agent-bus tell` to the praetor/sender.
+
+---
+
+# starfleetctl task assign — full reference
+
+## Synopsis
+
+```
+starfleetctl task assign <slug> [<ship>] [--no-push]
+```
+
+## Description
+
+Re-assigns an existing dashboard task topic to a ship. With no `<ship>`, picks
+the first `idle`, non-stale ship from the agent-bus board (same logic as
+`capture --assign`) and commissions it. Commits the topic, refreshes
+`DASHBOARD.md`'s index automatically (no separate `reindex`), and sends the
+ship a German directive.
+
+The topic is updated purely via the sanctioned `dashboard` package — no raw
+filesystem access to topic files.
+
+## Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<slug>` | yes | Dashboard topic slug of the existing task. |
+| `<ship>` | no | Ship to assign. Omit to auto-pick the first idle, non-stale ship. |
+| `--no-push` | no | Stage + commit locally but do not push to origin. |
+| `-h`, `--help` | no | Show help. |
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Task assigned + commissioned. |
+| 2 | Bad arguments / unknown option. |
+| 3 | No such task (slug not found). |
+| 4 | No free ship available (with no explicit `<ship>`). |
+
+## Output
+
+```
+task-assigned: slug=<slug> status=assigned assigned-to=<ship>
+```
+
+## Examples
+
+```sh
+# Re-assign to a specific ship
+starfleetctl task assign task-fix-nvidia-build Voyager
+
+# Re-assign to the first free ship
+starfleetctl task assign task-fix-nvidia-build
+```
+
+## How it works (internally)
+
+1. `dashboard.New(root)` — initialize dashboard handle.
+2. `dashboard.DoTopicLoad(slug)` — load the existing topic (sanctioned read).
+   Errors with exit 3 if the slug does not exist.
+3. If no `<ship>`: `agentbus.BoardEntries()` → pick first `idle && !stale` ship.
+4. Set `status = assigned`, `assigned-to = <ship>`; preserve all other
+   frontmatter + body (lossless round-trip).
+5. `dashboard.DoTopicUpdate(slug, meta, body)` — rewrite via sanctioned path.
+6. Commit the topic + `dashboard.DoReindex()` + `dashboard.DoCommit(...)`.
+7. `agentbus.Tell(ship, german directive)` — fresh-assignment vs. reassignment
+   wording is chosen automatically based on the prior `assigned-to` value.
+
+---
+
+# starfleetctl task unassign — full reference
+
+## Synopsis
+
+```
+starfleetctl task unassign <slug> [--no-push]
+```
+
+## Description
+
+Clears a task's assignment: sets `status = open`, `assigned-to = —`. The topic
+is updated via the sanctioned dashboard path and `DASHBOARD.md` is reindexed
+automatically.
+
+## Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<slug>` | yes | Dashboard topic slug of the existing task. |
+| `--no-push` | no | Stage + commit locally but do not push to origin. |
+| `-h`, `--help` | no | Show help. |
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Task unassigned. |
+| 2 | Bad arguments. |
+| 3 | No such task (slug not found). |
+
+## Output
+
+```
+task-unassigned: slug=<slug> status=open assigned-to=—
+```
+
+---
+
+# starfleetctl task status — full reference
+
+## Synopsis
+
+```
+starfleetctl task status <slug> <status> [--no-push]
+```
+
+## Description
+
+Sets an existing task's `status` field (e.g. `open`, `assigned`, `done`) via
+the sanctioned dashboard path; `DASHBOARD.md` is reindexed automatically.
+
+## Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<slug>` | yes | Dashboard topic slug of the existing task. |
+| `<status>` | yes | New status value. |
+| `--no-push` | no | Stage + commit locally but do not push to origin. |
+| `-h`, `--help` | no | Show help. |
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Status updated. |
+| 2 | Bad arguments. |
+| 3 | No such task (slug not found). |
+
+## Output
+
+```
+task-status: slug=<slug> status=<status>
+```

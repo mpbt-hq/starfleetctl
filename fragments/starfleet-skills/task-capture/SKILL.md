@@ -1,6 +1,6 @@
 ---
 name: task-capture
-description: "Capture a fleet task into the dashboard (and optionally commission a free ship) purely by commandeering — never executing the task, never touching dashboard files directly. Use when asked to 'record a task', 'capture an aufgabe', 'track a to-do for the fleet', or 'assign a task to a free ship'."
+description: "Capture a fleet task into the dashboard (and optionally commission a free ship) purely by commandeering — never executing the task, never touching dashboard files directly. Also re-assign / unassign / update an existing task's status via the same sanctioned path. Use when asked to 'record a task', 'capture an aufgabe', 'track a to-do for the fleet', 'assign a task to a free ship', or 'reassign / unassign / update a task'."
 ---
 
 # task-capture — pure commandeering of fleet tasks
@@ -18,8 +18,8 @@ and forwards the printed summary. No judgement, no file editing.
 1. **Never execute the task.** Capturing is the whole job. The assigned ship
    does the work later.
 2. **No direct file access.** Never `Read`/`Edit`/`Write` `DASHBOARD.md` or
-   `dashboard/topics/*.md`. All access goes through `starfleetctl dashboard
-   topic …` (the helper already does this).
+   `dashboard/topics/*.md`. All access goes through `starfleetctl task …` or
+   `starfleetctl dashboard topic …` (the helper already does this).
 3. **Messages to other ships / the praetor go in German** (agent-bus
    `tell`/`broadcast`). Code, commits, and doc files stay English.
 4. **Report back** to the sender (e.g. Enterprise) via `agent-bus tell` with
@@ -57,6 +57,38 @@ that to the sender.
 5. `starfleetctl dashboard reindex` + `dashboard commit` — refreshes the index.
 6. If a ship was chosen: `starfleetctl agent-bus tell <ship>` with a German
    directive pointing at the dashboard topic.
+
+## Assigning, unassigning, and updating existing tasks
+
+To re-assign, unassign, or change the status of a task that already exists as a
+dashboard topic, use the dedicated `task` subcommands — **no hand-editing of
+`dashboard/topics/*.md` required**:
+
+```sh
+# Re-assign an existing task (no <ship> -> first idle,non-stale ship from the
+# board; with <ship> -> that ship). Commits + reindexes automatically and
+# commissions the ship with a German directive:
+starfleetctl task assign <slug> [<ship>] [--no-push]
+
+# Clear an assignment (status -> open, assigned-to -> —):
+starfleetctl task unassign <slug> [--no-push]
+
+# Set a task's status field (e.g. open, assigned, done):
+starfleetctl task status <slug> <status> [--no-push]
+```
+
+- All three go through the sanctioned dashboard path (no raw file access) and
+  refresh `DASHBOARD.md`'s "Active Topics"/"Parked" index automatically — no
+  separate `reindex` step is needed.
+- `task assign` with **no `<ship>`** behaves like `capture --assign`: it picks
+  the first `idle`, non-stale ship from the agent-bus board and commissions it.
+  With `<ship>` it commissions that specific ship (the German directive reads as
+  a fresh assignment vs. a reassignment automatically).
+- The commands print `task-assigned: …`, `task-unassigned: …`,
+  `task-status: …` respectively — forward that to the sender.
+
+These commands are the sanctioned replacement for any direct topic-file
+editing when managing task assignment.
 
 ## Manual fallback (only if `starfleetctl task capture` is unavailable)
 
