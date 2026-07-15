@@ -4,7 +4,7 @@
 // starfleetctl consolidates the flock/race-prone mpbt-workspace
 // fleet-coordination scripts (agent-bus, pr-claim, ws-commit — in that
 // order) into one Go CLI, one subcommand per script. See
-// mpbt-workspace/DASHBOARD.md ("mpbtctl" row) and AGENTS.md for the full
+// mpbt-workspace/DASHBOARD.md ("mpbtctl" row) and CLAUDE.md for the full
 // rationale and rollout plan. Lives in its own repo (metux/starfleetctl),
 // built as an mpbt-workspace solution like go-x11proto/flyingtux, since it
 // coordinates sessions across the workspace rather than shipping as part of
@@ -103,7 +103,7 @@ func main() {
 	// with-clone-lock operates on whatever git working tree the CALLER's cwd
 	// is in — an agent clone, a driver clone, anywhere — not just
 	// mpbt-workspace, so it must NOT go through workspaceRoot()'s
-	// AGENTS.md+scripts/ discovery (which would fail outside this checkout).
+	// CLAUDE.md+scripts/ discovery (which would fail outside this checkout).
 	if os.Args[1] == "with-clone-lock" {
 		dir, err := os.Getwd()
 		if err != nil {
@@ -126,7 +126,7 @@ func main() {
 	}
 
 	// genesis-init is the "stand up the whole fleet from nothing" entry
-	// point — by definition it runs BEFORE AGENTS.md/scripts/ exist, so it
+	// point — by definition it runs BEFORE CLAUDE.md/scripts/ exist, so it
 	// must NOT go through workspaceRoot() either; it takes its target
 	// directory as an explicit argument (default cwd) instead.
 	if os.Args[1] == "genesis-init" {
@@ -173,7 +173,7 @@ func main() {
 	// pr-label, pr-request-reviewers, pr-set-body and pr-append-body are
 	// pure `gh api`/`gh pr` wrappers with no fleet-file dependency;
 	// pr-amend-push operates entirely on a clone dir given as an argument.
-	// NOT cut over to "preferred" anywhere (AGENTS.md/.claude/settings.json
+	// NOT cut over to "preferred" anywhere (CLAUDE.md/.claude/settings.json
 	// unchanged) — parity-proving only this session, per the standing rule
 	// that a mutating command needs an explicit praetor go-ahead first.
 	case "pr-comment":
@@ -252,7 +252,7 @@ func main() {
 // workspaceRoot resolves the mpbt-workspace root: MPBT_WORKSPACE_ROOT if set
 // (e.g. for an installed binary that no longer lives under any checkout),
 // otherwise walk up from the current directory looking for the same
-// landmarks a human would (AGENTS.md + scripts/), so `starfleetctl` behaves
+// landmarks a human would (CLAUDE.md + scripts/), so `starfleetctl` behaves
 // sensibly run from the repo root or any subdirectory — unlike the bash
 // scripts (which resolve relative to their own on-disk path via
 // dirname "$0"), an installed Go binary has no fixed path relative to the

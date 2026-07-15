@@ -3,7 +3,7 @@
 //
 // DoInstallSelf is the mechanism behind the "starfleetctl carries its own
 // instructions" design (praetor directive m0089, 2026-07-06): a consuming
-// workspace's AGENTS.md should only need to know how to fetch/build
+// workspace's CLAUDE.md should only need to know how to fetch/build
 // starfleetctl and how to pull the actual usage instructions FROM it — not
 // hand-duplicate and separately maintain a copy of them. See the root
 // package doc comment (doc.go) for the embedding mechanism.

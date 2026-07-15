@@ -19,7 +19,7 @@ cleared:
   code, code comments, commit messages, PR titles/descriptions/review comments, other GitHub
   interactions, and doc files. Applies fleet-wide, not just to the flagship session.
 - **Record lessons learned as you go.** Append durable, non-obvious findings to the relevant
-  section of `AGENTS.md` (or a topic doc) **within the session**, not at the end. Session context
+  section of `CLAUDE.md` (or a topic doc) **within the session**, not at the end. Session context
   is wiped on session end; only what's written survives.
 - **Keep the dashboard current** — it's the cross-session "what's in flight / what got parked"
   index. When you start, pause, or finish a theme (an initiative spanning more than one PR, or a
@@ -32,7 +32,7 @@ cleared:
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
 - **Project knowledge lives in the repo, not in per-user agent memory.** Lessons, CI gotchas,
-  failure modes, and workflow quirks go into `AGENTS.md` or topic docs — version-controlled and
+  failure modes, and workflow quirks go into `CLAUDE.md` or topic docs — version-controlled and
   shared with the whole team. A machine-local agent memory store is private and invisible to
   teammates, so it must **not** hold project facts. Never create a `memory/` directory inside a
   source clone.

@@ -7,7 +7,7 @@
 // the index/HEAD. It shares the SAME <gitdir>/mpbt-clone.lock file as
 // scripts/with-clone-lock / scripts/ws-commit and internal/dashboard, so a
 // Go and a bash actor on this clone serialize against each other instead of
-// both mutating the index/HEAD at once (see AGENTS.md "Concurrency /
+// both mutating the index/HEAD at once (see CLAUDE.md "Concurrency /
 // isolation"). ADVISORY ONLY, like the bash original: a raw `git commit`
 // still bypasses it.
 package wscommit

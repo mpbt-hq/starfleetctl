@@ -16,7 +16,7 @@ import (
 // file scripts/with-clone-lock uses, so a Go dashboard commit and a
 // concurrent bash with-clone-lock/ws-commit actor on this clone serialize
 // against each other instead of both mutating the index/HEAD at once (see
-// AGENTS.md "Concurrency / isolation").
+// CLAUDE.md "Concurrency / isolation").
 type lockHandle struct{ f *os.File }
 
 // lock acquires the shared clone lock, honoring LOCK_WAIT (seconds, default

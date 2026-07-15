@@ -26,7 +26,7 @@ Thin index — each row links to its own file under ` + "`dashboard/themes/`" + 
 this index itself is regenerated with
 ` + "`starfleetctl dashboard reindex`" + ` and should not normally be hand-edited.
 
-**Maintenance rule** (see ` + "`AGENTS.md`" + ` "Working practices"): when you start,
+**Maintenance rule** (see ` + "`CLAUDE.md`" + ` "Working practices"): when you start,
 pause, or finish a theme, update its entry **in the same session**.
 Ephemeral live-status (who's online right now) stays in
 ` + "`starfleetctl agent-bus board`" + ` / ` + "`starfleetctl pr-claim list`" + `.

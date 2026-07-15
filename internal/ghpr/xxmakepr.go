@@ -14,7 +14,7 @@
 // pushed. An earlier version of both this port and its bash original
 // rewrote the pushed PR branch itself, which leaked the marker onto merged
 // upstream commits (seen on PR #3162, all 4 commits merged prefixed
-// "[PR #3162] "); see AGENTS.md "PR workflow" for the incident writeup.
+// "[PR #3162] "); see CLAUDE.md "PR workflow" for the incident writeup.
 package ghpr
 
 import (

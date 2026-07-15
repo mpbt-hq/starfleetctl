@@ -22,7 +22,7 @@ func (a *Agents) inlineMarker() string {
 }
 
 // Inline reports whether reindex should produce a self-contained (inline)
-// AGENTS.md. Driven by the persistent .starfleet-ai/agents-inline marker, so
+// CLAUDE.md. Driven by the persistent .starfleet-ai/agents-inline marker, so
 // `new`/`write` (which call DoReindex) keep the workspace's chosen mode.
 func (a *Agents) Inline() bool {
 	_, err := os.Stat(a.inlineMarker())
@@ -31,7 +31,7 @@ func (a *Agents) Inline() bool {
 
 // SetInline turns inline mode on (token != "") or off (token == ""), by
 // creating or removing the marker file. Reindex must be run afterwards to
-// rewrite AGENTS.md in the new mode.
+// rewrite CLAUDE.md in the new mode.
 func (a *Agents) SetInline(on bool) error {
 	mk := a.inlineMarker()
 	if on {
@@ -159,7 +159,7 @@ func (a *Agents) DoWrite(slug, src string) error {
 }
 
 // DoNew scaffolds a new fragment file with frontmatter, refusing to clobber
-// an existing one, then reindexes (and bootstraps the root AGENTS.md/index
+// an existing one, then reindexes (and bootstraps the root CLAUDE.md/index
 // first if this is the very first fragment ever created). Slugs may contain
 // "/" to place the fragment in a subdirectory (e.g. "starfleet/my-topic").
 func (a *Agents) DoNew(slug, title string, order int, owner string) error {

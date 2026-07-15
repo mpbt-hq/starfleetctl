@@ -3,7 +3,7 @@
 //
 // Package dashboard is the Go port of scripts/dashboard — the safe
 // read/write/commit/push cycle for DASHBOARD.md, the cross-session "what's
-// in flight / what got parked" index (see mpbt-workspace's AGENTS.md
+// in flight / what got parked" index (see mpbt-workspace's CLAUDE.md
 // "Working practices"). It shells out to git exactly like the bash original
 // (pull --rebase --autostash, add, commit, push) and shares the SAME
 // per-worktree lock file as scripts/with-clone-lock / scripts/ws-commit

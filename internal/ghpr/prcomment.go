@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Go port of scripts/pr-comment: post a PR comment from a file, with an
-// optional --bot-review banner prepend (AGENTS.md's "Automated reviews"
+// optional --bot-review banner prepend (CLAUDE.md's "Automated reviews"
 // mandated wording, so it can't drift between call sites).
 package ghpr
 

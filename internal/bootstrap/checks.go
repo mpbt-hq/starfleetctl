@@ -183,7 +183,7 @@ func fixAgentsMD(b *Bootstrap) error {
 	return err
 }
 
-// verifyDashboardMD/fixDashboardMD: same idea as AGENTS.md above, but for
+// verifyDashboardMD/fixDashboardMD: same idea as CLAUDE.md above, but for
 // DASHBOARD.md's dashboard/themes/ + reindex system (internal/dashboard).
 // DASHBOARD.md is now a generated artifact under .starfleet-ai/ (not committed).
 func verifyDashboardMD(b *Bootstrap) (bool, string) {

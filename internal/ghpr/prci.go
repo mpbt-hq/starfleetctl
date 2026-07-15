@@ -4,7 +4,7 @@
 // Go port of scripts/pr-ci: quick CI status of a PR, classified BY
 // CONCLUSION not by count (the CI matrix is fail-fast, so one real FAILURE
 // cancels every still-running sibling — a big red number is usually mostly
-// CANCELLED collateral, not the cause; see AGENTS.md). Replaces the bash
+// CANCELLED collateral, not the cause; see CLAUDE.md). Replaces the bash
 // original's jq bucket-classification pipeline with native Go structs —
 // same logic, no jq dependency.
 package ghpr
@@ -221,7 +221,7 @@ func RunPRCi(args []string) int {
 		if knownFlakeRe.MatchString(c.name()) {
 			fmt.Println("  ⚠ note: some failing lanes match known flakes (BSD/Solaris VM boot, xephyr-glamor XTS")
 			fmt.Println("    timeout, go-xts race). Confirm vs a sibling run / rerun before assuming breakage —")
-			fmt.Printf("    see AGENTS.md 'PR repair workflow'. Get logs with: starfleetctl pr-job-logs %s\n", pr)
+			fmt.Printf("    see CLAUDE.md 'PR repair workflow'. Get logs with: starfleetctl pr-job-logs %s\n", pr)
 			break
 		}
 	}

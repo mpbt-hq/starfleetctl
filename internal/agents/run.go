@@ -17,9 +17,9 @@ const usage = `agents <command> [args…]
   new <slug> --title "<t>" [--order <n>] [--owner "<tool>"]
                                               scaffold a new fragment file
   reindex [--inline|--no-inline]              regenerate agents.d/index.md from agents.d/**/*.md
-                                              (--inline also writes a self-contained AGENTS.md with no
+                                              (--inline also writes a self-contained CLAUDE.md with no
                                               @-imports, for agents that don't resolve @, e.g. opencode)
-  commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) AGENTS.md+index.md
+  commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) CLAUDE.md+index.md
   install-self [--order <n>]                 write/refresh agents.d/starfleet/starfleetctl.md from this
                                               binary's own embedded README.md (always overwrites —
                                               tool-owned, re-run after a starfleetctl update)

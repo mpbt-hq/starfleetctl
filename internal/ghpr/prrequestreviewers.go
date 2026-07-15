@@ -3,7 +3,7 @@
 //
 // Go port of scripts/pr-request-reviewers: request one or more reviewers on
 // a PR via the REST API (the multi-flag `requested_reviewers` recipe from
-// AGENTS.md's HW-domain-routing section).
+// CLAUDE.md's HW-domain-routing section).
 package ghpr
 
 import (

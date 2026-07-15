@@ -7,7 +7,7 @@
 // it got built — `genesis-init` writes the small, project-independent set
 // of files a consuming workspace needs to bootstrap starfleetctl itself
 // (the starfleet-bootstrap script), then hands
-// off to `bootstrap --fix` for everything else (AGENTS.md/agents.d,
+// off to `bootstrap --fix` for everything else (CLAUDE.md/agents.d,
 // DASHBOARD.md, allowlist entries, _WORK_ dirs, the self-documenting
 // fragment, opencode plugins/scripts). None of the embedded templates
 // below reference any project-specific detail (no XLibre/xserver literal

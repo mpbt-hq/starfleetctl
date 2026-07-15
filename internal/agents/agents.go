@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Package agents implements the modular AGENTS.md system: the root
-// AGENTS.md file is fixed forever (a short notice plus one `@agents.d/
+// Package agents implements the modular CLAUDE.md system: the root
+// CLAUDE.md file is fixed forever (a short notice plus one `@agents.d/
 // index.md` import), and the actual content lives in per-topic fragment
 // files under agents.d/, each a Markdown body with a small frontmatter
 // block — same shape and rationale as internal/dashboard's theme system
@@ -13,13 +13,13 @@
 //
 // This only works because Claude Code resolves `@file` imports
 // recursively up to 4 hops (verified against the official docs before
-// building this): CLAUDE.md -> AGENTS.md -> agents.d/index.md ->
-// agents.d/<slug>.md is 3 hops, comfortably within that limit.
+// building this): CLAUDE.md -> agents.d/index.md ->
+// agents.d/<slug>.md is 2 hops, comfortably within that limit.
 //
 // Some agents (notably opencode) do not resolve `@`-imports, so `reindex`
 // also supports an inline mode: with the .starfleet-ai/agents-inline marker
 // present (or `reindex --inline`), it writes a single self-contained
-// AGENTS.md — the fixed root notice followed by every fragment's body — with
+// CLAUDE.md — the fixed root notice followed by every fragment's body — with
 // no `@` at all. `agents reindex` (and `new`/`write`, which reindex) honor the
 // marker, so a workspace keeps its chosen mode.
 package agents
@@ -35,7 +35,7 @@ import (
 type Agents struct {
 	Root   string // workspace root (toplevel of the git checkout)
 	GitDir string // absolute .git dir, for the shared clone lock file
-	File   string // absolute path to the root AGENTS.md
+	File   string // absolute path to the root CLAUDE.md
 }
 
 // New resolves an Agents rooted at the given workspace root.
