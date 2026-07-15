@@ -27,6 +27,6 @@ unset STARFLEET_TARGET
 MODEL=""
 [ -n "${STARFLEET_MODEL:-}" ] && MODEL="--model ${STARFLEET_MODEL}"
 
-export OPENCODE_CONFIG_CONTENT="{\"username\":\"${STARFLEET_SHIP_ID}\"}"
+export OPENCODE_CONFIG_CONTENT="{\"username\":\"${STARFLEET_SHIP_ID}\",\"instructions\":[\".starfleet-ai/agents.d/index.md\"]}"
 #shellcheck disable=SC2086
-exec opencode ${MODEL} --prompt "You are the flagship ${STARFLEET_SHIP_ID:-unknown}. agent instructions in ./agents.d/index.md" "$@"
+exec opencode ${MODEL} --prompt "You are the flagship ${STARFLEET_SHIP_ID:-unknown}. Fleet identity loaded via OPENCODE_CONFIG_CONTENT." "$@"
