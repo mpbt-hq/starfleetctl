@@ -30,8 +30,12 @@ type TopicMeta struct {
 	Slug         string
 	Title        string
 	Category     string // "active" or "parked"
+	Kind         string // active only, e.g. "task"
 	Status       string // active only
+	AssignedTo   string // active only, "—" when unassigned
 	DocRef       string // active only
+	CreatedBy    string // active only
+	Created      string // active only
 	NotedBy      string // parked only
 	Since        string // parked only
 	MigratedFrom string
@@ -97,8 +101,16 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 			m.Title = val
 		case "category":
 			m.Category = val
+		case "kind":
+			m.Kind = val
 		case "status":
 			m.Status = val
+		case "assigned-to":
+			m.AssignedTo = val
+		case "created-by":
+			m.CreatedBy = val
+		case "created":
+			m.Created = val
 		case "doc_ref":
 			m.DocRef = val
 		case "noted_by":
@@ -122,7 +134,13 @@ func writeTopicFile(path string, m TopicMeta, body string) error {
 		fmt.Fprintf(&b, "noted_by: %s\n", quoteYAML(m.NotedBy))
 		fmt.Fprintf(&b, "since: %s\n", quoteYAML(m.Since))
 	} else {
+		if m.Kind != "" {
+			fmt.Fprintf(&b, "kind: %s\n", quoteYAML(m.Kind))
+		}
 		fmt.Fprintf(&b, "status: %s\n", quoteYAML(m.Status))
+		fmt.Fprintf(&b, "assigned-to: %s\n", quoteYAML(m.AssignedTo))
+		fmt.Fprintf(&b, "created-by: %s\n", quoteYAML(m.CreatedBy))
+		fmt.Fprintf(&b, "created: %s\n", quoteYAML(m.Created))
 		fmt.Fprintf(&b, "doc_ref: %s\n", quoteYAML(m.DocRef))
 	}
 	if m.MigratedFrom != "" {
@@ -163,4 +181,39 @@ func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
 	}
 	sort.Slice(metas, func(i, j int) bool { return metas[i].Slug < metas[j].Slug })
 	return metas, nil
+}
+
+// DoTopicLoad reads an existing topic file, returning its parsed frontmatter
+// and body. It is the read counterpart to DoTopicUpdate / DoTopicWrite and the
+// sanctioned way to inspect a topic without touching the file as a raw path.
+func (d *Dashboard) DoTopicLoad(slug string) (TopicMeta, string, error) {
+	data, err := os.ReadFile(d.topicPath(slug))
+	if err != nil {
+		return TopicMeta{}, "", err
+	}
+	return parseTopicFile(data)
+}
+
+// DoTopicUpdate rewrites an existing topic file with the given frontmatter
+// and body, via the sanctioned dashboard path (never hand-edits the file).
+// It is the in-place counterpart to DoTopicWrite (which takes a source file).
+func (d *Dashboard) DoTopicUpdate(slug string, m TopicMeta, body string) error {
+	tmpDir := filepath.Join(d.Root, "_WORK_", ".tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(tmpDir, "topic.*.md")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := writeTopicFile(tmpName, m, body); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return d.DoTopicWrite(slug, tmpName)
 }

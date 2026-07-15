@@ -26,9 +26,17 @@ import (
 const usage = `task <command> [args…]
 
   capture --title "<t>" [options]   capture a task into the dashboard (as a
-                                    dashboard/topics/<slug>.md topic) and
-                                    optionally commission a free ship to work
-                                    it. Never executes the task itself.
+                                     dashboard/topics/<slug>.md topic) and
+                                     optionally commission a free ship to work
+                                     it. Never executes the task itself.
+  assign <slug> [<ship>]            assign an existing task to a ship (or,
+                                     with no ship, to the first idle
+                                     non-stale ship). Updates status +
+                                     assigned-to via the sanctioned
+                                     dashboard path and commissions the ship.
+  unassign <slug>                   clear a task's assignment (status ->
+                                     open, assigned-to -> —).
+  status <slug> <status>            set an existing task's status field.
 
 Run 'starfleetctl task <command> --help' for command-specific help.
 `
@@ -46,6 +54,12 @@ func Run(root string, args []string) int {
 	switch args[0] {
 	case "capture":
 		return runCapture(root, args[1:])
+	case "assign":
+		return runAssign(root, args[1:])
+	case "unassign":
+		return runUnassign(root, args[1:])
+	case "status":
+		return runStatus(root, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "task: unknown command: %s\n\n%s", args[0], usage)
 		return 2
@@ -305,4 +319,249 @@ func writeTopicContent(d *dashboard.Dashboard, slug, content string) error {
 		return err
 	}
 	return d.DoTopicWrite(slug, tmpName)
+}
+
+const assignUsage = `task assign <slug> [<ship>] [--no-push]
+
+Assign an existing task to a ship. With no <ship>, commission the first idle,
+non-stale ship from the agent-bus board. Updates the topic's status +
+assigned-to via the sanctioned dashboard path (no raw file access) and
+commissions the ship with an agent-bus directive.
+
+Exit codes:
+  0  task assigned + commissioned
+  2  bad arguments / unknown option
+  3  no such task (slug not found)
+  4  no free ship available (with no explicit ship)
+`
+
+const unassignUsage = `task unassign <slug> [--no-push]
+
+Clear a task's assignment: status -> open, assigned-to -> —. The topic is
+updated via the sanctioned dashboard path.
+
+Exit codes:
+  0  task unassigned
+  2  bad arguments
+  3  no such task (slug not found)
+`
+
+const statusUsage = `task status <slug> <status> [--no-push]
+
+Set an existing task's status field (e.g. open, assigned, done) via the
+sanctioned dashboard path.
+
+Exit codes:
+  0  status updated
+  2  bad arguments
+  3  no such task (slug not found)
+`
+
+// commitAndReindex commits the single topic file (and, best-effort, the
+// regenerated DASHBOARD.md index) the same way runCapture does — shared so the
+// assign/unassign/status paths keep identical fleet-visibility behaviour.
+func commitAndReindex(d *dashboard.Dashboard, slug, msg string, push bool) {
+	if err := d.DoTopicCommit(slug, msg, push); err != nil {
+		fmt.Fprintf(os.Stderr, "task: topic commit failed: %v\n", err)
+		return
+	}
+	if err := d.DoReindex(); err != nil {
+		fmt.Fprintf(os.Stderr, "task: dashboard reindex failed (%v) — task %s updated but not yet in DASHBOARD.md index\n", err, slug)
+		return
+	}
+	if err := d.DoCommit("reindex: update task "+slug, push); err != nil {
+		fmt.Fprintf(os.Stderr, "task: dashboard reindex commit failed (%v) — task %s updated but DASHBOARD.md index not updated\n", err, slug)
+	}
+}
+
+// commissionShip sends the assignment directive to the assigned ship.
+// wasAssigned reports whether the task already had an assignee before this
+// call, so the message reads as a fresh assignment vs. a reassignment.
+func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
+	var msg string
+	if wasAssigned {
+		msg = "Dir wurde die Aufgabe neu zugewiesen: " + title +
+			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
+	} else {
+		msg = "Neue Aufgabe für dich erfasst: " + title +
+			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
+	}
+	b, err := agentbus.New(root)
+	if err != nil {
+		return err
+	}
+	if _, err := b.Tell(ship, msg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// runAssign implements `task assign <slug> [<ship>] [--no-push]`.
+func runAssign(root string, args []string) int {
+	noPush := false
+	ship := ""
+	slug := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(assignUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else if ship == "" {
+				ship = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "task assign: too many arguments")
+				return 2
+			}
+		}
+	}
+	if slug == "" {
+		fmt.Fprintln(os.Stderr, "task assign: <slug> required")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task assign:", err)
+		return 1
+	}
+
+	// Load the existing topic (sanctioned read path — no raw file access).
+	m, body, err := d.DoTopicLoad(slug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task assign: no such task: %s\n", slug)
+		return 3
+	}
+
+	assignMode := ship // explicit ship, or "" -> auto-pick
+	if assignMode == "" {
+		picked, perr := pickFreeShip(root)
+		if perr != nil {
+			fmt.Fprintln(os.Stderr, "task assign:", perr)
+			return 1
+		}
+		if picked == "" {
+			fmt.Fprintln(os.Stderr, "task assign: no free (idle, non-stale) ship available — leaving unassigned")
+			return 4
+		}
+		ship = picked
+	}
+
+	wasAssigned := m.AssignedTo != "" && m.AssignedTo != "—"
+	m.Status = "assigned"
+	m.AssignedTo = ship
+
+	if err := d.DoTopicUpdate(slug, m, body); err != nil {
+		fmt.Fprintln(os.Stderr, "task assign:", err)
+		return 1
+	}
+	commitAndReindex(d, slug, "task: assign "+slug+" -> "+ship, !noPush)
+
+	if err := commissionShip(root, slug, m.Title, ship, wasAssigned); err != nil {
+		fmt.Fprintln(os.Stderr, "task assign: commission failed:", err)
+		return 1
+	}
+
+	fmt.Printf("task-assigned: slug=%s status=assigned assigned-to=%s\n", slug, ship)
+	return 0
+}
+
+// runUnassign implements `task unassign <slug> [--no-push]`.
+func runUnassign(root string, args []string) int {
+	noPush := false
+	slug := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(unassignUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "task unassign: too many arguments")
+				return 2
+			}
+		}
+	}
+	if slug == "" {
+		fmt.Fprintln(os.Stderr, "task unassign: <slug> required")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task unassign:", err)
+		return 1
+	}
+	m, body, err := d.DoTopicLoad(slug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task unassign: no such task: %s\n", slug)
+		return 3
+	}
+
+	m.Status = "open"
+	m.AssignedTo = "—"
+	if err := d.DoTopicUpdate(slug, m, body); err != nil {
+		fmt.Fprintln(os.Stderr, "task unassign:", err)
+		return 1
+	}
+	commitAndReindex(d, slug, "task: unassign "+slug, !noPush)
+	fmt.Printf("task-unassigned: slug=%s status=open assigned-to=—\n", slug)
+	return 0
+}
+
+// runStatus implements `task status <slug> <status> [--no-push]`.
+func runStatus(root string, args []string) int {
+	noPush := false
+	slug := ""
+	status := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(statusUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else if status == "" {
+				status = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "task status: too many arguments")
+				return 2
+			}
+		}
+	}
+	if slug == "" || status == "" {
+		fmt.Fprintln(os.Stderr, "task status: <slug> and <status> required")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task status:", err)
+		return 1
+	}
+	m, body, err := d.DoTopicLoad(slug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task status: no such task: %s\n", slug)
+		return 3
+	}
+
+	m.Status = status
+	if err := d.DoTopicUpdate(slug, m, body); err != nil {
+		fmt.Fprintln(os.Stderr, "task status:", err)
+		return 1
+	}
+	commitAndReindex(d, slug, "task: status "+slug+" -> "+status, !noPush)
+	fmt.Printf("task-status: slug=%s status=%s\n", slug, status)
+	return 0
 }
