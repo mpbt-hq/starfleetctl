@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
 	"github.com/metux/starfleetctl/internal/shipnames"
@@ -148,13 +147,12 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		return nil, fmt.Errorf("session run: unknown --client '%s' (claude|opencode|shell)", client)
 	}
 
-	var relFull, relShort string
+	var project string
 	if release != "" {
-		relFull = "xserver-" + strings.TrimPrefix(release, "xserver-")
-		relShort = strings.TrimPrefix(relFull, "xserver-")
-		configPath := filepath.Join(root, "cf", relFull, "config.sh")
+		project = release
+		configPath := filepath.Join(root, "cf", project, "config.sh")
 		if _, err := os.Stat(configPath); err != nil {
-			return nil, fmt.Errorf("session run: no such release '%s' (missing cf/%s/config.sh)", release, relFull)
+			return nil, fmt.Errorf("session run: no such release '%s' (missing cf/%s/config.sh)", release, project)
 		}
 	} else {
 		if client == "opencode" {
@@ -171,8 +169,8 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		}
 	}
 	if shipID == "" {
-		if relFull != "" {
-			shipID = relShort + "-" + client
+		if project != "" {
+			shipID = project + "-" + client
 		} else {
 			return nil, fmt.Errorf("session run: empty <release> needs an explicit --name (nothing to derive STARFLEET_SHIP_ID from)")
 		}
@@ -193,7 +191,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 			clientPath = "claude"
 		}
 	case "opencode":
-		clientPath = "./run-opencode." + relFull
+		clientPath = "./run-opencode." + project
 	case "shell":
 		clientPath = os.Getenv("SHELL")
 		if clientPath == "" {
@@ -222,8 +220,8 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	if supervisor != "" {
 		inner += "export AGENT_SUPERVISOR=" + shellQuote(supervisor) + "; "
 	}
-	if relFull != "" {
-		inner += ". cf/" + shellQuote(relFull) + "/config.sh; export XLIBRE_RELEASE; "
+	if project != "" {
+		inner += ". cf/" + shellQuote(project) + "/config.sh; export PROJECT; "
 	}
 	inner += "exec"
 	inner += " " + shellQuote(clientPath)
@@ -237,7 +235,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	return &LaunchVars{
 		ShipID:      shipID,
 		Session:     session,
-		ReleaseFull: relFull,
+		ReleaseFull: project,
 		Client:      client,
 		InnerCmd:    inner,
 		Tier:        tier,
@@ -262,7 +260,7 @@ func spawnSession(root string, vars *LaunchVars) error {
 	os.Setenv("STARFLEET_AGENT_HANDLE", vars.Session)
 	os.Setenv("AGENT_HANDLE", vars.Session)
 	if vars.ReleaseFull != "" {
-		os.Setenv("XLIBRE_RELEASE", vars.ReleaseFull)
+		os.Setenv("PROJECT", vars.ReleaseFull)
 	}
 
 	// Post initial heartbeat (same format as the bash wrapper).
