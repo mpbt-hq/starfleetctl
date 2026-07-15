@@ -51,8 +51,6 @@ All commands prefixed with `starfleetctl agent-bus`. Use `--json` on `board`/`in
 | `clear` | Remove own heartbeat on exit |
 | `prune` | Garbage-collect stale entries |
 
-For large payloads (>100 KB), pipe via `--stdin` instead of argv (see below).
-
 ### Large payloads — use `--stdin`, not argv
 
 `agent-bus tell` / `broadcast` deliver the message body either as command-line
@@ -61,17 +59,26 @@ arguments (`tell <agent> <text…>`) or, to bypass the OS `ARG_MAX` limit
 from **stdin**:
 
 ```sh
-# small message — argv is fine
+# short one-liner — argv is fine
 starfleetctl agent-bus tell Voyager "status report: build green"
 
-# large message (logs, diffs, long briefings) — pipe via stdin
-cat briefing.txt | starfleetctl agent-bus tell Voyager --stdin
-tar -tzf artifacts.tar | starfleetctl agent-bus broadcast --stdin
+# multi-line or payloads with special characters — pipe via stdin
+cat <<'EOF' | starfleetctl agent-bus tell Yamato --stdin
+Einsatzbefehl: PR-Review-Batch. Führe bot-review für diese PRs durch:
+
+1. #3323 (xfree86: remove xf86validateConfig license from Files.c)
+2. #3322 (xfree86: remove obsolete keywords and license from Files.c)
+
+Nutze den /bot-review Skill. Poste Review-Kommentare + Labels.
+Melde Status nach Abschluss.
+EOF
 ```
 
 The storage layer itself has **no** size limit (verified at 20 MB+); only the
-argv path is bounded by the kernel. Prefer `--stdin` for anything bigger than
-~100 KB so the send can't fail with `E2BIG`.
+argv path is bounded by the kernel. **Prefer `--stdin` for anything beyond a
+single short one-liner** — argv truncation can silently cut multi-line messages
+even well below the theoretical `ARG_MAX` due to shell quoting overhead and
+encoding expansion.
 
 ### Control agent ("1st officer") model
 
