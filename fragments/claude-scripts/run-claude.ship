@@ -72,7 +72,6 @@ if [ -z "$NAME" ]; then
 fi
 
 export STARFLEET_SHIP_ID="$NAME"
-export CLAUDE_CODE_DISABLE_CLAUDE_MDS=1
 
 INSTRUCTIONS_FILE=".starfleet-ai/agents.d/index.md"
 SYSTEM_PROMPT=""
