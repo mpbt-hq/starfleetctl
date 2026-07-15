@@ -15,10 +15,8 @@ func newTestBus(t *testing.T, agentID string) *Bus {
 	os.Setenv("STARFLEET_SHIP_ID", agentID)
 	os.Unsetenv("AGENT_ID")
 	os.Unsetenv("BUS_DIR")
-	os.Unsetenv("XLIBRE_RELEASE")
 	os.Unsetenv("PROJECT")
 	os.Unsetenv("STARFLEET_AGENT_HANDLE")
-	os.Unsetenv("AGENT_HANDLE")
 	t.Cleanup(func() { os.Unsetenv("STARFLEET_SHIP_ID") })
 	b, err := New(root)
 	if err != nil {

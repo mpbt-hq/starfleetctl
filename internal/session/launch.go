@@ -258,7 +258,6 @@ func spawnSession(root string, vars *LaunchVars) error {
 	// Order matters: agentbus.New captures ShipID from the environment.
 	os.Setenv("STARFLEET_SHIP_ID", vars.ShipID)
 	os.Setenv("STARFLEET_AGENT_HANDLE", vars.Session)
-	os.Setenv("AGENT_HANDLE", vars.Session)
 	if vars.ReleaseFull != "" {
 		os.Setenv("PROJECT", vars.ReleaseFull)
 	}

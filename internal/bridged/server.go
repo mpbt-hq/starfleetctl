@@ -98,7 +98,7 @@ func dispatch(root string, req Request) Response {
 // allowedEnvOverrides is the identity-related subset of environment
 // variables a request may override — exactly what agentbus.New reads to
 // resolve an agent's identity (STARFLEET_SHIP_ID, PROJECT,
-// AGENT_HANDLE), per Enterprise's directive (m0082). Deliberately NOT
+// STARFLEET_AGENT_HANDLE), per Enterprise's directive (m0082). Deliberately NOT
 // including infra-level vars like BUS_DIR/BUS_TTL: overriding those per
 // request would let one caller silently point another's request at a
 // different bus directory entirely, a materially different (and unasked
@@ -109,7 +109,6 @@ var allowedEnvOverrides = map[string]bool{
 	"STARFLEET_SHIP_ID":    true,
 	"PROJECT":              true,
 	"STARFLEET_AGENT_HANDLE": true,
-	"AGENT_HANDLE":         true,
 }
 
 // runCaptured calls fn with the process's real os.Stdout/os.Stderr

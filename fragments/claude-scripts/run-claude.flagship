@@ -47,7 +47,7 @@ fi
 
 if [ "$DETACH" -eq 1 ]; then
     # Launch in a named tmux session so it survives terminal close.
-    # agent-run registers the AGENT_HANDLE on the board automatically.
+    # agent-run registers the STARFLEET_AGENT_HANDLE on the board automatically.
     exec scripts/agent-run "" --client claude --name Enterprise -- "${EXTRA[@]+"${EXTRA[@]}"}"
 fi
 
