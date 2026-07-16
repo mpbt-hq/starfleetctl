@@ -152,6 +152,37 @@ func (b *Bus) Conversation(ship string) []msgEntryJSON {
 	return out
 }
 
+// ConversationWithViewer is like Conversation(ship) but additionally keeps
+// any message addressed to or sent by the web viewer (b.ShipID). This is what
+// makes a ship's reply visible in the web Funk tab when the user chats with a
+// ship over the web console: the ship replies to the viewer's identity (often
+// a direct tell, not a broadcast), so the reply's target is the viewer — not
+// the chat partner and not "all". Without this, such replies would be filtered
+// out and the user would never see the answer they asked for in the UI.
+func (b *Bus) ConversationWithViewer(ship, viewer string) []msgEntryJSON {
+	msgs := b.allMsgRecords()
+	out := make([]msgEntryJSON, 0, len(msgs))
+	entries, _ := os.ReadDir(b.AckDir)
+	for _, m := range msgs {
+		involved := m.From == ship || m.Target == ship || m.Target == "all" ||
+			(viewer != "" && (m.From == viewer || m.Target == viewer))
+		if !involved {
+			continue
+		}
+		nacks := 0
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), m.ID+"__") {
+				nacks++
+			}
+		}
+		out = append(out, msgEntryJSON{
+			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
+			Target: m.Target, Acks: nacks, Text: m.Text, ReplyTo: m.ReplyTo,
+		})
+	}
+	return out
+}
+
 type askEntryJSON struct {
 	ID         string `json:"id"`
 	AgeSeconds int64  `json:"age_seconds"`

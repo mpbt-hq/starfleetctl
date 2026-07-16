@@ -98,7 +98,7 @@ func (s *Server) apiMsgs(w http.ResponseWriter, r *http.Request) {
 	// (sent by it, addressed to it, or a broadcast to all). Used by the
 	// per-ship conversation view in the frontend.
 	if ship := strings.TrimSpace(r.URL.Query().Get("ship")); ship != "" {
-		writeJSON(w, s.bus.Conversation(ship))
+		writeJSON(w, s.bus.ConversationWithViewer(ship, s.bus.ShipID))
 		return
 	}
 	writeJSON(w, s.bus.AllMsgRecordsJSON())
