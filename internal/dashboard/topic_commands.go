@@ -12,29 +12,42 @@ import (
 	"strings"
 )
 
-// DoTopicList prints every topic's slug/title/status (or, with jsonOut, a
-// JSON array) — the "what's tracked" overview, same spirit as `pr-claim
+// TopicListOpts holds filters for DoTopicList.
+type TopicListOpts struct {
+	JSON     bool   // output JSON instead of plain text
+	Category string // filter: "active", "parked", or "" (all)
+	Status   string // filter: substring match on status/notedBy field
+}
+
+// DoTopicList prints every topic's slug/title/status (or, with JSON output,
+// a JSON array) — the "what's tracked" overview, same spirit as `pr-claim
 // --list`/`ship-names list`.
-func (d *Dashboard) DoTopicList(jsonOut bool) error {
+func (d *Dashboard) DoTopicList(opts TopicListOpts) error {
 	metas, err := d.loadAllTopics()
 	if err != nil {
 		return err
 	}
-	if jsonOut {
-		type row struct {
-			Slug     string `json:"slug"`
-			Title    string `json:"title"`
-			Category string `json:"category"`
-			Status   string `json:"status"`
+	type row struct {
+		Slug     string `json:"slug"`
+		Title    string `json:"title"`
+		Category string `json:"category"`
+		Status   string `json:"status"`
+	}
+	out := make([]row, 0, len(metas))
+	for _, m := range metas {
+		if opts.Category != "" && m.Category != opts.Category {
+			continue
 		}
-		out := make([]row, 0, len(metas))
-		for _, m := range metas {
-			st := m.Status
-			if m.Category == "parked" {
-				st = m.NotedBy
-			}
-			out = append(out, row{m.Slug, m.Title, m.Category, st})
+		st := m.Status
+		if m.Category == "parked" {
+			st = m.NotedBy
 		}
+		if opts.Status != "" && !strings.Contains(strings.ToLower(st), strings.ToLower(opts.Status)) {
+			continue
+		}
+		out = append(out, row{m.Slug, m.Title, m.Category, st})
+	}
+	if opts.JSON {
 		enc, err := json.Marshal(out)
 		if err != nil {
 			return err
@@ -42,12 +55,8 @@ func (d *Dashboard) DoTopicList(jsonOut bool) error {
 		fmt.Println(string(enc))
 		return nil
 	}
-	for _, m := range metas {
-		st := m.Status
-		if m.Category == "parked" {
-			st = m.NotedBy
-		}
-		fmt.Printf("%-8s %-50s %s\n", m.Category, m.Slug, st)
+	for _, r := range out {
+		fmt.Printf("%-8s %-50s %s\n", r.Category, r.Slug, r.Status)
 	}
 	return nil
 }

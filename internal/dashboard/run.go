@@ -16,7 +16,8 @@ const usage = `dashboard <command> [args…]
   commit -m "<msg>" [--no-push] stage + commit (+ pull --rebase + push)
   reindex                       regenerate the thin index from dashboard/topics/*.md
 
-  topic list [--json]                        every topic's slug/title/status
+  topic list [--json] [--category active|parked] [--status <substr>]
+                                              every topic's slug/title/status (with filters)
   topic show <slug>                          print one topic file (implies pull)
   topic write <slug> <file|->                replace one topic file (no commit)
   topic new <slug> --title "<t>" [--status "<s>"] [--parked]
@@ -25,7 +26,7 @@ const usage = `dashboard <command> [args…]
 `
 
 const topicUsage = `dashboard topic <command> [args…]
-  list [--json]
+  list [--json] [--category active|parked] [--status <substr>]
   show <slug>
   write <slug> <file|->
   new <slug> --title "<t>" [--status "<s>"] [--parked]
@@ -95,13 +96,20 @@ func runTopic(d *Dashboard, args []string) int {
 	var cmdErr error
 	switch args[0] {
 	case "list":
-		jsonOut := false
+		opts := TopicListOpts{}
 		for _, a := range args[1:] {
-			if a == "--json" {
-				jsonOut = true
+			switch {
+			case a == "--json":
+				opts.JSON = true
+			case a == "--category" || a == "-c":
+				// next arg is the category
+			default:
+				// handle --category VALUE and --status VALUE
 			}
 		}
-		cmdErr = d.DoTopicList(jsonOut)
+		// re-parse properly with positional awareness
+		opts = parseTopicListArgs(args[1:])
+		cmdErr = d.DoTopicList(opts)
 	case "show":
 		if len(args) != 2 {
 			fmt.Fprint(os.Stderr, topicUsage)
@@ -175,6 +183,27 @@ func parseTopicNewArgs(args []string) (title, status, category string, err error
 		return "", "", "", fmt.Errorf("--title is required")
 	}
 	return title, status, category, nil
+}
+
+func parseTopicListArgs(args []string) TopicListOpts {
+	var opts TopicListOpts
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			opts.JSON = true
+		case "--category", "-c":
+			if i+1 < len(args) {
+				i++
+				opts.Category = args[i]
+			}
+		case "--status", "-s":
+			if i+1 < len(args) {
+				i++
+				opts.Status = args[i]
+			}
+		}
+	}
+	return opts
 }
 
 func parseCommitArgs(args []string) (msg string, push bool, err error) {

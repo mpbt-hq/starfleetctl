@@ -42,6 +42,18 @@ starfleetctl dashboard commit -m "update" --no-push
 starfleetctl dashboard topic list
 starfleetctl dashboard topic list --json
 
+# Filter by category
+starfleetctl dashboard topic list --category active
+starfleetctl dashboard topic list --category parked
+
+# Filter by status (substring match, case-insensitive)
+starfleetctl dashboard topic list --status done
+starfleetctl dashboard topic list --status open
+
+# Combine filters
+starfleetctl dashboard topic list --category active --status done
+starfleetctl dashboard topic list --json --category active --status open
+
 # Show a topic's content
 starfleetctl dashboard topic show my-feature
 
