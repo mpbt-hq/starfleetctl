@@ -27,6 +27,26 @@ type LaunchVars struct {
 // By default it launches a detached termctl terminal (replacing tmux); pass --print
 // to emit shell-evaluable launch variables instead (legacy mode).
 func runLaunch(root string, args []string) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Print(`session run <release> [flags...] [-- <args...>]
+
+Launch a detached terminal for an agent/CLI and post the initial
+heartbeat (replaces scripts/agent-run).  Pass --print to emit the
+shell-evaluable launch variables instead.
+
+Flags:
+  --client <claude|opencode|shell>   client to run (default: claude)
+  --name <id>                        explicit ship ID (default: auto-assign)
+  --permission-mode <mode>           claude permission mode (default: dontAsk for workers)
+  --tier <name>                      agent tier (e.g. worker)
+  --supervisor <id>                  supervisor ship ID
+  --print                            emit shell variables instead of launching
+
+Args after -- are passed to the client.
+`)
+		return 0
+	}
+
 	printVars := false
 	launchArgs := make([]string, 0, len(args))
 	for _, a := range args {
