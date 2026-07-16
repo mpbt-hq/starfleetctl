@@ -61,6 +61,32 @@
     border-radius: 999px; overflow: hidden; min-width: 80px; }
   .bar .fill { height: 100%; background: var(--acc); }
   a { color: var(--acc); }
+  .ship { cursor: pointer; transition: border-color .15s; }
+  .ship:hover { border-color: var(--acc); }
+  .overlay { position: fixed; inset: 0; background: rgba(4,7,12,.66);
+    display: none; z-index: 40; }
+  .overlay.on { display: block; }
+  .modal { position: absolute; top: 0; right: 0; height: 100%; width: min(440px, 100%);
+    background: var(--bg); border-left: 1px solid var(--line); display: flex;
+    flex-direction: column; }
+  .modal header { padding: 12px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 8px; }
+  .modal .x { margin-left: auto; background: var(--chip); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px; width: 36px; height: 36px;
+    font-size: 18px; cursor: pointer; }
+  .modal .body { flex: 1; overflow-y: auto; padding: 12px; }
+  .modal .compose { border-top: 1px solid var(--line); padding: 10px; display: flex;
+    gap: 8px; align-items: flex-end; }
+  .modal .compose textarea { margin: 0; min-height: 42px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; }
+  .kv b { color: var(--dim); font-weight: 500; }
+  .bubble { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+    margin-bottom: 8px; background: var(--card); }
+  .bubble.me { border-color: var(--acc); background: #11304d; }
+  .bubble .meta { font-size: 11px; color: var(--dim); margin-bottom: 3px; }
+  .bubble .meta a { font-size: 11px; }
+  .bubble pre { white-space: pre-wrap; word-break: break-word; margin: 0;
+    font: 13px/1.4 ui-monospace, monospace; }
 </style>
 </head>
 <body>
@@ -131,6 +157,26 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="overlay" id="ship_overlay" onclick="if(event.target===this)closeShip()">
+  <div class="modal">
+    <header>
+      <span class="agent" id="ship_name"></span>
+      <span class="pill" id="ship_state"></span>
+      <button class="x" onclick="closeShip()">×</button>
+    </header>
+    <div class="body">
+      <div class="card">
+        <div class="kv" id="ship_detail"></div>
+      </div>
+      <div id="ship_chat"></div>
+    </div>
+    <div class="compose">
+      <textarea id="ship_msg" placeholder="Nachricht an Schiff…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();shipSend()}"></textarea>
+      <button onclick="shipSend()">Senden</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const api = (p, opt) => fetch(p, opt).then(r => r.ok ? r.json() : Promise.reject(r));
 let identity = { ship_id: "" };
@@ -188,7 +234,7 @@ async function loadBoard(){
       if (r.branch) detail.push(`<span class="pill dim">${esc(r.branch)}</span>`);
       if (r.blocker) detail.push(`<span class="pill bad">⛔ ${esc(r.blocker)}</span>`);
       if (r.eta) detail.push(`<span class="muted">ETA ${esc(r.eta)}</span>`);
-      return `<div class="card${stale}">
+      return `<div class="card ship${stale}" onclick="openShip('${esc(r.agent)}')">
         <div class="row"><span class="agent grow">${esc(r.agent)}</span>
           <span class="pill ${cls}">${esc(st)}</span></div>
         <div class="row" style="margin-top:6px">
@@ -203,6 +249,71 @@ async function loadBoard(){
       </div>`;
     }).join('');
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+
+let shipCurrent = null;
+async function openShip(name){
+  shipCurrent = name;
+  document.getElementById('ship_name').textContent = name;
+  document.getElementById('ship_overlay').classList.add('on');
+  await loadShip(name);
+}
+function closeShip(){
+  shipCurrent = null;
+  document.getElementById('ship_overlay').classList.remove('on');
+}
+async function loadShip(name){
+  try {
+    const rows = await api('/api/board');
+    const s = rows.find(r=>r.agent===name) || {};
+    const st = s.state||'idle';
+    const cls = st==='done'?'ok':(st==='blocked'?'bad':(st==='working'||st==='building'?'warn':'dim'));
+    document.getElementById('ship_state').className = 'pill '+cls;
+    document.getElementById('ship_state').textContent = st;
+    const kv = [];
+    const add = (k,v)=>{ if(v) kv.push(`<b>${k}</b><span>${esc(v)}</span>`); };
+    add('Projekt', s.project);
+    add('Task', s.task);
+    add('Fortschritt', s.progress!=null && s.progress>0 ? s.progress+'%' : '');
+    add('Branch', s.branch);
+    add('Blocker', s.blocker);
+    add('ETA', s.eta);
+    add('Note', s.note);
+    add('Zuletzt', s.updated ? age(s.age_seconds)+' her' : '');
+    document.getElementById('ship_detail').innerHTML = kv.join('') || '<span class="muted">keine Detaildaten</span>';
+    await loadShipChat(name);
+  } catch(e){ document.getElementById('ship_detail').innerHTML = '<span class="muted">Fehler: '+esc(e.message)+'</span>'; }
+}
+async function loadShipChat(name){
+  const el = document.getElementById('ship_chat');
+  try {
+    const msgs = await api('/api/msgs?ship='+encodeURIComponent(name));
+    if (!msgs.length){ el.innerHTML = '<div class="empty">noch keine Nachrichten</div>'; return; }
+    el.innerHTML = msgs.map(m=>{
+      const me = m.from === identity.ship_id;
+      const tgt = m.target==='all' ? '📡 all' : ('→ '+m.target);
+      const meta = `${esc(m.from)} ${tgt} · ${age(m.age_seconds)}` +
+        (m.reply_to ? ` · <a href="#" onclick="jumpToMsg('${esc(m.reply_to)}');return false">↩ ${esc(m.reply_to)}</a>` : '');
+      return `<div class="bubble${me?' me':''}">
+        <div class="meta">${meta}</div>
+        <pre>${esc(m.text)}</pre>
+      </div>`;
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+async function shipSend(){
+  if (!shipCurrent) return;
+  const ta = document.getElementById('ship_msg');
+  const text = ta.value.trim();
+  if (!text){ toast('Text fehlt', true); return; }
+  try {
+    const r = await api('/api/tell', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target: shipCurrent, text})});
+    ta.value='';
+    toast('gesendet → '+shipCurrent+' ('+r.id+')');
+    await loadShipChat(shipCurrent);
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
 async function loadTasks(){
@@ -356,7 +467,8 @@ async function loadEvents(){
 }
 
 loadIdentity().then(refresh);
-setInterval(()=>{ const c=document.querySelector('.page.on')?.id; if(c==='status'||c==='log'||c==='bus') refresh(); }, 15000);
+setInterval(()=>{ const c=document.querySelector('.page.on')?.id; if(c==='status'||c==='log'||c==='bus') refresh();
+  if (shipCurrent) loadShipChat(shipCurrent); }, 15000);
 </script>
 </body>
 </html>

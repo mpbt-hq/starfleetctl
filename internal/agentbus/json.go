@@ -127,6 +127,31 @@ func (b *Bus) DoMsgsJSON() error {
 	return printJSON(out)
 }
 
+// Conversation returns the messages involving a single ship (sent by it,
+// addressed to it, or a broadcast to all) — used by the web console's
+// per-ship chat view. Each entry is identical in shape to DoMsgsJSON.
+func (b *Bus) Conversation(ship string) []msgEntryJSON {
+	msgs := b.allMsgRecords()
+	out := make([]msgEntryJSON, 0, len(msgs))
+	entries, _ := os.ReadDir(b.AckDir)
+	for _, m := range msgs {
+		if m.From != ship && m.Target != ship && m.Target != "all" {
+			continue
+		}
+		nacks := 0
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), m.ID+"__") {
+				nacks++
+			}
+		}
+		out = append(out, msgEntryJSON{
+			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
+			Target: m.Target, Acks: nacks, Text: m.Text, ReplyTo: m.ReplyTo,
+		})
+	}
+	return out
+}
+
 type askEntryJSON struct {
 	ID         string `json:"id"`
 	AgeSeconds int64  `json:"age_seconds"`

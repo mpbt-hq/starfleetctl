@@ -94,6 +94,13 @@ func (s *Server) apiBoard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiMsgs(w http.ResponseWriter, r *http.Request) {
+	// Optional ?ship=<name> filter: only messages involving that ship
+	// (sent by it, addressed to it, or a broadcast to all). Used by the
+	// per-ship conversation view in the frontend.
+	if ship := strings.TrimSpace(r.URL.Query().Get("ship")); ship != "" {
+		writeJSON(w, s.bus.Conversation(ship))
+		return
+	}
 	writeJSON(w, s.bus.AllMsgRecordsJSON())
 }
 
