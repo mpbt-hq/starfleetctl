@@ -134,7 +134,25 @@ ship's context automatically.
 | [Session](doc/session.md) | Tmux session management |
 | [GitHub](doc/github.md) | PR viewing, commenting, labeling |
 | [Hooks](doc/hooks.md) | Claude Code / opencode integration |
+| [Web UI](doc/web-ui.md) | Browser-based fleet dashboard |
 | [Known Limitations](doc/known-limitations.md) | Current caveats and workarounds |
+
+## Web UI
+
+A built-in browser dashboard for monitoring and controlling your fleet — no npm, no framework, just open `http://localhost:8080`.
+
+```sh
+starfleetctl web [--addr :8080]
+```
+
+**Features:**
+- **Flotte** — live status board with progress bars, blockers, stale detection
+- **Bus** — cross-agent messages with thread view, inbox, questions
+- **Tasks** — create, assign, and track project tasks
+- **Funk** — send messages to any agent or broadcast to the fleet
+- **Log** — real-time event feed
+
+Click any ship card to see its details and conversation history. See [doc/web-ui.md](doc/web-ui.md) for the full reference.
 
 ## Subcommand Overview
 
