@@ -579,14 +579,18 @@ func fixOpencodePluginsDir(b *Bootstrap) error {
 }
 
 // verifyOpencodePlugins checks that every embedded opencode plugin file is
-// installed to .opencode/plugins/ and byte-identical to what the current binary would write.
+// installed to .opencode/plugins/, byte-identical to what the current binary
+// would write, AND registered in .opencode/opencode.json's "plugin" array
+// (openblocks only auto-loads plugins from the array, not by file presence
+// alone — without registration the agent-bus polling/injection never runs).
 func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir))
 	if err != nil {
 		// If the directory doesn't exist in the embedded FS, that's OK — no plugins to install.
 		return true, "no embedded opencode plugins"
 	}
-	var missing, stale []string
+	var missing, stale, unregistered []string
+	registered := loadOpencodePluginConfig(b)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
 			continue
@@ -604,9 +608,15 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 		if string(data) != string(current) {
 			stale = append(stale, e.Name())
 		}
+		// Plugin must be registered in .opencode/opencode.json so opencode
+		// actually loads it. Path is relative to .opencode/ (see resolvePluginSpec
+		// path handling) to avoid the doubled-.opencode path bug.
+		if !registered[pluginConfigSpec(e.Name())] {
+			unregistered = append(unregistered, e.Name())
+		}
 	}
-	if len(missing) == 0 && len(stale) == 0 {
-		return true, fmt.Sprintf("%d/%d present, up to date", len(entries), len(entries))
+	if len(missing) == 0 && len(stale) == 0 && len(unregistered) == 0 {
+		return true, fmt.Sprintf("%d/%d present, up to date, registered", len(entries), len(entries))
 	}
 	var parts []string
 	if len(missing) > 0 {
@@ -615,7 +625,41 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 	if len(stale) > 0 {
 		parts = append(parts, fmt.Sprintf("stale: %s", strings.Join(stale, ", ")))
 	}
+	if len(unregistered) > 0 {
+		parts = append(parts, fmt.Sprintf("unregistered: %s", strings.Join(unregistered, ", ")))
+	}
 	return false, strings.Join(parts, "; ")
+}
+
+// pluginConfigSpec returns the opencode config "plugin" array entry for a
+// plugin filename. opencode resolves plugin specs relative to the config
+// directory (.opencode/), so we use "./plugins/<name>.ts" rather than a
+// project-root-relative or absolute path (the latter triggers a doubled
+// ".opencode/.opencode/plugins" resolution bug).
+func pluginConfigSpec(name string) string {
+	return "./plugins/" + name
+}
+
+// loadOpencodePluginConfig reads .opencode/opencode.json and returns the set
+// of plugin specs already present in its "plugin" array. A missing or
+// unparsable file yields an empty set (so fix will register everything).
+func loadOpencodePluginConfig(b *Bootstrap) map[string]bool {
+	out := map[string]bool{}
+	path := filepath.Join(b.Root, ".opencode", "opencode.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	var doc struct {
+		Plugin []string `json:"plugin"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return out
+	}
+	for _, spec := range doc.Plugin {
+		out[spec] = true
+	}
+	return out
 }
 
 func fixOpencodePlugins(b *Bootstrap) error {
@@ -677,6 +721,56 @@ func fixOpencodePlugins(b *Bootstrap) error {
 				return err
 			}
 			break
+		}
+	}
+
+	// Register every embedded plugin in .opencode/opencode.json's "plugin"
+	// array. opencode only loads plugins that are listed there (file presence
+	// in .opencode/plugins/ is not enough), so without this the agent-bus
+	// polling/injection never starts. The write is idempotent: an already
+	// registered spec is left untouched, and any pre-existing config keys are
+	// preserved.
+	cfgPath := filepath.Join(b.Root, ".opencode", "opencode.json")
+	specs := []string{}
+	registered := map[string]bool{}
+	if data, err := os.ReadFile(cfgPath); err == nil {
+		var doc struct {
+			Plugin []string `json:"plugin"`
+		}
+		if err := json.Unmarshal(data, &doc); err == nil {
+			specs = doc.Plugin
+			for _, s := range specs {
+				registered[s] = true
+			}
+		}
+	}
+	changed := false
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+			continue
+		}
+		spec := pluginConfigSpec(e.Name())
+		if registered[spec] {
+			continue
+		}
+		specs = append(specs, spec)
+		registered[spec] = true
+		changed = true
+	}
+	if changed {
+		doc := map[string]any{}
+		if data, err := os.ReadFile(cfgPath); err == nil {
+			// Best-effort: preserve other keys (e.g. future additions).
+			_ = json.Unmarshal(data, &doc)
+		}
+		doc["plugin"] = specs
+		out, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			return err
+		}
+		out = append(out, '\n')
+		if err := os.WriteFile(cfgPath, out, 0o644); err != nil {
+			return err
 		}
 	}
 
