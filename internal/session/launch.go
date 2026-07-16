@@ -179,7 +179,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	session := tmuxSafe(sessPrefix + shipID)
 
 	if sessionExists(session) {
-		fmt.Fprintf(os.Stderr, "session run: session '%s' already running — attach with: scripts/agent-attach %s (or use --name for a second one)\n", session, shipID)
+		fmt.Fprintf(os.Stderr, "session run: session '%s' already running — attach with: .starfleet-ai/bin/starfleetctl session attach %s (or use --name for a second one)\n", session, shipID)
 		return nil, nil
 	}
 
@@ -207,9 +207,9 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 			if sup == "" {
 				sup = shipnames.Flagship
 			}
-			clientArgs = []string{"Session just started. You are an autoscaled worker ship (AGENT_TIER=worker), spawned on demand by scripts/fleet-autoscale — you run with --permission-mode dontAsk, so anything outside this workspace's permissions.allow is rejected outright instead of prompting for confirmation (nobody is watching an interactive prompt for this session). Before anything else, call the Monitor tool with command `scripts/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. If a tool call gets rejected or otherwise blocked and you can't proceed: do NOT keep retrying the same action and do NOT just give up silently — run `scripts/agent-bus tell " + sup + " \"<exactly what you tried, and why it failed>\"` (your supervisor — a human at a terminal or a control ship — can grant it interactively, which you can't), then continue with other queued work if you have any, or wait for a reply if you don't. Otherwise wait quietly for further instructions; don't start a task on your own initiative beyond what you were spawned for."}
+			clientArgs = []string{"Session just started. You are an autoscaled worker ship (AGENT_TIER=worker), spawned on demand by session autoscale — you run with --permission-mode dontAsk, so anything outside this workspace's permissions.allow is rejected outright instead of prompting for confirmation (nobody is watching an interactive prompt for this session). Before anything else, call the Monitor tool with command `.starfleet-ai/bin/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. If a tool call gets rejected or otherwise blocked and you can't proceed: do NOT keep retrying the same action and do NOT just give up silently — run `.starfleet-ai/bin/starfleetctl agent-bus tell " + sup + " \"<exactly what you tried, and why it failed>\"` (your supervisor — a human at a terminal or a control ship — can grant it interactively, which you can't), then continue with other queued work if you have any, or wait for a reply if you don't. Otherwise wait quietly for further instructions; don't start a task on your own initiative beyond what you were spawned for."}
 		} else {
-			clientArgs = []string{"Session just started. Before anything else, call the Monitor tool with command `scripts/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start a task on your own initiative."}
+			clientArgs = []string{"Session just started. Before anything else, call the Monitor tool with command `.starfleet-ai/bin/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start a task on your own initiative."}
 		}
 	}
 

@@ -28,7 +28,7 @@ starfleetctl github pr claim <pr#> "what you're doing"
 starfleetctl github pr claim --release <pr#>
 
 # Per-task worktree
-scripts/worktree add <repo> [name]
+.starfleet-ai/bin/starfleetctl worktree add <repo> [name]
 
 # Serialize mutating work
 starfleetctl with-clone-lock <cmd...>
