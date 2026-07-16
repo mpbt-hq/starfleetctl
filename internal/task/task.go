@@ -170,7 +170,7 @@ func runCapture(root string, args []string) int {
 			fmt.Fprintln(os.Stderr, "task capture:", berr)
 			return 1
 		}
-		if _, terr := b.Tell(assign, msg); terr != nil {
+		if _, terr := b.Tell(assign, msg, ""); terr != nil {
 			fmt.Fprintln(os.Stderr, "task capture:", terr)
 			return 1
 		}
@@ -390,7 +390,7 @@ func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
 	if err != nil {
 		return err
 	}
-	if _, err := b.Tell(ship, msg); err != nil {
+	if _, err := b.Tell(ship, msg, ""); err != nil {
 		return err
 	}
 	return nil

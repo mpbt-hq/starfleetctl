@@ -51,7 +51,7 @@ const attachPrefix = "[[attach:"
 // is non-empty it is stored as an attachment under AttachDir and the inline
 // text gains a fetch pointer, so the full body is retrievable via DoGet.
 // Caller must not hold the bus lock — post takes it itself, mirroring _post().
-func (b *Bus) post(target, summary, payload, basename string) (string, error) {
+func (b *Bus) post(target, summary, payload, basename, replyTo string) (string, error) {
 	lock, err := b.lockBus()
 	if err != nil {
 		return "", err
@@ -77,7 +77,7 @@ func (b *Bus) post(target, summary, payload, basename string) (string, error) {
 			id, attachPrefix, fsafe(basename), len(payload), shx)
 	}
 
-	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\n", now(), isots(), b.ShipID, target, text)
+	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\n", now(), isots(), b.ShipID, target, text, replyTo)
 	mpath, err := b.mfile(id)
 	if err != nil {
 		return "", err
@@ -323,11 +323,11 @@ func (b *Bus) DoBoard() error {
 // (e.g. task capture's commission-a-ship step) that shouldn't shell out. It
 // takes the bus lock itself and auto-spills oversized bodies into an
 // attachment, exactly like DoPost.
-func (b *Bus) Tell(target, text string) (string, error) {
-	return b.post(target, text, "", "tell")
+func (b *Bus) Tell(target, text, replyTo string) (string, error) {
+	return b.post(target, text, "", "tell", replyTo)
 }
 
-func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath string) error {
+func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, replyTo string) error {
 	var summary, payload, basename string
 
 	if attachPath != "" {
@@ -372,7 +372,7 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath st
 		return usageErr("agent-bus: directive needs text (via args or stdin)")
 	}
 	b.warnID()
-	id, err := b.post(target, summary, payload, basename)
+	id, err := b.post(target, summary, payload, basename, replyTo)
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func (b *Bus) DoReply(qid string, words []string) error {
 		return usageErr(fmt.Sprintf("agent-bus: no such question '%s'", qid))
 	}
 	b.warnID()
-	rid, err := b.post(qm.From, fmt.Sprintf("[re %s] %s", qid, ans), "", "")
+	rid, err := b.post(qm.From, fmt.Sprintf("[re %s] %s", qid, ans), "", "", qid)
 	if err != nil {
 		return err
 	}
@@ -600,7 +600,7 @@ func (b *Bus) DoPrune() error {
 // use from hook subcommands that must not blow away the whole process.
 func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error) {
 	b.warnID()
-	qid, err := b.post(ctrl, "[ask] "+question, "", "")
+	qid, err := b.post(ctrl, "[ask] "+question, "", "", "")
 	if err != nil {
 		return "", fmt.Errorf("post: %w", err)
 	}

@@ -105,6 +105,10 @@
       <div class="tab" data-b="inbox" onclick="busTab('inbox')">Inbox</div>
       <div class="tab" data-b="asks" onclick="busTab('asks')">Fragen</div>
     </div>
+    <div class="row" style="margin-bottom:8px">
+      <span class="muted">Ansicht:</span>
+      <button class="sec" id="btn_thread" onclick="toggleThread()" style="width:auto;padding:6px 12px">💬 Threads: aus</button>
+    </div>
     <div class="card" id="busbody"></div>
   </section>
 
@@ -252,6 +256,42 @@ async function taskUnassign(slug){
   catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
+let threadMode = false;
+function toggleThread(){
+  threadMode = !threadMode;
+  const b = document.getElementById('btn_thread');
+  b.textContent = threadMode ? '💬 Threads: an' : '💬 Threads: aus';
+  b.classList.toggle('sec', !threadMode);
+  loadBus(document.querySelector('#bus .tab.on')?.dataset.b || 'msgs');
+}
+function msgCard(r, indented){
+  const tag = r.target ? `<span class="pill dim">→${esc(r.target)}</span>` :
+              (r.acked!==undefined ? `<span class="pill ${r.acked?'ok':'warn'}">${r.acked?'✓':'…'}</span>` : '');
+  const q = r.question ? esc(r.question) : esc(r.text);
+  return `<div class="card" style="${indented?'margin-left:18px;border-left:3px solid var(--acc)':''}">
+    <div class="row"><span class="agent grow">${esc(r.id)}</span>${tag}
+      <span class="muted">${age(r.age_seconds)}</span></div>
+    <div style="margin-top:6px">${q}</div>
+    <div class="row" style="margin-top:4px">
+      ${r.from?`<span class="muted">von ${esc(r.from)}</span>`:''}
+      ${r.reply_to?`<a class="pill dim" href="#" onclick="jumpToMsg('${esc(r.reply_to)}');return false">↩ ${esc(r.reply_to)}</a>`:''}
+    </div>
+  </div>`;
+}
+function jumpToMsg(id){
+  const el = document.querySelector('#busbody');
+  const all = el.querySelectorAll('.card');
+  // highlight the referenced message if present in the flat list
+  for (const c of all){
+    if (c.querySelector('.agent')?.textContent === id){
+      c.scrollIntoView({behavior:'smooth', block:'center'});
+      c.style.outline = '2px solid var(--acc)';
+      setTimeout(()=>c.style.outline='', 1500);
+      return;
+    }
+  }
+  toast('Nachricht '+id+' nicht in dieser Ansicht');
+}
 async function loadBus(kind){
   const el = document.getElementById('busbody');
   try {
@@ -260,17 +300,28 @@ async function loadBus(kind){
     else if (kind==='asks') rows = await api('/api/asks');
     else rows = await api('/api/msgs');
     if (!rows.length){ el.innerHTML = '<div class="empty">leer</div>'; return; }
-    el.innerHTML = rows.map(r=>{
-      const tag = r.target ? `<span class="pill dim">→${esc(r.target)}</span>` :
-                  (r.acked!==undefined ? `<span class="pill ${r.acked?'ok':'warn'}">${r.acked?'✓':'…'}</span>` : '');
-      const q = r.question ? esc(r.question) : esc(r.text);
-      return `<div class="card">
-        <div class="row"><span class="agent grow">${esc(r.id)}</span>${tag}
-          <span class="muted">${age(r.age_seconds)}</span></div>
-        <div style="margin-top:6px">${q}</div>
-        ${r.from?`<div class="muted" style="margin-top:4px">von ${esc(r.from)}</div>`:''}
-      </div>`;
-    }).join('');
+    if (threadMode && kind!=='asks'){
+      // Build threads: messages with reply_to hang under their parent.
+      const byID = {};
+      rows.forEach(r=>byID[r.id]=r);
+      const roots = [], children = {};
+      rows.forEach(r=>{
+        if (r.reply_to && byID[r.reply_to]){
+          (children[r.reply_to] = children[r.reply_to] || []).push(r);
+        } else {
+          roots.push(r);
+        }
+      });
+      const out = [];
+      const walk = (node, depth)=>{
+        out.push(msgCard(node, depth>0));
+        (children[node.id]||[]).forEach(ch=>walk(ch, depth+1));
+      };
+      roots.forEach(r=>walk(r, 0));
+      el.innerHTML = out.join('') || '<div class="empty">keine Threads</div>';
+      return;
+    }
+    el.innerHTML = rows.map(r=>msgCard(r, false)).join('');
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
 }
 

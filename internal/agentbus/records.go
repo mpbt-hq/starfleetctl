@@ -57,12 +57,13 @@ type StatusPatch struct {
 // msgRecord mirrors one msgs/<id>.tsv line:
 // epoch \t isots \t from \t target \t text
 type msgRecord struct {
-	ID     string
-	Epoch  int64
-	ISO    string
-	From   string
-	Target string
-	Text   string
+	ID      string
+	Epoch   int64
+	ISO     string
+	From    string
+	Target  string
+	Text    string
+	ReplyTo string // id of the message this one replies to (In-Reply-To), empty if none
 }
 
 func readFirstLine(path string) (string, error) {
@@ -98,12 +99,12 @@ func parseMsgFile(id, path string) (msgRecord, bool) {
 	if err != nil {
 		return msgRecord{}, false
 	}
-	f := strings.SplitN(line, "\t", 5)
-	for len(f) < 5 {
+	f := strings.SplitN(line, "\t", 6)
+	for len(f) < 6 {
 		f = append(f, "")
 	}
 	epoch, _ := strconv.ParseInt(f[0], 10, 64)
-	return msgRecord{ID: id, Epoch: epoch, ISO: f[1], From: f[2], Target: f[3], Text: f[4]}, true
+	return msgRecord{ID: id, Epoch: epoch, ISO: f[1], From: f[2], Target: f[3], Text: f[4], ReplyTo: f[5]}, true
 }
 
 // globSortedTSV lists <dir>/<prefix>*.tsv basenames (without extension),

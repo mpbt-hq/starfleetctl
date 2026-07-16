@@ -141,20 +141,23 @@ func (s *Server) apiTell(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 405, "method not allowed")
 		return
 	}
-	target, text := "", ""
+	target, text, replyTo := "", "", ""
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		var p struct {
 			Target string `json:"target"`
 			Text   string `json:"text"`
+			ReplyTo string `json:"reply_to"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeErr(w, 400, "bad json: "+err.Error())
 			return
 		}
 		target, text = p.Target, p.Text
+		replyTo = strings.TrimSpace(p.ReplyTo)
 	} else {
 		target = r.FormValue("target")
 		text = r.FormValue("text")
+		replyTo = strings.TrimSpace(r.FormValue("reply_to"))
 	}
 	target = strings.TrimSpace(target)
 	text = strings.TrimSpace(text)
@@ -162,12 +165,12 @@ func (s *Server) apiTell(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "target and text are required")
 		return
 	}
-	id, err := s.bus.Tell(target, text)
+	id, err := s.bus.Tell(target, text, replyTo)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{"id": id, "target": target})
+	writeJSON(w, map[string]any{"id": id, "target": target, "reply_to": replyTo})
 }
 
 // apiTask captures or mutates a dashboard task via the sanctioned task

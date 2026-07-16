@@ -124,15 +124,15 @@ func Run(root string, args []string) int {
 		}
 	case "tell":
 		if len(args) < 2 {
-			cmdErr = usageErr("agent-bus: tell needs <agent> [--stdin|--attach <file>|<text…>]")
+			cmdErr = usageErr("agent-bus: tell needs <agent> [--stdin|--attach <file>|--reply <id>|<text…>]")
 			break
 		}
 		target := args[1]
-		words, useStdin, attachPath := parsePostFlags(args[2:])
-		cmdErr = b.DoPost(target, words, useStdin, attachPath)
+		words, useStdin, attachPath, replyTo := parsePostFlags(args[2:])
+		cmdErr = b.DoPost(target, words, useStdin, attachPath, replyTo)
 	case "broadcast", "--all":
-		words, useStdin, attachPath := parsePostFlags(args[1:])
-		cmdErr = b.DoPost("all", words, useStdin, attachPath)
+		words, useStdin, attachPath, replyTo := parsePostFlags(args[1:])
+		cmdErr = b.DoPost("all", words, useStdin, attachPath, replyTo)
 	case "get":
 		id, out := "", ""
 		for i := 1; i < len(args); i++ {
@@ -209,7 +209,7 @@ func arg(args []string, i int) string {
 // words (summary/text), a --stdin flag, and an optional --attach <file> path.
 // Both flags may be combined; --attach makes the file the directive body while
 // the remaining words/stdin form the short inline summary.
-func parsePostFlags(args []string) (words []string, useStdin bool, attachPath string) {
+func parsePostFlags(args []string) (words []string, useStdin bool, attachPath, replyTo string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--stdin":
@@ -217,6 +217,11 @@ func parsePostFlags(args []string) (words []string, useStdin bool, attachPath st
 		case "--attach":
 			if i+1 < len(args) {
 				attachPath = args[i+1]
+				i++
+			}
+		case "--reply":
+			if i+1 < len(args) {
+				replyTo = args[i+1]
 				i++
 			}
 		default:

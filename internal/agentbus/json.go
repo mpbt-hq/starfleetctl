@@ -75,6 +75,7 @@ type inboxEntryJSON struct {
 	From       string `json:"from"`
 	Acked      bool   `json:"acked"`
 	Text       string `json:"text"`
+	ReplyTo    string `json:"reply_to,omitempty"`
 }
 
 // DoInboxJSON implements `agent-bus inbox --json`.
@@ -90,6 +91,7 @@ func (b *Bus) DoInboxJSON() error {
 			From:       m.From,
 			Acked:      b.acked(m.ID, b.ShipID),
 			Text:       m.Text,
+			ReplyTo:    m.ReplyTo,
 		})
 	}
 	return printJSON(orEmpty(out))
@@ -102,6 +104,7 @@ type msgEntryJSON struct {
 	Target     string `json:"target"`
 	Acks       int    `json:"acks"`
 	Text       string `json:"text"`
+	ReplyTo    string `json:"reply_to,omitempty"`
 }
 
 // DoMsgsJSON implements `agent-bus msgs --json`.
@@ -118,7 +121,7 @@ func (b *Bus) DoMsgsJSON() error {
 		}
 		out = append(out, msgEntryJSON{
 			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: nacks, Text: m.Text,
+			Target: m.Target, Acks: nacks, Text: m.Text, ReplyTo: m.ReplyTo,
 		})
 	}
 	return printJSON(out)
