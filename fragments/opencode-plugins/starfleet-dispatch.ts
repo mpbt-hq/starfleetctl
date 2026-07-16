@@ -121,7 +121,7 @@ async function autoPong($: any, id: string, from: string, text: string): Promise
   if (from === 'Enterprise' && /ping/i.test(text)) {
     try {
       await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${id} auto-pong`.quiet()
-      await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise Pong! (auto-reply to ${id})`.quiet()
+      await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise --reply ${id} Pong! (auto-reply to ${id})`.quiet()
       logEvent(`auto-pong ${id} → Enterprise`)
     } catch { /* ignore */ }
   }
