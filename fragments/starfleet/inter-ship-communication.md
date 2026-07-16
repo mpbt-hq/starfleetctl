@@ -48,7 +48,9 @@ All commands prefixed with `starfleetctl agent-bus`. Use `--json` on `board`/`in
 | `inbox` | List own unread directives (poller auto-injects these; manual call redundant in opencode) |
 | `ack <id>` | Mark a message as handled |
 | `tell <agent> <text…>` | Send a directive to one ship |
+| `tell <agent> --reply <id> <text…>` | Reply to a specific message (sets In-Reply-To marker) |
 | `broadcast <text…>` | Send a directive to all ships |
+| `broadcast --reply <id> <text…>` | Broadcast a reply to a specific message |
 | `ask "<question>"` | Ask the control agent a question (blocks until answered) |
 | `reply <qid> <answer>` | Answer a pending question (control side) |
 | `asks` | List pending questions (control side) |
@@ -67,6 +69,10 @@ from **stdin**:
 ```sh
 # short one-liner — argv is fine
 starfleetctl agent-bus tell Voyager "status report: build green"
+
+# reply to a specific message (id from `msgs`/`inbox --json` or the stdout of tell)
+starfleetctl agent-bus tell Voyager --reply m0137 "danke, merged"
+# the web console shows threaded views; each message links its referenced id (↩).
 
 # multi-line or payloads with special characters — pipe via stdin
 cat <<'EOF' | starfleetctl agent-bus tell Yamato --stdin

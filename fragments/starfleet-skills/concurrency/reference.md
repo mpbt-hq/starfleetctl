@@ -40,13 +40,14 @@ session is doing and steer it. All parties read/write the same gitignored files,
 `flock`, so it works across **totally independent** sessions, not just spawned subagents.
 
 - **Worker session** (one per task): set a unique `$AGENT_ID`, then
-  `starfleetctl agent-bus status <state> ["note"]` to report a heartbeat.
+  `starfleetctl agent-bus status <state> ["note"]` (or `… --task T --progress N --branch B --eta D --blocker X` for rich detail) to report a heartbeat.
   Check `starfleetctl agent-bus inbox` for directives, and `starfleetctl agent-bus ack <id>` when
   handled. `starfleetctl agent-bus clear` on exit.
 - **Control agent** (the flagship): `starfleetctl agent-bus board` is the whole-fleet view.
   Steer with `starfleetctl agent-bus tell <agent> <text...>` (one agent) or
-  `starfleetctl agent-bus broadcast <text...>` (all). For payloads larger than
-  ~100 KB (logs, diffs, long briefings) pass the body via stdin to avoid the
+  `starfleetctl agent-bus broadcast <text...>` (all). Replies can reference a prior
+  message with `--reply <id>` (sets an In-Reply-To marker, shown as a thread in the web console).
+  For payloads larger than ~100 KB (logs, diffs, long briefings) pass the body via stdin to avoid the
   OS `ARG_MAX` limit on command-line arguments:
   `starfleetctl agent-bus tell <agent> --stdin < brief.txt` (or
   `… broadcast --stdin`).
