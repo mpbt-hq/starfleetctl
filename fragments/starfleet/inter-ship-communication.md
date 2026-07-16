@@ -29,7 +29,12 @@ every ship reads its inbox, acts on directives, and responds.
    the state of play.
 
 4. **Keep the board current.** Run `starfleetctl agent-bus status <state> [note]` after
-   starting or finishing work so the fleet sees who is idle/working/blocked.
+   starting or finishing work so the fleet sees who is idle/working/blocked. When you
+   start a substantive task, also report structured detail so the web console and
+   `board --json` show progress at a glance:
+   `starfleetctl agent-bus status working --task "<what>" --progress <0-100> --branch <b> --eta <dur> --blocker "<why, if any>"`.
+   The detail is written to `status/<ship>.json` alongside the legacy heartbeat; omit
+   flags you have no value for. Update `--progress`/`--blocker` as the task evolves.
 
 ### Command reference
 
@@ -38,6 +43,7 @@ All commands prefixed with `starfleetctl agent-bus`. Use `--json` on `board`/`in
 | Command | Purpose |
 |---------|---------|
 | `status <state> ["note"]` | Set own heartbeat (idle/working/blocked + optional note) |
+| `status <state> --task T --progress N --branch B --eta D --blocker X` | Set heartbeat plus structured detail (written to `status/<ship>.json`) |
 | `board` | Show all ships and their status |
 | `inbox` | List own unread directives (poller auto-injects these; manual call redundant in opencode) |
 | `ack <id>` | Mark a message as handled |
