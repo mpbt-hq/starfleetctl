@@ -142,12 +142,13 @@
     <div class="card">
       <b>Nachricht an</b>
       <div class="grid2" style="margin-top:8px">
-        <select id="talk_target"><option value="all">📡 ganze Flotte (all)</option></select>
+        <select id="talk_target" onchange="loadTalk()"><option value="all">📡 ganze Flotte (all)</option></select>
         <input id="talk_text" placeholder="Text…">
       </div>
       <div class="actions"><button onclick="sendTell()">Senden</button></div>
     </div>
     <div class="card muted" id="talk_hint">Hinweis: Nachrichten gehen über den echten Agent-Bus (agent-bus tell / broadcast). Agents holen sie via inbox ab.</div>
+    <div class="card" id="talk_body"></div>
   </section>
 
   <section class="page" id="log">
@@ -211,7 +212,7 @@ async function refresh(){
   else if (cur==='tasks') await loadTasks();
   else if (cur==='bus') await loadBus(document.querySelector('#bus .tab.on')?.dataset.b || 'msgs');
   else if (cur==='log') await loadEvents();
-  else if (cur==='talk') await loadTargets();
+  else if (cur==='talk') await loadTargets(); await loadTalk();
 }
 
 async function loadIdentity(){
@@ -469,6 +470,31 @@ async function loadTargets(){
     if (sel.innerHTML !== opts.join('')) sel.innerHTML = opts.join('');
   } catch(e){}
 }
+// loadTalk renders the conversation for the currently selected Funk target.
+// It uses the same per-ship Conversation() view as the Bus/ship-chat: messages
+// involving the target (or a broadcast to all) are shown, including ping
+// replies (which arrive as a tell with reply_to set). This is what makes a
+// ship's "Pong!" answer visible in the Funk tab after you ping it.
+async function loadTalk(){
+  const el = document.getElementById('talk_body');
+  if (!el) return;
+  const target = document.getElementById('talk_target')?.value || 'all';
+  try {
+    const msgs = await api('/api/msgs?ship='+encodeURIComponent(target));
+    if (!msgs.length){ el.innerHTML = '<div class="empty">noch keine Nachrichten</div>'; return; }
+    el.innerHTML = msgs.map(m=>{
+      const me = m.from === identity.ship_id;
+      const tgt = m.target==='all' ? '📡 all' : ('→ '+m.target);
+      const meta = `${esc(m.from)} ${tgt} · ${age(m.age_seconds)}` +
+        (m.reply_to ? ` · <a href="#" onclick="jumpToMsg('${esc(m.reply_to)}');return false">↩ ${esc(m.reply_to)}</a>` : '');
+      return `<div class="bubble${me?' me':''}">
+        <div class="meta">${meta}</div>
+        <pre>${esc(m.text)}</pre>
+      </div>`;
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
 async function sendTell(){
   const target = document.getElementById('talk_target').value;
   const text = document.getElementById('talk_text').value.trim();
@@ -478,6 +504,7 @@ async function sendTell(){
       body: JSON.stringify({target, text})});
     toast('gesendet → '+(r.target||target)+' ('+r.id+')');
     document.getElementById('talk_text').value='';
+    await loadTalk();
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
@@ -493,7 +520,8 @@ async function loadEvents(){
 loadIdentity().then(refresh);
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
-setInterval(()=>{ const c=document.querySelector('.page.on')?.id; if(c==='status'||c==='log'||c==='bus') refresh();
+setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
+  if (c==='status'||c==='log'||c==='bus'||c==='talk') refresh();
   if (shipCurrent) loadShipChat(shipCurrent); }, 15000);
 </script>
 </body>
