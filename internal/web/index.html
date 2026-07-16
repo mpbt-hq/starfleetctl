@@ -97,11 +97,11 @@
 </header>
 
 <div class="tabs" id="tabs">
-  <div class="tab on" data-p="status" onclick="show('status')">Flotte</div>
-  <div class="tab" data-p="tasks" onclick="show('tasks')">Tasks</div>
-  <div class="tab" data-p="bus" onclick="show('bus')">Bus</div>
-  <div class="tab" data-p="talk" onclick="show('talk')">Funk</div>
-  <div class="tab" data-p="log" onclick="show('log')">Log</div>
+  <div class="tab on" data-p="status" onclick="show('status', true)">Flotte</div>
+  <div class="tab" data-p="tasks" onclick="show('tasks', true)">Tasks</div>
+  <div class="tab" data-p="bus" onclick="show('bus', true)">Bus</div>
+  <div class="tab" data-p="talk" onclick="show('talk', true)">Funk</div>
+  <div class="tab" data-p="log" onclick="show('log', true)">Log</div>
 </div>
 
 <main>
@@ -127,9 +127,9 @@
 
   <section class="page" id="bus">
     <div class="tabs" style="border:0;padding:0 0 8px;margin:0">
-      <div class="tab on" data-b="msgs" onclick="busTab('msgs')">Direktiven</div>
-      <div class="tab" data-b="inbox" onclick="busTab('inbox')">Inbox</div>
-      <div class="tab" data-b="asks" onclick="busTab('asks')">Fragen</div>
+      <div class="tab on" data-b="msgs" onclick="busTab('msgs', true)">Direktiven</div>
+      <div class="tab" data-b="inbox" onclick="busTab('inbox', true)">Inbox</div>
+      <div class="tab" data-b="asks" onclick="busTab('asks', true)">Fragen</div>
     </div>
     <div class="row" style="margin-bottom:8px">
       <span class="muted">Ansicht:</span>
@@ -181,15 +181,19 @@
 const api = (p, opt) => fetch(p, opt).then(r => r.ok ? r.json() : Promise.reject(r));
 let identity = { ship_id: "" };
 
-function show(p){
+function show(p, push){
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on', s.id===p));
   document.querySelectorAll('#tabs .tab').forEach(t=>t.classList.toggle('on', t.dataset.p===p));
+  if (push) history.pushState({tab:p, bus: curBus}, '');
   refresh();
 }
-function busTab(b){
+function busTab(b, push){
+  curBus = b;
   document.querySelectorAll('#bus .tab').forEach(t=>t.classList.toggle('on', t.dataset.b===b));
+  if (push) history.pushState({tab:'bus', bus:b}, '');
   loadBus(b);
 }
+let curBus = 'msgs';
 function toast(msg, err){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.toggle('err', !!err); t.classList.add('show');
@@ -265,9 +269,22 @@ function closeShip(){
   shipCurrent = null;
   document.getElementById('ship_overlay').classList.remove('on');
 }
-window.addEventListener('popstate', ()=>{
+window.addEventListener('popstate', (e)=>{
+  const st = e.state || {};
   // Back/forward navigated away from the open panel — ensure it's closed.
-  if (shipCurrent !== null) closeShip();
+  if (shipCurrent !== null && !st.ship) closeShip();
+  // Restore the tab/subtab from history without pushing a new entry.
+  if (st.tab) {
+    document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on', s.id===st.tab));
+    document.querySelectorAll('#tabs .tab').forEach(t=>t.classList.toggle('on', t.dataset.p===st.tab));
+    if (st.tab === 'bus' && st.bus) {
+      curBus = st.bus;
+      document.querySelectorAll('#bus .tab').forEach(t=>t.classList.toggle('on', t.dataset.b===st.bus));
+      loadBus(st.bus);
+    } else {
+      refresh();
+    }
+  }
 });
 async function loadShip(name){
   try {
@@ -474,6 +491,8 @@ async function loadEvents(){
 }
 
 loadIdentity().then(refresh);
+// Seed the initial history entry so the first tab/bus switch pops cleanly.
+history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id; if(c==='status'||c==='log'||c==='bus') refresh();
   if (shipCurrent) loadShipChat(shipCurrent); }, 15000);
 </script>
