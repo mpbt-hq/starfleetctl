@@ -25,7 +25,7 @@ function seenFile(): string {
   return join(SEEN_DIR, aid())
 }
 
-function loadSeen(): Set<string> {
+function loadSeenAll(): Set<string> {
   const s = new Set<string>()
   try {
     for (const entry of readdirSync(SEEN_DIR)) {
@@ -38,6 +38,18 @@ function loadSeen(): Set<string> {
       } catch { /* ignore individual file errors */ }
     }
   } catch { /* ignore missing dir */ }
+  return s
+}
+
+function loadSeenShip(): Set<string> {
+  const s = new Set<string>()
+  try {
+    const content = readFileSync(seenFile(), 'utf-8')
+    for (const line of content.split('\n')) {
+      const id = line.trim()
+      if (id) s.add(id)
+    }
+  } catch { /* ignore missing file */ }
   return s
 }
 
@@ -154,18 +166,17 @@ export const plugin = async ({ client, $ }: any) => {
   // Write initial health marker
   writeHealth({ state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
 
-  // seed: mark all currently known/seen messages so poll() doesn't
-  // re-submit them on a fresh process start.
-  const known = loadSeen()
+  // seed: ack all current inbox messages so they don't keep showing up
+  // as "new" after a restart. Also mark as seen for poll-loop dedup.
   const inbox = await getInbox($)
   for (const msg of inbox) {
-    if (!known.has(msg.id)) {
-      markSeen(msg.id)
-      known.add(msg.id)
-    }
+    markSeen(msg.id)
+    try { await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${msg.id} init-seen`.quiet() } catch { /* ignore */ }
   }
-  // sync submitted set with everything already seen across all ships
-  for (const id of known) {
+  // seed submitted set with THIS ship's seen messages only —
+  // using all ships' IDs caused submitted.size > 100 guard to
+  // kill the poll loop permanently on busy repos.
+  for (const id of loadSeenShip()) {
     submitted.add(id)
   }
 
@@ -189,7 +200,7 @@ export const plugin = async ({ client, $ }: any) => {
   }
 
   const poll = async () => {
-    if (!tuiReady || submitted.size > 100) return
+    if (!tuiReady) return
     try {
       const msgs = await getInbox($)
       for (const msg of msgs) {
@@ -254,7 +265,7 @@ export const plugin = async ({ client, $ }: any) => {
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
-      const seen = loadSeen()
+      const seen = loadSeenAll()
       const lines: string[] = []
       const msgs = await getInbox($)
 
