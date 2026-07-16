@@ -129,6 +129,74 @@ func (b *Bus) DoAsksJSON() error {
 	return printJSON(orEmpty(out))
 }
 
+// AllMsgRecordsJSON returns every directive on the bus as a JSON-shaped slice,
+// for programmatic callers (e.g. the web UI) that need the full list without
+// parsing stdout or re-deriving ack counts.
+func (b *Bus) AllMsgRecordsJSON() []msgEntryJSON {
+	msgs := b.allMsgRecords()
+	out := make([]msgEntryJSON, 0, len(msgs))
+	entries, _ := os.ReadDir(b.AckDir)
+	for _, m := range msgs {
+		nacks := 0
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), m.ID+"__") {
+				nacks++
+			}
+		}
+		out = append(out, msgEntryJSON{
+			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
+			Target: m.Target, Acks: nacks, Text: m.Text,
+		})
+	}
+	return out
+}
+
+// AllInboxRecordsJSON returns the inbox (directives addressed to my ship or
+// to all) as a JSON-shaped slice.
+func (b *Bus) AllInboxRecordsJSON() []inboxEntryJSON {
+	var out []inboxEntryJSON
+	for _, m := range b.allMsgRecords() {
+		if m.Target != "all" && m.Target != b.ShipID {
+			continue
+		}
+		out = append(out, inboxEntryJSON{
+			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
+			Acked: b.acked(m.ID, b.ShipID), Text: m.Text,
+		})
+	}
+	return out
+}
+
+// AllAskRecordsJSON returns the pending questions addressed to my ship as a
+// JSON-shaped slice.
+func (b *Bus) AllAskRecordsJSON() []askEntryJSON {
+	var out []askEntryJSON
+	for _, m := range b.allMsgRecords() {
+		if m.Target != b.ShipID || !strings.HasPrefix(m.Text, "[ask] ") || b.acked(m.ID, b.ShipID) {
+			continue
+		}
+		out = append(out, askEntryJSON{
+			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
+			Question: strings.TrimPrefix(m.Text, "[ask] "),
+		})
+	}
+	return out
+}
+
+// TailEvents returns the last n lines of the audit log (or an empty slice when
+// there is no log yet) — for the web UI's live event feed.
+func (b *Bus) TailEvents(n int) []string {
+	data, err := os.ReadFile(b.Events)
+	if err != nil {
+		return []string{}
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
 func printJSON(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
