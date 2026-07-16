@@ -49,7 +49,7 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 			InboxCount: b.inboxCount(r.Agent),
 			Attach:     r.Handle,
 			Note:       r.Note,
-			Stale:      b.stale(r.Epoch),
+			Stale:      b.stale(r.Epoch, r.State),
 		}
 		if d := b.ReadStatusDetail(r.Agent); d.State != "" || d.Task != "" || d.Note != "" {
 			e.Task = d.Task

@@ -303,7 +303,7 @@ func (b *Bus) DoBoard() error {
 			h = "-"
 		}
 		mark := ""
-		if b.stale(r.Epoch) {
+		if b.stale(r.Epoch, r.State) {
 			mark = " [STALE]"
 		}
 		fmt.Printf("%-18s  %-12s  %-10s  %-6s  %-5d  %-22s  %s%s\n",
@@ -551,7 +551,7 @@ func (b *Bus) DoPrune() error {
 	statusCnt := 0
 	live := make(map[string]bool)
 	for _, r := range b.AllStatusRecords() {
-		if b.stale(r.Epoch) {
+		if b.stale(r.Epoch, r.State) {
 			os.Remove(filepath.Join(b.StatusDir, fsafe(r.Agent)+".tsv"))
 			statusCnt++
 			continue
@@ -561,7 +561,7 @@ func (b *Bus) DoPrune() error {
 
 	msgCnt := 0
 	for _, m := range b.allMsgRecords() {
-		if !b.stale(m.Epoch) {
+		if !b.stale(m.Epoch, "") {
 			continue
 		}
 		keep := false

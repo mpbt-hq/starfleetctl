@@ -174,7 +174,13 @@ func (b *Bus) acked(id, agent string) bool {
 	return err == nil
 }
 
-func (b *Bus) stale(epoch int64) bool {
+func (b *Bus) stale(epoch int64, state string) bool {
+	// A ship that is intentionally idle (client still alive, just nothing to
+	// do) must not read as STALE — only ships that stopped heartbeating while
+	// in an active state (working/blocked/…) are considered dead.
+	if state == "idle" {
+		return false
+	}
 	return now()-epoch >= b.BusTTL
 }
 
