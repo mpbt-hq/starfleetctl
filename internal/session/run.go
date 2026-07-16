@@ -2,15 +2,16 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package session manages session lifecycle (attach, list, run, autoscale)
-// for the fleet — including the tmux launch/attach steps that scripts/agent-run
-// and scripts/agent-attach used to perform.  See also scripts/fleet-autoscale.
+// for the fleet — using termctl for terminal management instead of tmux.
 package session
 
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
+
+	"github.com/X11Libre/go-x11proto/tk/term/termctl"
+	"github.com/metux/starfleetctl/internal/agentbus"
 )
 
 const usage = `session <command> [args…]
@@ -19,19 +20,19 @@ Fleet session lifecycle management.
 
 Commands:
   attach <id> [--read-only] [--independent]
-      Resolve <id> to a running tmux session and attach the caller's terminal
-      to it (replaces scripts/agent-attach).  <id> may be an exact tmux
-      session, an agent ID, a bus-handle, or a unique substring.
+      Resolve <id> to a running terminal and attach the caller's terminal
+      to it (replaces scripts/agent-attach).  <id> may be a ship ID,
+      a bus-handle, or a unique substring.
   attach --list
-      List running mpbt- tmux sessions and the agent-bus board.
+      List running terminals and the agent-bus board.
   autoscale <command> [args...]
       On-demand fleet elasticity (status / need).  See 'session autoscale --help'.
   run <release> [flags...] [-- <args...>]
-      Launch a detached tmux session for an agent/CLI and post the initial
+      Launch a detached terminal for an agent/CLI and post the initial
       heartbeat (replaces scripts/agent-run).  Pass --print to emit the
       shell-evaluable launch variables instead.  See 'session run --help'.
   stop <id|session>
-      Kill a tmux session, clear its agent-bus heartbeat, and release its
+      Kill a terminal, clear its agent-bus heartbeat, and release its
       ship name (used by scripts/agent-run --stop).
 `
 
@@ -65,8 +66,8 @@ func runAttach(root string, args []string) int {
 	}
 
 	if args[0] == "--list" {
-		sessions := ListSessions()
-		fmt.Println("== running mpbt tmux sessions ==")
+		sessions := ListSessions(root)
+		fmt.Println("== running terminals ==")
 		if len(sessions) == 0 {
 			fmt.Println("(none)")
 		} else {
@@ -118,46 +119,71 @@ func runAttach(root string, args []string) int {
 		}
 	}
 
-	session := ResolveID(root, id)
-	if session == "" {
+	pipePath, ok := resolvePipe(root, id)
+	if !ok {
 		fmt.Fprintf(os.Stderr, "agent-attach: no running session matches '%s' (try: session attach --list)\n", id)
 		return 1
 	}
 
-	if err := attachSession(session, mode); err != nil {
+	if err := attachPipe(pipePath, mode); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
 }
 
-// attachSession connects the caller's terminal to a running tmux session,
-// replacing what scripts/agent-attach did via `exec tmux attach`. mode is one
-// of "shared" (rw attach), "ro" (read-only attach), "ind" (own grouped window
-// with an independent size).
-func attachSession(session, mode string) error {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		return fmt.Errorf("tmux not found — install it (e.g. 'sudo apt install tmux')")
+// attachPipe connects the caller's terminal to a running terminal via its
+// termctl control pipe. mode is one of "shared" (rw attach), "ro" (read-only
+// attach - not supported by termctl directly, falls back to shared), "ind"
+// (independent - not supported, falls back to shared).
+func attachPipe(pipePath, mode string) error {
+	rem, err := termctl.OpenPipe(pipePath)
+	if err != nil {
+		return fmt.Errorf("open pipe %s: %w", pipePath, err)
 	}
+
+	// termctl only supports full attach; read-only/independent not available.
+	if mode != "shared" {
+		fmt.Fprintf(os.Stderr, "agent-attach: mode %q not supported by termctl, using shared\n", mode)
+	}
+
+	display := os.Getenv("DISPLAY")
+	if display == "" {
+		display = ":0"
+	}
+
 	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return fmt.Errorf("agent-attach: not a terminal — attach from an interactive shell")
 	}
 
-	var targs []string
-	switch mode {
-	case "ro":
-		targs = []string{"attach", "-r", "-t", session}
-	case "ind":
-		targs = []string{"new-session", "-t", session, "-s", fmt.Sprintf("%s-view-%d", session, os.Getpid())}
-	default: // shared
-		targs = []string{"attach", "-t", session}
+	fmt.Printf("agent-attach: attaching to terminal via pipe %s (mode: shared). Detach with Ctrl-b d; the agent keeps running.\n", pipePath)
+
+	if err := rem.Attach(display); err != nil {
+		return fmt.Errorf("attach: %w", err)
+	}
+	return nil
+}
+
+// resolvePipe finds the termctl pipe path for a given ID. ID can be a ship ID
+// (registry key), a bus handle, or a substring.
+func resolvePipe(root, id string) (string, bool) {
+	// 1. Direct registry lookup by ship ID
+	reg := NewRegistry(root)
+	if pipe, ok := reg.Get(id); ok {
+		return pipe, true
 	}
 
-	fmt.Printf("agent-attach: attaching to '%s' (mode: %s). Detach with Ctrl-b d; the agent keeps running.\n", session, mode)
-
-	cmd := exec.Command("tmux", targs...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// 2. Check agent-bus board for matching agent/handle
+	bus, err := agentbus.New(root)
+	if err != nil {
+		return "", false
+	}
+	for _, r := range bus.AllStatusRecords() {
+		if r.Agent == id || r.Handle == id || strings.Contains(r.Agent, id) || strings.Contains(r.Handle, id) {
+			if pipe, ok := reg.Get(r.Agent); ok {
+				return pipe, true
+			}
+		}
+	}
+	return "", false
 }

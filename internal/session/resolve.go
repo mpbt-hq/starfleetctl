@@ -4,7 +4,6 @@
 package session
 
 import (
-	"os/exec"
 	"strings"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
@@ -19,7 +18,7 @@ func shellQuote(s string) string {
 const sessPrefix = "mpbt-"
 
 // tmuxSafe sanitizes a string to tmux-safe characters (same as bash's
-// tr -c 'A-Za-z0-9_-' '_').
+// tr -c 'A-Za-z0-9_-' '_'). Kept for backward compatibility in name generation.
 func tmuxSafe(s string) string {
 	b := make([]byte, len(s))
 	for i, c := range []byte(s) {
@@ -33,41 +32,31 @@ func tmuxSafe(s string) string {
 	return string(b)
 }
 
-// sessionExists checks whether a tmux session by this exact name is running.
-func sessionExists(name string) bool {
-	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
-}
-
-// ResolveID resolves an agent ID / handle / tmux session name / unique
-// substring to the concrete tmux session name.  Returns empty string on
-// failure.
+// ResolveID resolves an agent ID / handle / unique substring to the concrete
+// termctl pipe path. Returns empty string on failure.
 func ResolveID(root, arg string) string {
-	// 1) exact tmux session
-	if sessionExists(arg) {
-		return arg
+	reg := NewRegistry(root)
+
+	// 1) Direct registry lookup by ship ID
+	if pipe, ok := reg.Get(arg); ok {
+		return pipe
 	}
 
-	// 2) sanitized "mpbt-<arg>"
-	prefixed := sessPrefix + tmuxSafe(arg)
-	if sessionExists(prefixed) {
-		return prefixed
-	}
-
-	// 3) board lookup: STARFLEET_SHIP_ID or handle matches arg
+	// 2) Check agent-bus board for matching agent/handle
 	bus, err := agentbus.New(root)
 	if err != nil {
 		return ""
 	}
 	for _, r := range bus.AllStatusRecords() {
 		if r.Agent == arg || r.Handle == arg {
-			if r.Handle != "" && sessionExists(r.Handle) {
-				return r.Handle
+			if pipe, ok := reg.Get(r.Agent); ok {
+				return pipe
 			}
 		}
 	}
 
-	// 4) unique substring of a running mpbt session
-	entries := tmuxMpbtSessions()
+	// 3) Unique substring of a registered ship ID
+	entries := reg.List()
 	var match string
 	for _, s := range entries {
 		if strings.Contains(s, arg) {
@@ -77,12 +66,18 @@ func ResolveID(root, arg string) string {
 			match = s
 		}
 	}
-	return match
+	if match != "" {
+		if pipe, ok := reg.Get(match); ok {
+			return pipe
+		}
+	}
+	return ""
 }
 
-// ListSessions returns the list of running mpbt- tmux sessions.
-func ListSessions() []string {
-	return tmuxMpbtSessions()
+// ListSessions returns the list of running terminals (ship IDs from registry).
+func ListSessions(root string) []string {
+	reg := NewRegistry(root)
+	return reg.List()
 }
 
 // ListBoard returns all status records from the bus board.
@@ -93,19 +88,3 @@ func ListBoard(root string) []agentbus.StatusRecord {
 	}
 	return bus.AllStatusRecords()
 }
-
-func tmuxMpbtSessions() []string {
-	out, err := exec.Command("tmux", "ls", "-F", "#{session_name}").Output()
-	if err != nil {
-		return nil
-	}
-	var matches []string
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if strings.HasPrefix(line, sessPrefix) {
-			matches = append(matches, line)
-		}
-	}
-	return matches
-}
-
-
