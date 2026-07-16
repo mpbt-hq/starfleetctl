@@ -157,12 +157,12 @@
 
 <div class="toast" id="toast"></div>
 
-<div class="overlay" id="ship_overlay" onclick="if(event.target===this)closeShip()">
+<div class="overlay" id="ship_overlay" onclick="if(event.target===this)history.back()">
   <div class="modal">
     <header>
       <span class="agent" id="ship_name"></span>
       <span class="pill" id="ship_state"></span>
-      <button class="x" onclick="closeShip()">×</button>
+      <button class="x" onclick="history.back()">×</button>
     </header>
     <div class="body">
       <div class="card">
@@ -256,12 +256,19 @@ async function openShip(name){
   shipCurrent = name;
   document.getElementById('ship_name').textContent = name;
   document.getElementById('ship_overlay').classList.add('on');
+  // Push a history entry so the browser Back button closes the panel
+  // instead of leaving the app. popstate() handles the close.
+  history.pushState({ship: name}, '');
   await loadShip(name);
 }
 function closeShip(){
   shipCurrent = null;
   document.getElementById('ship_overlay').classList.remove('on');
 }
+window.addEventListener('popstate', ()=>{
+  // Back/forward navigated away from the open panel — ensure it's closed.
+  if (shipCurrent !== null) closeShip();
+});
 async function loadShip(name){
   try {
     const rows = await api('/api/board');
