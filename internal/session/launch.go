@@ -264,7 +264,7 @@ func spawnSession(root string, vars *LaunchVars) error {
 
 	// Post initial heartbeat (same format as the bash wrapper).
 	if bus, err := agentbus.New(root); err == nil {
-		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")")
+		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")", agentbus.StatusPatch{})
 	}
 	return nil
 }

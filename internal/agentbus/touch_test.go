@@ -38,7 +38,7 @@ func TestDoTouchNoopWithoutExistingHeartbeat(t *testing.T) {
 func TestDoTouchRefreshesTimestampOnly(t *testing.T) {
 	b := newTestBus(t, "TestShip")
 
-	if err := b.DoStatus("working", "on it"); err != nil {
+	if err := b.DoStatus("working", "on it", StatusPatch{}); err != nil {
 		t.Fatal(err)
 	}
 	before, ok := parseStatusFile(b.sfile(b.ShipID))
@@ -72,11 +72,11 @@ func TestDoTouchRefreshesTimestampOnly(t *testing.T) {
 func TestDoTouchPicksUpLatestRealStatusNotACache(t *testing.T) {
 	b := newTestBus(t, "TestShip")
 
-	if err := b.DoStatus("working", "first task"); err != nil {
+	if err := b.DoStatus("working", "first task", StatusPatch{}); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate a real status change happening between two touch cycles.
-	if err := b.DoStatus("blocked", "waiting on review"); err != nil {
+	if err := b.DoStatus("blocked", "waiting on review", StatusPatch{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.DoTouch(); err != nil {

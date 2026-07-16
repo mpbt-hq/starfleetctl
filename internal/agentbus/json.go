@@ -24,6 +24,14 @@ type boardEntryJSON struct {
 	Attach     string `json:"attach"`
 	Note       string `json:"note"`
 	Stale      bool   `json:"stale"`
+	// Structured detail (status/<ship>.json); absent when the ship never
+	// reported one. Mirrors the fields of StatusDetail.
+	Task     string `json:"task,omitempty"`
+	Progress int    `json:"progress,omitempty"`
+	Blocker  string `json:"blocker,omitempty"`
+	ETA      string `json:"eta,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Updated  string `json:"updated,omitempty"`
 }
 
 // BoardEntries returns the same board data that `agent-bus board --json`
@@ -33,7 +41,7 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 	recs := b.AllStatusRecords()
 	out := make([]boardEntryJSON, 0, len(recs))
 	for _, r := range recs {
-		out = append(out, boardEntryJSON{
+		e := boardEntryJSON{
 			Agent:      r.Agent,
 			Project:    r.Project,
 			State:      r.State,
@@ -42,7 +50,16 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 			Attach:     r.Handle,
 			Note:       r.Note,
 			Stale:      b.stale(r.Epoch),
-		})
+		}
+		if d := b.ReadStatusDetail(r.Agent); d.State != "" || d.Task != "" || d.Note != "" {
+			e.Task = d.Task
+			e.Progress = d.Progress
+			e.Blocker = d.Blocker
+			e.ETA = d.ETA
+			e.Branch = d.Branch
+			e.Updated = d.Updated
+		}
+		out = append(out, e)
 	}
 	return out
 }

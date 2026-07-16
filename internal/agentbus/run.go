@@ -6,6 +6,7 @@ package agentbus
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 const usage = `agent-bus <command> [args…]
@@ -101,8 +102,8 @@ func Run(root string, args []string) int {
 		fmt.Print(usage)
 		return 0
 	case "status":
-		state, note := arg(args, 1), arg(args, 2)
-		cmdErr = b.DoStatus(state, note)
+		state, note, patch := parseStatusArgs(args[1:])
+		cmdErr = b.DoStatus(state, note, patch)
 	case "clear":
 		cmdErr = b.DoClear()
 	case "touch":
@@ -231,4 +232,68 @@ func reportErr(err error) int {
 		return 2
 	}
 	return 1
+}
+
+// parseStatusArgs parses `agent-bus status` arguments into the legacy
+// (state, note) pair plus an optional structured detail patch. Forms accepted:
+//
+//	status <state> ["note"]                 # legacy; note is the 2nd positional
+//	status <state> --task T [--progress N] [--blocker B] [--eta E] [--branch BR] [--note N]
+//
+// A leading positional after <state> that is NOT a --flag is treated as the
+// legacy note (so old callers keep working); any --flag overrides/extends it.
+// Progress defaults to -1 (unspecified) so callers can distinguish "leave
+// unchanged" from "set to 0".
+func parseStatusArgs(args []string) (state, note string, patch StatusPatch) {
+	patch.Progress = -1
+	if len(args) == 0 {
+		return "", "", patch
+	}
+	state = args[0]
+	rest := args[1:]
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		switch {
+		case a == "--task":
+			if i+1 < len(rest) {
+				patch.Task = rest[i+1]
+				i++
+			}
+		case a == "--progress":
+			if i+1 < len(rest) {
+				fmt.Sscanf(rest[i+1], "%d", &patch.Progress)
+				i++
+			}
+		case a == "--blocker":
+			if i+1 < len(rest) {
+				patch.Blocker = rest[i+1]
+				i++
+			}
+		case a == "--eta":
+			if i+1 < len(rest) {
+				patch.ETA = rest[i+1]
+				i++
+			}
+		case a == "--branch":
+			if i+1 < len(rest) {
+				patch.Branch = rest[i+1]
+				i++
+			}
+		case a == "--note":
+			if i+1 < len(rest) {
+				patch.Note = rest[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--"):
+			// unknown flag: ignore
+		default:
+			// first non-flag positional after state = legacy note
+			if note == "" {
+				note = a
+			} else {
+				note += " " + a
+			}
+		}
+	}
+	return
 }

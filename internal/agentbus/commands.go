@@ -129,8 +129,10 @@ func dispText(m msgRecord) string {
 	return t
 }
 
-// DoStatus implements `agent-bus status <state> [note]`.
-func (b *Bus) DoStatus(state, note string) error {
+// DoStatus implements `agent-bus status <state> [note]` and, when a structured
+// detail patch is supplied (via the --task/--progress/--blocker/--eta/--branch/
+// --note flags), also writes status/<ship>.json for the fleet console.
+func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if state == "" {
 		return usageErr("agent-bus: status needs a <state> (e.g. working|building|blocked|idle|done)")
 	}
@@ -152,6 +154,14 @@ func (b *Bus) DoStatus(state, note string) error {
 		now(), isots(), b.ShipID, pp, clean(state), os.Getpid(), hh, clean(note))
 	if err := os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644); err != nil {
 		return err
+	}
+	// Structured detail: only when at least one detail flag was given, so a
+	// plain `status <state>` (legacy) leaves any existing JSON untouched.
+	if patch.Task != "" || patch.Progress >= 0 || patch.Blocker != "" ||
+		patch.ETA != "" || patch.Branch != "" || patch.Note != "" {
+		if err := b.WriteStatusDetail(b.ShipID, state, patch); err != nil {
+			return err
+		}
 	}
 	proj := ""
 	if b.Project != "" {

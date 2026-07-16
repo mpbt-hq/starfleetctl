@@ -139,6 +139,12 @@ func (b *Bus) sfile(agent string) string {
 	return filepath.Join(b.StatusDir, fsafe(agent)+".tsv")
 }
 
+// dfile is the path of the richer structured status JSON (status/<agent>.json),
+// written alongside the legacy TSV heartbeat.
+func (b *Bus) dfile(agent string) string {
+	return filepath.Join(b.StatusDir, fsafe(agent)+".json")
+}
+
 func (b *Bus) mfile(id string) (string, error) {
 	safe, ok := fsutil.Safe(id)
 	if !ok {

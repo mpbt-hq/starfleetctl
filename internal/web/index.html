@@ -57,6 +57,9 @@
   .toast.show { opacity: 1; }
   .toast.err { background: var(--bad); color: #1a0606; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .bar { flex: 1; height: 8px; background: var(--chip); border: 1px solid var(--line);
+    border-radius: 999px; overflow: hidden; min-width: 80px; }
+  .bar .fill { height: 100%; background: var(--acc); }
   a { color: var(--acc); }
 </style>
 </head>
@@ -172,6 +175,15 @@ async function loadBoard(){
       const stale = r.stale ? ' stale' : '';
       const st = (r.state||'idle');
       const cls = st==='done'?'ok':(st==='blocked'?'bad':(st==='working'||st==='building'?'warn':'dim'));
+      const prog = (Number(r.progress)||0);
+      const bar = (r.progress!=null && prog>0) ? `
+        <div class="bar"><div class="fill" style="width:${prog}%"></div></div>
+        <span class="muted">${prog}%</span>` : '';
+      const detail = [];
+      if (r.task) detail.push(`<b>${esc(r.task)}</b>`);
+      if (r.branch) detail.push(`<span class="pill dim">${esc(r.branch)}</span>`);
+      if (r.blocker) detail.push(`<span class="pill bad">⛔ ${esc(r.blocker)}</span>`);
+      if (r.eta) detail.push(`<span class="muted">ETA ${esc(r.eta)}</span>`);
       return `<div class="card${stale}">
         <div class="row"><span class="agent grow">${esc(r.agent)}</span>
           <span class="pill ${cls}">${esc(st)}</span></div>
@@ -181,6 +193,8 @@ async function loadBoard(){
           <span class="muted">· 📥 ${r.inbox_count}</span>
           ${r.stale?'<span class="pill bad">STALE</span>':''}
         </div>
+        ${detail.length?`<div class="row" style="margin-top:6px">${detail.join(' ')}</div>`:''}
+        ${bar?`<div class="row" style="margin-top:6px;align-items:center">${bar}</div>`:''}
         ${r.note?`<div class="muted" style="margin-top:6px">${esc(r.note)}</div>`:''}
       </div>`;
     }).join('');
