@@ -565,3 +565,81 @@ func runStatus(root string, args []string) int {
 	fmt.Printf("task-status: slug=%s status=%s\n", slug, status)
 	return 0
 }
+
+// --- Programmatic wrappers (no os.Exit) for the web UI / in-process callers.
+// Each builds the same argument vector a CLI invocation would and routes it
+// through the existing run* logic, so the web interface and `starfleetctl task`
+// stay behaviour-identical. "__auto__" as the ship means "pick the first idle,
+// non-stale ship" (mirrors `--assign` with no arg).
+
+// RunCaptureOnly captures a task. assign == "" means unassigned; "auto" picks a
+// free ship; any other value commissions that specific ship. noPush suppresses
+// the git push (local-only capture) — used by the web UI so a LAN viewer never
+// blocks on a (possibly offline) remote. Returns the exit code (0 == ok) and
+// any fatal error.
+func RunCaptureOnly(root, title, desc, assign string, noPush bool) (int, error) {
+	args := []string{"--title", title}
+	if desc != "" {
+		args = append(args, "--desc", desc)
+	}
+	switch assign {
+	case "__auto__":
+		args = append(args, "--assign")
+	case "":
+		// unassigned
+	default:
+		args = append(args, "--assign", assign)
+	}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runCapture(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task capture exited with code %d", code)
+	}
+	return 0, nil
+}
+
+// RunAssignOnly assigns an existing task to ship ("" / "__auto__" => first free
+// ship). noPush suppresses the git push.
+func RunAssignOnly(root, slug, ship string, noPush bool) (int, error) {
+	args := []string{slug}
+	if ship != "" && ship != "__auto__" {
+		args = append(args, ship)
+	}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runAssign(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task assign exited with code %d", code)
+	}
+	return 0, nil
+}
+
+// RunUnassignOnly clears a task's assignment. noPush suppresses the git push.
+func RunUnassignOnly(root, slug string, noPush bool) (int, error) {
+	args := []string{slug}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runUnassign(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task unassign exited with code %d", code)
+	}
+	return 0, nil
+}
+
+// RunCaptureStatus sets an existing task's status field. noPush suppresses the
+// git push.
+func RunCaptureStatus(root, slug, status string, noPush bool) (int, error) {
+	args := []string{slug, status}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runStatus(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task status exited with code %d", code)
+	}
+	return 0, nil
+}

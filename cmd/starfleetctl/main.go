@@ -28,6 +28,7 @@ import (
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/task"
+	"github.com/metux/starfleetctl/internal/web"
 	"github.com/metux/starfleetctl/internal/telemetry"
 	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/worktree"
@@ -50,6 +51,7 @@ Fleet management:
   worktree          create/list/remove throwaway git worktrees
   ws-commit         commit workspace changes with locking
   task              capture fleet tasks into the dashboard (+ optional ship commission)
+  web               minimalist mobile-first fleet web console (status / tasks / bus / talk)
 
 Bootstrap & setup:
   genesis-init      bootstrap a workspace from nothing (writes starfleet-bootstrap + runs bootstrap --fix)
@@ -214,10 +216,12 @@ func main() {
 		os.Exit(hook.Run(root, os.Args[2:]))
 	case "session":
 		os.Exit(session.Run(root, os.Args[2:]))
-	case "worktree":
+  case "worktree":
 		os.Exit(worktree.Run(root, os.Args[2:]))
 	case "task":
 		os.Exit(task.Run(root, os.Args[2:]))
+	case "web":
+		os.Exit(web.Run(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)

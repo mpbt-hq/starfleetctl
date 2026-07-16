@@ -183,6 +183,39 @@ func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
 	return metas, nil
 }
 
+// TopicJSON is the JSON-facing view of a topic's frontmatter — the shape the
+// web UI consumes (see internal/web). Field names mirror TopicMeta.
+type TopicJSON struct {
+	Slug       string `json:"slug"`
+	Title      string `json:"title"`
+	Category   string `json:"category"`
+	Kind       string `json:"kind"`
+	Status     string `json:"status"`
+	AssignedTo string `json:"assigned_to"`
+	CreatedBy  string `json:"created_by"`
+	Created    string `json:"created"`
+	NotedBy    string `json:"noted_by"`
+	Since      string `json:"since"`
+}
+
+// LoadAllTopicsJSON returns every dashboard/topics/*.md file's frontmatter as a
+// JSON-shaped slice, sorted by slug — for the web UI's task board.
+func (d *Dashboard) LoadAllTopicsJSON() ([]TopicJSON, error) {
+	metas, err := d.loadAllTopics()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TopicJSON, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, TopicJSON{
+			Slug: m.Slug, Title: m.Title, Category: m.Category, Kind: m.Kind,
+			Status: m.Status, AssignedTo: m.AssignedTo, CreatedBy: m.CreatedBy,
+			Created: m.Created, NotedBy: m.NotedBy, Since: m.Since,
+		})
+	}
+	return out, nil
+}
+
 // DoTopicLoad reads an existing topic file, returning its parsed frontmatter
 // and body. It is the read counterpart to DoTopicUpdate / DoTopicWrite and the
 // sanctioned way to inspect a topic without touching the file as a raw path.
