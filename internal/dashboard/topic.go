@@ -42,7 +42,7 @@ type TopicMeta struct {
 }
 
 func (d *Dashboard) TopicsDir() string {
-	return filepath.Join(d.Root, "dashboard", "topics")
+	return filepath.Join(d.Root, ".starfleet-ai", "dashboard", "topics")
 }
 
 func (d *Dashboard) topicPath(slug string) string {
