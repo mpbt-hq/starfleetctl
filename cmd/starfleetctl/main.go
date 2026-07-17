@@ -24,6 +24,7 @@ import (
 	"github.com/metux/starfleetctl/internal/genesis"
 	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/jsonutil"
+	"github.com/metux/starfleetctl/internal/logs"
 	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
@@ -53,6 +54,7 @@ Fleet management:
   ws-commit         commit workspace changes with locking
   task              capture fleet tasks into the dashboard (+ optional ship commission)
   timer             fleet scheduling: one-time, interval, cron (with worker daemon)
+  logs              scan ship logs + bus events, extract failures as tasks (feedback loop)
   web               minimalist mobile-first fleet web console (status / tasks / bus / talk)
 
 Bootstrap & setup:
@@ -233,6 +235,8 @@ func main() {
 		os.Exit(timer.Run(root, os.Args[2:]))
 	case "web":
 		os.Exit(web.Run(root, os.Args[2:]))
+	case "logs":
+		os.Exit(logs.Run(root, os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)
