@@ -261,7 +261,7 @@ async function refresh(){
   else if (cur==='tasks') await loadTasks();
   else if (cur==='bus') await loadBus(document.querySelector('#bus .tab.on')?.dataset.b || 'msgs');
   else if (cur==='log') await loadEvents();
-  else if (cur==='talk') await loadTargets(); await loadTalk();
+  else if (cur==='talk') { await loadTargets(); await loadTalk(); }
   else if (cur==='timers') await loadTimers();
 }
 
