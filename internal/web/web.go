@@ -72,6 +72,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/timer", s.apiTimerCreate)
 	s.mux.HandleFunc("/api/timer/", s.apiTimerDispatch)
 	s.mux.HandleFunc("/api/timer/worker", s.apiTimerWorker)
+	s.mux.HandleFunc("/api/web/restart", s.apiWebRestart)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -477,6 +478,25 @@ func (s *Server) timerToggle(w http.ResponseWriter, r *http.Request, path string
 	writeErr(w, 404, "timer not found")
 }
 
+// apiWebRestart restarts the web server daemon (stop + start).
+func (s *Server) apiWebRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	if err := webRestart(s.Root); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// webRestart stops and restarts the web server. The new process takes over
+// the port after the current process is killed.
+func webRestart(root string) error {
+	return Restart(root)
+}
+
 // apiTimerWorker handles worker start/stop/status.
 func (s *Server) apiTimerWorker(w http.ResponseWriter, r *http.Request) {
 	running, pid := timer.WorkerStatus(s.Root)
@@ -488,7 +508,7 @@ func (s *Server) apiTimerWorker(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPost {
 		var p struct {
-			Action string `json:"action"` // "start"|"stop"
+			Action string `json:"action"` // "start"|"stop"|"restart"
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeErr(w, 400, "bad json")
@@ -500,7 +520,10 @@ func (s *Server) apiTimerWorker(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, map[string]any{"ok": true, "already_running": true, "pid": pid})
 				return
 			}
-			go timer.RunWorker(s.Root)
+			if err := timer.StartWorker(s.Root); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
 			writeJSON(w, map[string]any{"ok": true})
 		case "stop":
 			if !running {
@@ -512,8 +535,14 @@ func (s *Server) apiTimerWorker(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeJSON(w, map[string]any{"ok": true})
+		case "restart":
+			if err := timer.RestartWorker(s.Root); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
 		default:
-			writeErr(w, 400, "action must be start or stop")
+			writeErr(w, 400, "action must be start, stop, or restart")
 		}
 		return
 	}

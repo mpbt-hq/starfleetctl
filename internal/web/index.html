@@ -159,10 +159,18 @@
   <section class="page" id="timers">
     <div class="card">
       <div class="row" style="align-items:center">
-        <b>Worker</b>
+        <b>Timer Worker</b>
         <span id="tw_status" class="muted">…</span>
         <span style="margin-left:auto"></span>
         <button class="sec" id="tw_btn" onclick="timerWorkerToggle()" style="width:auto;padding:6px 14px">Start</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="align-items:center">
+        <b>Web Server</b>
+        <span class="muted" id="ws_info">…</span>
+        <span style="margin-left:auto"></span>
+        <button class="sec" onclick="webRestart()" style="width:auto;padding:6px 14px">Neu starten</button>
       </div>
     </div>
     <div class="card">
@@ -653,6 +661,21 @@ async function timerWorkerToggle(){
       body: JSON.stringify({action})});
     toast('Worker '+(action==='start'?'gestartet':'gestoppt'));
     loadTimers();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
+async function webRestart(){
+  try {
+    document.getElementById('ws_info').textContent = 'Neustart…';
+    await api('/api/web/restart', {method:'POST'});
+    toast('Web-Server wird neu gestartet…');
+    // The server will die and restart — poll until it's back.
+    let tries = 0;
+    const poll = setInterval(async () => {
+      tries++;
+      try { await api('/api/identity'); clearInterval(poll); location.reload(); }
+      catch(e) { if (tries > 20) { clearInterval(poll); toast('Neustart fehlgeschlagen', true); } }
+    }, 500);
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 

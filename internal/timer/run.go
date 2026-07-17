@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,7 +40,10 @@ Flags for set:
   timer clear                      cancel all my timers
   timer pause <id>                 disable a timer
   timer resume <id>                re-enable a timer
-  timer worker [--stop]            start/stop the worker daemon
+  timer worker                    run in foreground (blocking)
+  timer worker --start            fork daemon in background
+  timer worker --stop             stop the daemon
+  timer worker --restart          restart the daemon
   timer status                     show worker status
 `
 
@@ -395,11 +399,36 @@ func runPause(root string, args []string, disable bool) int {
 }
 
 func runWorker(root string, args []string) int {
-	stop := false
-	for _, a := range args {
-		if a == "--stop" {
-			stop = true
+	// If we're the forked child daemon, run directly in foreground.
+	if os.Getenv("STARFLEET_TIMER_WORKER") == "1" {
+		os.Unsetenv("STARFLEET_TIMER_WORKER")
+		if err := RunWorker(root); err != nil {
+			fmt.Fprintf(os.Stderr, "timer worker: %v\n", err)
+			return 1
 		}
+		return 0
+	}
+
+	stop := false
+	restart := false
+	start := false
+	for _, a := range args {
+		switch a {
+		case "--stop":
+			stop = true
+		case "--restart":
+			restart = true
+		case "--start":
+			start = true
+		}
+	}
+	if restart {
+		if err := RestartWorker(root); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return 1
+		}
+		fmt.Println("timer worker restarted")
+		return 0
 	}
 	if stop {
 		if err := StopWorker(root); err != nil {
@@ -409,9 +438,18 @@ func runWorker(root string, args []string) int {
 		fmt.Println("timer worker stopped")
 		return 0
 	}
-	// Start worker in background.
-	if err := StartWorker(root); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+	if start {
+		// Fork a daemon in background.
+		if err := StartWorker(root); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return 1
+		}
+		fmt.Println("timer worker started")
+		return 0
+	}
+	// No flags: run in foreground (blocking).
+	if err := RunWorker(root); err != nil {
+		fmt.Fprintf(os.Stderr, "timer worker: %v\n", err)
 		return 1
 	}
 	return 0
@@ -429,24 +467,58 @@ func runStatus(root string) int {
 
 // --- helpers ---
 
-// StartWorker forks the worker into the background.
+// StartWorker forks the worker into the background as a daemon.
 func StartWorker(root string) error {
 	running, _ := WorkerStatus(root)
 	if running {
 		return fmt.Errorf("timer worker: already running")
 	}
 
-	// Fork a child process that runs the worker.
-	// Use the same binary with "timer worker" args — but we need to exec
-	// ourselves since the parent already handles "timer worker" dispatch.
-	// Instead, we just call RunWorker in a goroutine and rely on the
-	// PID file for singleton enforcement. For proper daemonization, we'd
-	// need to re-exec. For now, run in background via nohup pattern.
-	//
-	// Practical approach: the web server starts the worker in-process.
-	// CLI `timer worker` runs in foreground (blocking).
-	// For true background: `nohup starfleetctl timer worker &`
-	return fmt.Errorf("timer worker: use 'nohup starfleetctl timer worker &' or start via web UI")
+	logDir := filepath.Join(root, "_WORK_", "agent-bus", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return fmt.Errorf("timer worker: mkdir logs: %w", err)
+	}
+	logFile := filepath.Join(logDir, workerLogFile)
+	logF, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("timer worker: open log: %w", err)
+	}
+
+	cmd := exec.Command(os.Args[0], "timer", "worker")
+	cmd.Env = append(os.Environ(), "STARFLEET_TIMER_WORKER=1")
+	cmd.Dir = root
+	cmd.Stdout = logF
+	cmd.Stderr = logF
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+		Pgid:    0,
+	}
+
+	if err := cmd.Start(); err != nil {
+		logF.Close()
+		return fmt.Errorf("timer worker: start: %w", err)
+	}
+	logF.Close()
+	cmd.Process.Release()
+	return nil
+}
+
+// RestartWorker stops the worker if running, then starts it again.
+func RestartWorker(root string) error {
+	if running, _ := WorkerStatus(root); running {
+		if err := StopWorker(root); err != nil {
+			return fmt.Errorf("timer worker restart: stop: %w", err)
+		}
+		// Wait for process to exit.
+		for i := 0; i < 10; i++ {
+			if running, _ = WorkerStatus(root); !running {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return StartWorker(root)
 }
 
 // parseSchedule parses the flags into a next_fire unix timestamp.

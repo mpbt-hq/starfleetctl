@@ -193,15 +193,34 @@ func Stop(root string) error {
 	return RemovePID(ac.PIDFile)
 }
 
+// Restart stops the web server if running, then starts it again.
+func Restart(root string) error {
+	Stop(root)
+	// Wait for the port to be freed.
+	time.Sleep(500 * time.Millisecond)
+	_, err := Autostart(root)
+	return err
+}
+
 // RunAutostart is the CLI entry point for `starfleetctl web autostart`.
 func RunAutostart(root string, args []string) int {
-	if len(args) > 0 && args[0] == "stop" {
-		if err := Stop(root); err != nil {
-			fmt.Fprintln(os.Stderr, "web autostart stop:", err)
-			return 1
+	if len(args) > 0 {
+		switch args[0] {
+		case "stop":
+			if err := Stop(root); err != nil {
+				fmt.Fprintln(os.Stderr, "web autostart stop:", err)
+				return 1
+			}
+			fmt.Println("web server stopped")
+			return 0
+		case "restart":
+			if err := Restart(root); err != nil {
+				fmt.Fprintln(os.Stderr, "web autostart restart:", err)
+				return 1
+			}
+			fmt.Println("web server restarted")
+			return 0
 		}
-		fmt.Println("web server stopped")
-		return 0
 	}
 
 	ok, err := Autostart(root)
