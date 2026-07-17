@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"syscall"
 
@@ -230,9 +231,8 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	if project != "" {
 		inner += ". cf/" + shellQuote(project) + "/config.sh; export PROJECT; "
 	}
-	inner += "exec"
 	if client == "claude" {
-		inner += " claude"
+		inner += "exec claude"
 		if permissionMode != "" {
 			inner += " --permission-mode " + shellQuote(permissionMode)
 		}
@@ -240,14 +240,21 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 			inner += " " + shellQuote(a)
 		}
 	} else if client == "opencode" {
-		inner += " " + shellQuote(clientPath)
+		inner += "exec " + shellQuote(clientPath)
 		for _, a := range clientArgs {
 			inner += " " + shellQuote(a)
 		}
 	} else { // shell
-		inner += " " + shellQuote(clientPath)
+		// Run the user's command(s) directly. RunTermctl already wraps the
+		// inner command via /bin/sh -c, so we must not prepend another shell
+		// here (that would interpret the first clientArg as a script name).
+		inner += "exec"
 		for _, a := range clientArgs {
 			inner += " " + shellQuote(a)
+		}
+		if len(clientArgs) == 0 {
+			// No command given: fall back to an interactive login shell.
+			inner += " " + shellQuote(clientPath) + " -l"
 		}
 	}
 
@@ -303,12 +310,13 @@ func spawnSession(root string, vars *LaunchVars) error {
 
 	cmd := exec.Command(self, "termctl-run", vars.ShipID, vars.PipePath, vars.ShellCmd)
 	cmd.Env = childEnv
+	cmd.Stdin = nil // detach from parent's stdin (Go maps nil to /dev/null)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	// Run in a new session so the child is independent of the parent
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
+	// NOTE: do NOT set Setsid here — termctl's PTY spawn (term.Spawn) needs to
+	// be the session leader itself (Setsid+Setctty). A double setsid fails
+	// with EPERM. The child owns its own session via the PTY; we just detach
+	// stdio above and SIGHUP is ignored inside RunTermctl.
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		_ = reg.Delete(vars.ShipID)
@@ -411,6 +419,10 @@ func RunTermctl(root string, args []string) int {
 	shipID := args[0]
 	pipePath := args[1]
 	shellCmd := args[2]
+
+	// Detached terminals must survive the parent's shell exiting. Ignore
+	// SIGHUP so a closing controlling terminal doesn't kill us.
+	signal.Ignore(syscall.SIGHUP)
 
 	fmt.Fprintf(os.Stderr, "termctl-run: shipID=%s pipePath=%s shellCmd=%s\n", shipID, pipePath, shellCmd)
 
