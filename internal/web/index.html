@@ -102,6 +102,7 @@
   <div class="tab" data-p="bus" onclick="show('bus', true)">Bus</div>
   <div class="tab" data-p="talk" onclick="show('talk', true)">Funk</div>
   <div class="tab" data-p="log" onclick="show('log', true)">Log</div>
+  <div class="tab" data-p="timers" onclick="show('timers', true)">Timer</div>
 </div>
 
 <main>
@@ -153,6 +154,46 @@
 
   <section class="page" id="log">
     <div class="card" id="events"></div>
+  </section>
+
+  <section class="page" id="timers">
+    <div class="card">
+      <div class="row" style="align-items:center">
+        <b>Worker</b>
+        <span id="tw_status" class="muted">…</span>
+        <span style="margin-left:auto"></span>
+        <button class="sec" id="tw_btn" onclick="timerWorkerToggle()" style="width:auto;padding:6px 14px">Start</button>
+      </div>
+    </div>
+    <div class="card">
+      <b>Neuer Timer</b>
+      <div class="grid2" style="margin-top:8px">
+        <select id="tf_type" onchange="timerFormUpdate()">
+          <option value="once">Einmalig (--at)</option>
+          <option value="interval">Intervall (--every)</option>
+          <option value="cron">Cron (--cron)</option>
+        </select>
+        <select id="tf_target">
+          <option value="fleet">Fleet (einen freien)</option>
+          <option value="fleet-all">Fleet-alle (alle freien)</option>
+          <option value="ship">Eigenes Schiff</option>
+        </select>
+      </div>
+      <div id="tf_at_row" class="grid2" style="margin-top:8px">
+        <input id="tf_at" placeholder="z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00">
+      </div>
+      <div id="tf_every_row" class="grid2" style="margin-top:8px;display:none">
+        <input id="tf_every" placeholder="z.B. 10m / 1h / 30s">
+      </div>
+      <div id="tf_cron_row" class="grid2" style="margin-top:8px;display:none">
+        <input id="tf_cron" placeholder="z.B. 0 4 * * *">
+      </div>
+      <input id="tf_msg" placeholder="Nachricht…" style="margin-top:8px">
+      <div class="actions">
+        <button onclick="timerCreate()">Erstellen</button>
+      </div>
+    </div>
+    <div class="card" id="timerlist"></div>
   </section>
 </main>
 
@@ -213,6 +254,7 @@ async function refresh(){
   else if (cur==='bus') await loadBus(document.querySelector('#bus .tab.on')?.dataset.b || 'msgs');
   else if (cur==='log') await loadEvents();
   else if (cur==='talk') await loadTargets(); await loadTalk();
+  else if (cur==='timers') await loadTimers();
 }
 
 async function loadIdentity(){
@@ -517,11 +559,108 @@ async function loadEvents(){
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
 }
 
+// --- Timer tab ---
+let timerWorkerRunning = false;
+
+function timerFormUpdate(){
+  const t = document.getElementById('tf_type').value;
+  document.getElementById('tf_at_row').style.display = t==='once'?'':'none';
+  document.getElementById('tf_every_row').style.display = t==='interval'?'':'none';
+  document.getElementById('tf_cron_row').style.display = t==='cron'?'':'none';
+}
+
+async function loadTimers(){
+  try {
+    // Worker status
+    const ws = await api('/api/timer/worker');
+    timerWorkerRunning = ws.running;
+    document.getElementById('tw_status').textContent = ws.running ? 'läuft (pid '+ws.pid+')' : 'gestoppt';
+    document.getElementById('tw_btn').textContent = ws.running ? 'Stop' : 'Start';
+    document.getElementById('tw_btn').className = ws.running ? '' : 'sec';
+
+    // Timer list
+    const rows = await api('/api/timers?all=1');
+    const el = document.getElementById('timerlist');
+    if (!rows.length){ el.innerHTML = '<div class="empty">keine Timer</div>'; return; }
+    el.innerHTML = rows.map(t=>{
+      const cls = t.enabled ? 'ok' : 'dim';
+      const kind = t.schedule.type;
+      const nf = t.next_fire ? new Date(t.next_fire*1000).toISOString().slice(0,16).replace('T',' ')+' UTC' : '—';
+      const tgt = t.target.type==='fleet'?'fleet':t.target.type==='fleet-all'?'fleet-all':t.target.value;
+      return `<div class="card">
+        <div class="row"><span class="agent grow">${esc(t.id)}</span>
+          <span class="pill dim">${esc(kind)}</span>
+          <span class="pill ${cls}">${t.enabled?'aktiv':'pausiert'}</span></div>
+        <div class="muted" style="margin-top:4px">${esc(nf)} · ${esc(tgt)} · ${esc(t.persistent?'persistent':'ephemeral')}</div>
+        <div style="margin-top:4px">${esc(t.message)}</div>
+        <div class="actions">
+          ${t.enabled
+            ?`<button class="sec" onclick="timerPause('${esc(t.id)}')">Pause</button>`
+            :`<button class="sec" onclick="timerResume('${esc(t.id)}')">Resume</button>`}
+          <button class="sec" onclick="timerCancel('${esc(t.id)}')">Löschen</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e){}
+}
+
+async function timerCreate(){
+  const type = document.getElementById('tf_type').value;
+  const target = document.getElementById('tf_target').value;
+  const msg = document.getElementById('tf_msg').value.trim();
+  if (!msg){ toast('Nachricht fehlt', true); return; }
+  const body = {schedule_type:type, message:msg, target_type:target};
+  if (type==='once') body.at = document.getElementById('tf_at').value.trim();
+  if (type==='interval') body.every = document.getElementById('tf_every').value.trim();
+  if (type==='cron') body.cron = document.getElementById('tf_cron').value.trim();
+  try {
+    const r = await api('/api/timer', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)});
+    toast('Timer '+r.id+' erstellt');
+    document.getElementById('tf_msg').value='';
+    loadTimers();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
+async function timerPause(id){
+  try {
+    await api('/api/timer/'+id+'/pause', {method:'POST'});
+    toast(id+' pausiert');
+    loadTimers();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
+async function timerResume(id){
+  try {
+    await api('/api/timer/'+id+'/resume', {method:'POST'});
+    toast(id+' fortgesetzt');
+    loadTimers();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
+async function timerCancel(id){
+  try {
+    await api('/api/timer/'+id, {method:'DELETE'});
+    toast(id+' gelöscht');
+    loadTimers();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
+async function timerWorkerToggle(){
+  const action = timerWorkerRunning ? 'stop' : 'start';
+  try {
+    await api('/api/timer/worker', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action})});
+    toast('Worker '+(action==='start'?'gestartet':'gestoppt'));
+    loadTimers();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
 loadIdentity().then(refresh);
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
-  if (c==='status'||c==='log'||c==='bus'||c==='talk') refresh();
+  if (c==='status'||c==='log'||c==='bus'||c==='talk'||c==='timers') refresh();
   if (shipCurrent) loadShipChat(shipCurrent); }, 15000);
 </script>
 </body>

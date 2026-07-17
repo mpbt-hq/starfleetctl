@@ -17,11 +17,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/task"
+	"github.com/metux/starfleetctl/internal/timer"
 )
 
 //go:embed index.html
@@ -66,6 +68,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/tell", s.apiTell)
 	s.mux.HandleFunc("/api/task", s.apiTask)
 	s.mux.HandleFunc("/api/identity", s.apiIdentity)
+	s.mux.HandleFunc("/api/timers", s.apiTimers)
+	s.mux.HandleFunc("/api/timer", s.apiTimerCreate)
+	s.mux.HandleFunc("/api/timer/", s.apiTimerDispatch)
+	s.mux.HandleFunc("/api/timer/worker", s.apiTimerWorker)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -257,6 +263,261 @@ func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// apiTimers lists all timers across all stores.
+func (s *Server) apiTimers(w http.ResponseWriter, r *http.Request) {
+	showAll := r.URL.Query().Get("all") == "1"
+	var all []*timer.TimerRecord
+	for _, td := range timer.TimerDirs(s.Root) {
+		store, err := timer.NewStore(td.Dir, td.Prefix)
+		if err != nil {
+			continue
+		}
+		timers, err := store.List()
+		if err != nil {
+			continue
+		}
+		all = append(all, timers...)
+	}
+	if !showAll {
+		var filtered []*timer.TimerRecord
+		for _, t := range all {
+			if t.Owner == s.bus.ShipID {
+				filtered = append(filtered, t)
+			}
+		}
+		all = filtered
+	}
+	if all == nil {
+		all = []*timer.TimerRecord{}
+	}
+	writeJSON(w, all)
+}
+
+// apiTimerCreate handles POST /api/timer for creating timers.
+func (s *Server) apiTimerCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	s.timerCreate(w, r)
+}
+
+// apiTimerDispatch handles /api/timer/{id}, /api/timer/{id}/pause, /api/timer/{id}/resume.
+func (s *Server) apiTimerDispatch(w http.ResponseWriter, r *http.Request) {
+	// Strip /api/timer/ prefix to get the path remainder.
+	rest := strings.TrimPrefix(r.URL.Path, "/api/timer/")
+
+	if rest == "" || rest == "worker" {
+		writeErr(w, 400, "need timer id")
+		return
+	}
+
+	// Check for /{id}/pause or /{id}/resume.
+	if strings.HasSuffix(rest, "/pause") || strings.HasSuffix(rest, "/resume") {
+		s.timerToggle(w, r, rest)
+		return
+	}
+
+	// Plain DELETE /api/timer/{id}.
+	if r.Method == http.MethodDelete {
+		s.timerDelete(w, r, rest)
+		return
+	}
+	writeErr(w, 405, "method not allowed")
+}
+
+func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
+	var p struct {
+		ScheduleType string `json:"schedule_type"` // "once"|"interval"|"cron"
+		At           string `json:"at"`
+		Every        string `json:"every"`
+		Cron         string `json:"cron"`
+		Message      string `json:"message"`
+		TargetType   string `json:"target_type"` // "ship"|"fleet"|"fleet-all"
+		TargetValue  string `json:"target_value"`
+		Persistent   *bool  `json:"persistent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if p.Message == "" {
+		writeErr(w, 400, "message required")
+		return
+	}
+	if p.ScheduleType == "" {
+		writeErr(w, 400, "schedule_type required")
+		return
+	}
+
+	// Parse target type.
+	tt := timer.TargetShip
+	switch p.TargetType {
+	case "fleet":
+		tt = timer.TargetFleet
+	case "fleet-all":
+		tt = timer.TargetFleetAll
+	}
+	tgtVal := p.TargetValue
+	if tt == timer.TargetShip && tgtVal == "" {
+		tgtVal = s.bus.ShipID
+	}
+
+	// Parse schedule.
+	var sched timer.Schedule
+	var nextFire int64
+	switch timer.ScheduleType(p.ScheduleType) {
+	case timer.ScheduleOnce:
+		sched = timer.Schedule{Type: timer.ScheduleOnce}
+		t, err := timer.ParseAtTime(p.At, "")
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		nextFire = t.Unix()
+	case timer.ScheduleInterval:
+		d, err := time.ParseDuration(p.Every)
+		if err != nil {
+			writeErr(w, 400, "invalid every: "+err.Error())
+			return
+		}
+		sched = timer.Schedule{Type: timer.ScheduleInterval, IntervalSec: int64(d.Seconds())}
+		nextFire = time.Now().UTC().Add(d).Unix()
+	case timer.ScheduleCron:
+		sched = timer.Schedule{Type: timer.ScheduleCron, CronExpr: p.Cron}
+		next, err := timer.CronNextFire(p.Cron, "")
+		if err != nil {
+			writeErr(w, 400, "invalid cron: "+err.Error())
+			return
+		}
+		nextFire = next.Unix()
+	default:
+		writeErr(w, 400, "unknown schedule_type: "+p.ScheduleType)
+		return
+	}
+
+	// Persistence: default cron → persistent, others → ephemeral.
+	persistent := timer.ScheduleType(p.ScheduleType) == timer.ScheduleCron
+	if p.Persistent != nil {
+		persistent = *p.Persistent
+	}
+
+	rec := &timer.TimerRecord{
+		Owner:      s.bus.ShipID,
+		Target:     timer.TargetSpec{Type: tt, Value: tgtVal},
+		Message:    p.Message,
+		Schedule:   sched,
+		Persistent: persistent,
+		Enabled:    true,
+		CreatedAt:  time.Now().Unix(),
+		NextFire:   nextFire,
+	}
+
+	store, err := timer.PickStore(s.Root, persistent)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	id, err := store.Create(rec)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+
+	timer.NotifyWorker(s.Root)
+	writeJSON(w, map[string]any{"ok": true, "id": id})
+}
+
+func (s *Server) timerDelete(w http.ResponseWriter, r *http.Request, id string) {
+	for _, td := range timer.TimerDirs(s.Root) {
+		store, err := timer.NewStore(td.Dir, td.Prefix)
+		if err != nil {
+			continue
+		}
+		if _, err := store.Get(id); err == nil {
+			if err := store.Delete(id); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			timer.NotifyWorker(s.Root)
+			writeJSON(w, map[string]any{"ok": true})
+			return
+		}
+	}
+	writeErr(w, 404, "timer not found")
+}
+
+func (s *Server) timerToggle(w http.ResponseWriter, r *http.Request, path string) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	disable := strings.HasSuffix(path, "/pause")
+	id := strings.TrimSuffix(strings.TrimSuffix(path, "/pause"), "/resume")
+
+	for _, td := range timer.TimerDirs(s.Root) {
+		store, err := timer.NewStore(td.Dir, td.Prefix)
+		if err != nil {
+			continue
+		}
+		rec, err := store.Get(id)
+		if err == nil {
+			rec.Enabled = !disable
+			if err := store.Update(rec); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			timer.NotifyWorker(s.Root)
+			writeJSON(w, map[string]any{"ok": true})
+			return
+		}
+	}
+	writeErr(w, 404, "timer not found")
+}
+
+// apiTimerWorker handles worker start/stop/status.
+func (s *Server) apiTimerWorker(w http.ResponseWriter, r *http.Request) {
+	running, pid := timer.WorkerStatus(s.Root)
+
+	if r.Method == http.MethodGet {
+		writeJSON(w, map[string]any{"running": running, "pid": pid})
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var p struct {
+			Action string `json:"action"` // "start"|"stop"
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeErr(w, 400, "bad json")
+			return
+		}
+		switch p.Action {
+		case "start":
+			if running {
+				writeJSON(w, map[string]any{"ok": true, "already_running": true, "pid": pid})
+				return
+			}
+			go timer.RunWorker(s.Root)
+			writeJSON(w, map[string]any{"ok": true})
+		case "stop":
+			if !running {
+				writeJSON(w, map[string]any{"ok": true, "not_running": true})
+				return
+			}
+			if err := timer.StopWorker(s.Root); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+		default:
+			writeErr(w, 400, "action must be start or stop")
+		}
+		return
+	}
+	writeErr(w, 405, "method not allowed")
 }
 
 // serveIndex serves the embedded single-page frontend.

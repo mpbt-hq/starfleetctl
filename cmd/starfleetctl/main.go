@@ -28,6 +28,7 @@ import (
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/task"
+	"github.com/metux/starfleetctl/internal/timer"
 	"github.com/metux/starfleetctl/internal/web"
 	"github.com/metux/starfleetctl/internal/telemetry"
 	"github.com/metux/starfleetctl/internal/withclonelock"
@@ -51,6 +52,7 @@ Fleet management:
   worktree          create/list/remove throwaway git worktrees
   ws-commit         commit workspace changes with locking
   task              capture fleet tasks into the dashboard (+ optional ship commission)
+  timer             fleet scheduling: one-time, interval, cron (with worker daemon)
   web               minimalist mobile-first fleet web console (status / tasks / bus / talk)
 
 Bootstrap & setup:
@@ -133,6 +135,13 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(bootstrap.Run(dir, os.Args[2:]))
+	}
+
+	// termctl-run runs a termctl terminal in the foreground (blocking on h.Run()).
+// This is meant to be spawned as a child process by `session run`.
+// It gets workspace root from MPBT_WORKSPACE_ROOT env var.
+	if os.Args[1] == "termctl-run" {
+		os.Exit(session.RunTermctl("", os.Args[2:]))
 	}
 
 	// json is a stateless utility — no workspace root needed.
@@ -220,6 +229,8 @@ func main() {
 		os.Exit(worktree.Run(root, os.Args[2:]))
 	case "task":
 		os.Exit(task.Run(root, os.Args[2:]))
+	case "timer":
+		os.Exit(timer.Run(root, os.Args[2:]))
 	case "web":
 		os.Exit(web.Run(root, os.Args[2:]))
 	default:
