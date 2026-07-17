@@ -6,6 +6,8 @@
 package web
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -134,6 +136,11 @@ func Autostart(root string) (bool, error) {
 	addr := cfg.Web.ListenAddr
 	ac := DefaultAutostartConfig(root)
 
+	// Clean up any starfleetctl web processes on WRONG ports (always run)
+	if err := cleanupWrongPortProcesses(addr); err != nil {
+		return false, err
+	}
+
 	// Check if already running on the configured address
 	if IsWebServerRunning(addr) {
 		return true, nil
@@ -142,8 +149,7 @@ func Autostart(root string) (bool, error) {
 	// Check PID file - if process is alive but not on our port, clean up
 	if pid, err := ReadPID(ac.PIDFile); err == nil {
 		if IsPIDAlive(pid) {
-			// Process exists but not on our port - maybe different config
-			// Leave it alone for safety
+			// Process exists but not on our port - cleanupWrongPortProcesses should have handled this
 		} else {
 			// Stale PID file
 			RemovePID(ac.PIDFile)
@@ -175,6 +181,95 @@ func Autostart(root string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("server started but not listening on %s", addr)
+}
+
+// cleanupWrongPortProcesses finds and kills any starfleetctl web processes
+// that are listening on ports other than the configured address.
+func cleanupWrongPortProcesses(expectedAddr string) error {
+	// Parse expected port
+	_, expectedPort, err := net.SplitHostPort(expectedAddr)
+	if err != nil {
+		return nil // not our problem
+	}
+
+	// Find all starfleetctl web processes and their listening ports
+	procs, err := findStarlfleetWebProcs()
+	if err != nil {
+		return err
+	}
+
+	for _, p := range procs {
+		if p.Port != "" && p.Port != expectedPort {
+			// Kill process on wrong port
+			process, err := os.FindProcess(p.PID)
+			if err == nil {
+				process.Kill()
+			}
+		}
+	}
+	return nil
+}
+
+// webProcInfo holds info about a starfleetctl web process
+type webProcInfo struct {
+	PID  int
+	Port string
+}
+
+// findStarlfleetWebProcs finds all starfleetctl web processes and their listening ports.
+func findStarlfleetWebProcs() ([]webProcInfo, error) {
+	var procs []webProcInfo
+
+	// Use ss to find listening processes
+	cmd := exec.Command("ss", "-ltnp")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Look for starfleetctl processes
+		if strings.Contains(line, "starfleetctl") && strings.Contains(line, "web") {
+			// Parse: LISTEN 0 4096 *:8090 *:* users:(("starfleetctl",pid=1234,fd=3))
+			port := extractPort(line)
+			pid := extractPID(line)
+			if port != "" && pid > 0 {
+				procs = append(procs, webProcInfo{PID: pid, Port: port})
+			}
+		}
+	}
+	return procs, scanner.Err()
+}
+
+func extractPort(line string) string {
+	// Find *:PORT or IP:PORT pattern
+	fields := strings.Fields(line)
+	for _, f := range fields {
+		if strings.Contains(f, ":") && !strings.HasPrefix(f, "pid=") && !strings.HasPrefix(f, "fd=") {
+			parts := strings.Split(f, ":")
+			if len(parts) == 2 {
+				return parts[1]
+			}
+		}
+	}
+	return ""
+}
+
+func extractPID(line string) int {
+	// Find pid=NUMBER
+	idx := strings.Index(line, "pid=")
+	if idx < 0 {
+		return 0
+	}
+	idx += 4
+	end := idx
+	for end < len(line) && line[end] >= '0' && line[end] <= '9' {
+		end++
+	}
+	pid, _ := strconv.Atoi(line[idx:end])
+	return pid
 }
 
 // Stop stops the web server daemon.
