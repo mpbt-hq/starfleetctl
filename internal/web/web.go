@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/task"
 )
@@ -270,7 +271,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // usage is the `web` subcommand help text.
-const usage = `web [--addr <host:port>] [--no-browser]
+const usage = `web [--addr <host:port>] [--no-browser] [autostart|autostart stop]
   Start the minimalist mobile-first fleet web console. Reuses the same
   in-process agentbus / dashboard / task code as the CLI subcommands, so the
   web UI and 'starfleetctl <cmd>' stay in lockstep. Defaults to
@@ -278,15 +279,32 @@ const usage = `web [--addr <host:port>] [--no-browser]
   devices — e.g. a phone on the LAN). The bus identity is taken from the environment
   (STARFLEET_SHIP_ID etc.), exactly like ` + "`agent-bus`" + `.
 
+  Subcommands:
+    autostart        Check if web server is running, start as daemon if not (for cron)
+    autostart stop   Stop the web server daemon
+
   Examples:
     starfleetctl web                 # http://:8080
     starfleetctl web --addr 0.0.0.0:9090
+    starfleetctl web autostart       # check/start (cron-friendly)
+    starfleetctl web autostart stop  # stop daemon
 `
 
 // Run dispatches a `web` invocation given the resolved workspace root.
 // Returns the process exit code.
 func Run(root string, args []string) int {
-	addr := "0.0.0.0:8080"
+	// Load config for default address
+	cfg, err := config.Load(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "web: config:", err)
+		return 1
+	}
+	addr := cfg.Web.ListenAddr
+
+	if len(args) > 0 && args[0] == "autostart" {
+		return RunAutostart(root, args[1:])
+	}
+
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-h", "--help":

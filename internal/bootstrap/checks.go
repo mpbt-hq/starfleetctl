@@ -41,6 +41,7 @@ var requiredDirs = []string{
 	filepath.Join("_WORK_", "agent-bus", "monitor-seen"),
 	filepath.Join("_WORK_", "agent-bus", "notify", ".popup-once"),
 	filepath.Join("_WORK_", "agent-claims"),
+	filepath.Join(".starfleet-ai", "conf"),
 }
 
 // requiredAllowEntries are the starfleetctl-specific permission rules
@@ -155,6 +156,11 @@ func Checks() []Check {
 			Name:   ".starfleet-ai/.gitignore (ephemeral dirs only)",
 			Verify: verifyStarfleetAIGitignore,
 			Fix:    fixStarfleetAIGitignore,
+		},
+		{
+			Name:   ".starfleet-ai/conf/web.yaml (web server config)",
+			Verify: verifyWebConf,
+			Fix:    fixWebConf,
 		},
 		{
 			Name:   ".gitignore: claude hooks entry",
@@ -1045,4 +1051,51 @@ func fixGitignoreClaudeHooks(b *Bootstrap) error {
 	}
 	content += gitignoreClaudeHooksEntry + "\n"
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+const webYamlTemplate = `# starfleetctl web server configuration
+# This file is managed by starfleetctl bootstrap --fix
+# Only created once on first bootstrap --fix; user edits are preserved.
+
+# Web server listen address (host:port)
+# Default: 0.0.0.0:8080
+# Alternative: 0.0.0.0:8090
+listen_addr: "0.0.0.0:8080"
+
+# Web server autostart (cron/systemd integration)
+# When enabled, starfleetctl web autostart will ensure the server is running
+# Default: false
+autostart_enabled: false
+
+# PID file location for daemon management
+# Default: .starfleet-ai/var/web.pid
+pid_file: ".starfleet-ai/var/web.pid"
+
+# Log file for web server daemon
+# Default: .starfleet-ai/logs/web.log
+log_file: ".starfleet-ai/logs/web.log"
+`
+
+func verifyWebConf(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, ".starfleet-ai", "conf", "web.yaml")
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, "missing .starfleet-ai/conf/web.yaml"
+		}
+		return false, fmt.Sprintf("stat error: %v", err)
+	}
+	return true, "present"
+}
+
+func fixWebConf(b *Bootstrap) error {
+	path := filepath.Join(b.Root, ".starfleet-ai", "conf", "web.yaml")
+	// Only create if missing - don't overwrite persistent user config
+	if _, err := os.Stat(path); err == nil {
+		return nil // already exists, leave user config alone
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(webYamlTemplate), 0o644)
 }
