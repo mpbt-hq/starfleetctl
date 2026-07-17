@@ -269,11 +269,144 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	}, nil
 }
 
+// runShipRun implements `session ship-run [--name <id>] [--model <model>] [-- <args...>]`.
+// It starts an opencode control-agent session in ship role (mirroring
+// run-opencode.ship) as a detached termctl terminal and returns immediately.
+// The caller may pre-allocate the ship name; otherwise a free name is assigned
+// and reserved here. State files (control pipe, log) live under
+// .starfleet-ai/var/ships/.
+func runShipRun(root string, args []string) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Print(`session ship-run [--name <id>] [--model <model>] [-- <args...>]
+
+Start an opencode control-agent session in ship role, detached in the
+background (like run-opencode.ship, but as a detachable termctl terminal).
+Returns immediately; the terminal keeps running until stopped via
+` + "`session stop <id>`" + `.
+
+Flags:
+  --name <id>     explicit ship ID (default: next free ship name). The caller
+                  may pre-allocate the name; if given, it is reserved here.
+  --model <model> opencode model (e.g. nvidia/nvidia/nemotron-3-nano-30b-a3b)
+  --              everything after is passed verbatim to opencode
+
+Example:
+  starfleetctl session ship-run --name Voyager --model my/model -- --workspace /foo
+`)
+		return 0
+	}
+
+	name := ""
+	model := ""
+	var oaArgs []string
+	for len(args) > 0 {
+		switch args[0] {
+		case "--name":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --name needs a value")
+				return 2
+			}
+			name = args[1]
+			args = args[2:]
+		case "--model":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --model needs a value")
+				return 2
+			}
+			model = args[1]
+			args = args[2:]
+		case "--":
+			oaArgs = args[1:]
+			args = nil
+		default:
+			oaArgs = args
+			args = nil
+		}
+	}
+
+	// Resolve / reserve the ship name. The caller may pass an already
+	// allocated name (reserved elsewhere); otherwise assign the next free one.
+	shipReg := shipnames.New(root)
+	if name == "" {
+		assigned, err := shipReg.AssignName()
+		if err != nil || assigned == "" {
+			fmt.Fprintln(os.Stderr, "session ship-run: failed to assign ship name:", err)
+			return 1
+		}
+		name = assigned
+	} else {
+		// Ensure a reservation exists for the given name so stop/gc are
+		// consistent (idempotent: keeps an existing reservation).
+		if err := shipReg.Reserve(name); err != nil {
+			fmt.Fprintln(os.Stderr, "session ship-run: failed to reserve name:", err)
+			return 1
+		}
+	}
+
+	// Refuse if a terminal with this ship ID is already registered.
+	reg := NewRegistry(root)
+	if _, exists := reg.Get(name); exists {
+		fmt.Fprintf(os.Stderr, "session ship-run: '%s' already running — stop it first (session stop %s)\n", name, name)
+		return 1
+	}
+
+	// State files under .starfleet-ai/var/ships/
+	stateDir := filepath.Join(root, ".starfleet-ai", "var", "ships")
+	pipePath := filepath.Join(stateDir, name+".pipe")
+	logPath := filepath.Join(stateDir, name+".log")
+
+	// Build the opencode ship command, mirroring run-opencode.ship.
+	const flagship = "Enterprise"
+	inner := "export STARFLEET_SHIP_ID=" + shellQuote(name) + "; "
+	inner += "export STARFLEET_ROLE=" + shellQuote("ship") + "; "
+	inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
+	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
+		`{"username":"`+name+`","instructions":[".starfleet-ai/agents.d/index.md"]}`) + "; "
+	inner += "cd " + shellQuote(root) + "; "
+	inner += "exec opencode"
+	if model != "" {
+		inner += " --model " + shellQuote(model)
+	}
+	inner += " --prompt " + shellQuote(
+		"You are fleet ship "+name+", report to flagship "+flagship+
+			". Fleet identity loaded via OPENCODE_CONFIG_CONTENT.") + " "
+	for _, a := range oaArgs {
+		inner += shellQuote(a) + " "
+	}
+
+	vars := &LaunchVars{
+		ShipID:      name,
+		PipePath:    pipePath,
+		ReleaseFull: "",
+		Client:      "opencode-ship",
+		ShellCmd:    inner,
+	}
+	// Override the log path to live under var/ships/.
+	if err := spawnSessionAt(root, vars, logPath); err != nil {
+		fmt.Fprintln(os.Stderr, "session ship-run:", err)
+		return 1
+	}
+
+	fmt.Printf("agent-run: launched ship '%s' (opencode, role=ship) detached.\n", name)
+	fmt.Printf("  pipe path    : %s\n", pipePath)
+	fmt.Printf("  attach       : starfleetctl session attach %s\n", name)
+	fmt.Printf("  stop         : starfleetctl session stop %s\n", name)
+	return 0
+}
+
 // spawnSession creates the termctl terminal for the given launch vars and posts
 // the initial agent-bus heartbeat. It spawns a child process that runs the
 // terminal and blocks on h.Run(), so the terminal survives after this function
 // returns.
 func spawnSession(root string, vars *LaunchVars) error {
+	return spawnSessionAt(root, vars, "")
+}
+
+// spawnSessionAt is spawnSession with an explicit log path. An empty logPath
+// defaults to .starfleet-ai/logs/<shipID>.log (the shared location used by
+// `session run`); callers that group state under .starfleet-ai/var/ pass their
+// own path (e.g. ship-run uses var/ships/<id>.log).
+func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 	// Register pipe path before starting (so attach/stop can find it)
 	reg := NewRegistry(root)
 	if err := reg.Put(vars.ShipID, vars.PipePath); err != nil {
@@ -300,9 +433,12 @@ func spawnSession(root string, vars *LaunchVars) error {
 
 	// Open log file for child output (so it doesn't inherit parent's stdout/stderr
 	// which get closed when starfleetctl exits)
-	logDir := filepath.Join(root, ".starfleet-ai", "logs")
-	_ = os.MkdirAll(logDir, 0o755)
-	logPath := filepath.Join(logDir, vars.ShipID+".log")
+	if logPath == "" {
+		logDir := filepath.Join(root, ".starfleet-ai", "logs")
+		_ = os.MkdirAll(logDir, 0o755)
+		logPath = filepath.Join(logDir, vars.ShipID+".log")
+	}
+	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
@@ -380,29 +516,34 @@ func runStop(root string, args []string) int {
 		}
 	}
 
-	if !ok {
-		fmt.Fprintf(os.Stderr, "agent-run: no such session: %s\n", id)
-		return 1
+	// Stop via termctl pipe (best effort). If the terminal already exited,
+	// its control pipe is gone and OpenPipe fails — that's fine, we still
+	// clean up the registry, heartbeat and ship-name reservation below.
+	if ok {
+		if rem, err := termctl.OpenPipe(pipePath); err == nil {
+			if err := rem.Stop(); err != nil {
+				fmt.Fprintf(os.Stderr, "agent-run: stop (pipe): %v\n", err)
+			}
+		}
 	}
 
-	// Stop via termctl pipe
-	rem, err := termctl.OpenPipe(pipePath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-run: open pipe %s: %v\n", pipePath, err)
-		return 1
-	}
-	if err := rem.Stop(); err != nil {
-		fmt.Fprintf(os.Stderr, "agent-run: stop failed: %v\n", err)
-		return 1
-	}
-
-	// Heartbeat cleanup + ship name release
+	// Heartbeat cleanup + ship name release. A session may already be dead
+	// (pipe gone, registry entry cleared by the terminal's OnExit) while the
+	// ship-name reservation still lingers; treat that as "already stopped"
+	// and clean up rather than erroring.
+	shipReg := shipnames.New(root)
+	_, nameReserved := shipReg.Lookup(id)
+	_ = reg.Delete(id)
 	os.Setenv("STARFLEET_SHIP_ID", id)
 	if bus, err := agentbus.New(root); err == nil {
 		_ = bus.DoClear()
 	}
-	shipReg := shipnames.New(root)
 	_ = shipReg.DoRelease(id)
+
+	if !ok && !nameReserved {
+		fmt.Fprintf(os.Stderr, "agent-run: no such session: %s\n", id)
+		return 1
+	}
 
 	fmt.Printf("agent-run: stopped session '%s'\n", id)
 	return 0

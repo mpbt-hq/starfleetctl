@@ -80,6 +80,37 @@ func writeReservation(path string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// Reserve atomically creates (or keeps) a reservation file for name, so the
+// name is treated as taken. It is idempotent: an existing reservation is left
+// untouched. Used when a caller pre-allocates a ship name and wants starfleetctl
+// to record the reservation on its behalf.
+func (r *Registry) Reserve(name string) error {
+	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
+		return err
+	}
+	path, err := r.shipFile(name)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil // already reserved
+	}
+	return writeReservation(path)
+}
+
+// Lookup reports whether a reservation for name currently exists.
+func (r *Registry) Lookup(name string) (string, bool) {
+	path, err := r.shipFile(name)
+	if err != nil {
+		return "", false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return firstLine(string(data)), true
+}
+
 // DoRelease implements `ship-names release <name>`.
 func (r *Registry) DoRelease(name string) error {
 	if name == "" {
