@@ -111,7 +111,7 @@
       <b>Neues Schiff</b>
       <div class="grid2" style="margin-top:8px">
         <input id="ns_name" placeholder="Name (leer = freier)">
-        <input id="ns_model" placeholder="Modell (z.B. nvidia/… / openai/gpt-4o)">
+        <select id="ns_model"><option value="">Modell wählen...</option></select>
       </div>
       <div class="grid2" style="margin-top:8px">
         <input id="ns_parent" placeholder="Übergeordnet (leer = Flagship)">
@@ -470,6 +470,45 @@ async function taskUnassign(slug){
   catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
+// loadModels fetches available models from /api/models and populates the
+// ns_model <select> dropdown, grouped by provider.
+async function loadModels(){
+  try {
+    const models = await api('/api/models');
+    const sel = document.getElementById('ns_model');
+    const prev = localStorage.getItem('fleet_model') || '';
+    // Group by provider
+    const groups = {};
+    for (const m of models) {
+      const p = m.provider || 'unknown';
+      if (!groups[p]) groups[p] = [];
+      groups[p].push(m);
+    }
+    // Build options
+    sel.innerHTML = '<option value="">Modell wählen...</option>';
+    for (const [provider, list] of Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0]))) {
+      const og = document.createElement('optgroup');
+      og.label = provider;
+      for (const m of list) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.label + ' (' + Math.round(m.context/1000) + 'k)';
+        opt.dataset.provider = m.provider;
+        if (m.id === prev) opt.selected = true;
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    }
+    // Auto-set provider on model change
+    sel.addEventListener('change', function(){
+      const opt = this.options[this.selectedIndex];
+      const prov = opt?.dataset?.provider || '';
+      if (prov) document.getElementById('ns_provider').value = prov;
+      localStorage.setItem('fleet_model', this.value);
+    });
+  } catch(e){ /* models.yaml not found — fallback to empty dropdown */ }
+}
+
 // shipLaunch starts a new ship from the web "Neues Schiff" form. Provider is
 // taken from the explicit select when set, otherwise derived server-side from
 // the model id. Web launches are auto-launches under the flagship.
@@ -484,7 +523,7 @@ async function shipLaunch(){
     const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(body)});
     toast('Schiff gestartet: '+(r.ship_id||name||'?'));
-    document.getElementById('ns_name').value=''; document.getElementById('ns_model').value='';
+    document.getElementById('ns_name').value=''; document.getElementById('ns_model').selectedIndex=0;
     document.getElementById('ns_parent').value=''; document.getElementById('ns_provider').value='';
     refresh();
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
@@ -727,7 +766,7 @@ async function webRestart(){
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
-loadIdentity().then(refresh);
+loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;

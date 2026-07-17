@@ -32,12 +32,30 @@ Shows every agent that has posted a heartbeat. Each card displays:
 - **Inbox count** (unacked directives)
 - **Task**, **Branch**, **Blocker**, **ETA**, **Progress bar** (if reported)
 - **STALE** pill if the heartbeat is older than `BUS_TTL` (default 15 min)
+- **Model** pill: shows the model ID or provider when reported
 
 Click a ship card to open the **ship detail panel** (slide-in from the right):
 
 - Full status details (project, task, progress, branch, blocker, ETA, note)
+- Model and provider information
 - Conversation history with that ship
 - Compose and send a message directly to the ship
+
+#### Launching a new ship
+
+The "Neues Schiff" form at the top of the Flotte tab lets you launch a
+background ship directly from the browser:
+
+- **Name** (optional): ship name; auto-assigned if left blank
+- **Modell** (dropdown): select from available models, grouped by provider.
+  The dropdown is populated from `/api/models` (backed by `models.yaml`).
+  The last-used model is remembered via `localStorage`.
+- **Provider** (dropdown): auto-set when a model is selected; can be overridden
+  manually. Options: openai, anthropic, google, nvidia, mistral, meta.
+- **Übergeordnet** (optional): parent ship for hierarchical ordering
+
+Model registry is generated from `opencode models --verbose` via the
+`gen-models-yaml` script (see [Model Registry](#model-registry) below).
 
 ### Tasks
 
@@ -90,6 +108,8 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 | `/api/task` | POST | Create or update a task (JSON body: `{title, desc, assign}` or `{slug, status}`) |
 | `/api/tell` | POST | Send a message (JSON body: `{target, text}` or form: `target` + `text`) |
 | `/api/identity` | GET | Viewing ship's identity (`{ship_id, handle, project}`) |
+| `/api/models` | GET | Available models for ship launch (from `models.yaml`) |
+| `/api/ship` | POST | Launch a new ship (JSON body: `{name, model, provider, parent}`) |
 
 ## Auto-Refresh
 
@@ -109,7 +129,42 @@ Browser  ──HTTP──▶  starfleetctl web
                        ├── /api/events    ──▶ agent-bus events.log
                        ├── /api/tasks     ──▶ dashboard/topics/*.md
                        ├── /api/tell      ──▶ agent-bus tell/broadcast
+                       ├── /api/models    ──▶ models.yaml
+                       ├── /api/ship      ──▶ session.LaunchShip()
                        └── /              ──▶ index.html (embedded)
+```
+
+## Model Registry
+
+The ship launch dropdown is populated from `.starfleet-ai/conf/models.yaml`,
+which is auto-generated from `opencode models --verbose`:
+
+```sh
+# Regenerate the model list (filters for text models with tool-call support)
+.starfleet-ai/bin/gen-models-yaml
+```
+
+The script outputs YAML with entries like:
+
+```yaml
+models:
+  - id: "opencode/big-pickle"
+    provider: "opencode"
+    label: "Big Pickle"
+    context: 200000
+```
+
+Only models with `toolcall: true` and `context > 0` are included (required
+for agent use). The web UI fetches this list via `GET /api/models` and groups
+models by provider in the dropdown.
+
+## Web Server Management
+
+```sh
+starfleetctl web                 # start (foreground)
+starfleetctl web autostart       # start as daemon (if not running)
+starfleetctl web autostart stop  # stop daemon
+starfleetctl web autostart restart  # kill + restart daemon
 ```
 
 ## Design Principles

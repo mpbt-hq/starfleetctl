@@ -69,6 +69,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/tell", s.apiTell)
 	s.mux.HandleFunc("/api/task", s.apiTask)
 	s.mux.HandleFunc("/api/identity", s.apiIdentity)
+	s.mux.HandleFunc("/api/models", s.apiModels)
 	s.mux.HandleFunc("/api/timers", s.apiTimers)
 	s.mux.HandleFunc("/api/timer", s.apiTimerCreate)
 	s.mux.HandleFunc("/api/timer/", s.apiTimerDispatch)
@@ -542,6 +543,57 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "ship_id": shipID})
+}
+
+// apiModels returns the list of available models from models.yaml.
+func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	modelsPath := s.Root + "/.starfleet-ai/conf/models.yaml"
+	data, err := os.ReadFile(modelsPath)
+	if err != nil {
+		writeErr(w, 404, "models.yaml not found — run gen-models-yaml")
+		return
+	}
+	// Parse YAML manually (minimal: extract id, provider, label, context)
+	type ModelEntry struct {
+		ID       string `json:"id"`
+		Provider string `json:"provider"`
+		Label    string `json:"label"`
+		Context  int    `json:"context"`
+	}
+	var models []ModelEntry
+	lines := strings.Split(string(data), "\n")
+	var cur ModelEntry
+	inModels := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "models:" {
+			inModels = true
+			continue
+		}
+		if !inModels {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- id:") {
+			if cur.ID != "" {
+				models = append(models, cur)
+			}
+			cur = ModelEntry{ID: strings.Trim(strings.TrimPrefix(trimmed, "- id:"), " \"" )}
+		} else if strings.HasPrefix(trimmed, "provider:") {
+			cur.Provider = strings.Trim(strings.TrimPrefix(trimmed, "provider:"), " \"")
+		} else if strings.HasPrefix(trimmed, "label:") {
+			cur.Label = strings.Trim(strings.TrimPrefix(trimmed, "label:"), " \"")
+		} else if strings.HasPrefix(trimmed, "context:") {
+			fmt.Sscanf(strings.TrimPrefix(trimmed, "context:"), "%d", &cur.Context)
+		}
+	}
+	if cur.ID != "" {
+		models = append(models, cur)
+	}
+	writeJSON(w, models)
 }
 
 // apiTimerWorker handles worker start/stop/status.

@@ -57,6 +57,9 @@ Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. S
 # Send a message to a specific agent
 starfleetctl agent-bus tell Voyager "run tests on branch feature-x"
 
+# Ship names with spaces MUST be quoted
+starfleetctl agent-bus tell 'Wild Mary' "check status"
+
 # Broadcast to all agents
 starfleetctl agent-bus broadcast "build is broken, hold off"
 
