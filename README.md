@@ -105,6 +105,13 @@ A fleet has one **flagship** (the control agent) and zero or more **ships**
 - Reports to the flagship (`STARFLEET_TARGET=Enterprise`)
 - Can delegate tasks to other ships or ask the flagship for decisions
 
+**Background Ships:**
+- Launched via the Web UI ("Neues Schiff" form) or `session ship-run`
+- Run as detached termctl terminals in the background
+- Visible on the fleet board with model/provider info
+- Start/stop/attach via `session ship-run`/`session stop`/`session attach`
+- Survive the launching session — managed independently
+
 **Automatic communication:** Once started via the launcher scripts, all
 ships share the same agent-bus and can communicate autonomously — sending
 directives (`tell`), broadcasting to all (`broadcast`), asking questions
@@ -131,7 +138,7 @@ ship's context automatically.
 | [Agent Bus](doc/agent-bus.md) | Cross-session messaging reference |
 | [Dashboard](doc/dashboard.md) | Project status tracking |
 | [PR Claim](doc/pr-claim.md) | PR-branch locking |
-| [Session](doc/session.md) | Tmux session management |
+| [Session](doc/session.md) | Agent session management (termctl) |
 | [GitHub](doc/github.md) | PR viewing, commenting, labeling |
 | [Hooks](doc/hooks.md) | Claude Code / opencode integration |
 | [Web UI](doc/web-ui.md) | Browser-based fleet dashboard |
@@ -146,7 +153,8 @@ starfleetctl web [--addr :8080]
 ```
 
 **Features:**
-- **Flotte** — live status board with progress bars, blockers, stale detection
+- **Flotte** — live status board with progress bars, blockers, stale detection, model/provider pills
+- **Neues Schiff** — launch background ships with model selection dropdown (grouped by provider)
 - **Bus** — cross-agent messages with thread view, inbox, questions
 - **Tasks** — create, assign, and track project tasks
 - **Funk** — send messages to any agent or broadcast to the fleet
@@ -165,7 +173,7 @@ Click any ship card to see its details and conversation history. See [doc/web-ui
 | `pr-claim` | Advisory PR-branch locks |
 | `ws-commit` | Atomic commit+push under lock |
 | `ship-names` | Session identity registry |
-| `session` | Tmux session lifecycle |
+| `session` | Agent session lifecycle |
 | `with-clone-lock` | Serialize git mutations |
 
 ### GitHub (read-only)

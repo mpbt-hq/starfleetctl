@@ -1,6 +1,6 @@
 # session
 
-Tmux session lifecycle management for agent sessions.
+Agent session management using termctl terminals.
 
 ## Synopsis
 
@@ -13,20 +13,14 @@ starfleetctl session <command> [args...]
 ### attach
 
 ```sh
-# Attach to a running session (shared read-write)
+# Attach to a running terminal (shared read-write)
 starfleetctl session attach Enterprise
 
-# Read-only attachment
-starfleetctl session attach Enterprise --read-only
-
-# Independent grouped window
-starfleetctl session attach Enterprise --independent
-
-# List running sessions
+# List running terminals
 starfleetctl session attach --list
 ```
 
-Resolves agent IDs, handles, tmux session names, or unique substrings.
+Resolves agent IDs, ship names, bus handles, or unique substrings.
 
 ### run
 
@@ -46,15 +40,27 @@ starfleetctl session run 25.2 \
 starfleetctl session run 25.2 --print
 ```
 
+### ship-run
+
+```sh
+# Start a background ship (detached termctl terminal)
+starfleetctl session ship-run --name Voyager
+
+# With specific model
+starfleetctl session ship-run --name Voyager --model opencode/big-pickle
+```
+
+Launches an opencode control-agent session in a detached terminal. The ship
+appears on the fleet board and participates in agent-bus communication.
+
 ### stop
 
 ```sh
 # Stop a session
 starfleetctl session stop Voyager
-starfleetctl session stop mpbt-opencode-Voyager
 ```
 
-Kills the tmux session, clears the agent-bus heartbeat, and releases the ship name.
+Kills the terminal, clears the agent-bus heartbeat, and releases the ship name.
 
 ### autoscale
 
