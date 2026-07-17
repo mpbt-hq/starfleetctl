@@ -1008,6 +1008,10 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 
 # Built binary (built from src/)
 /bin/starfleetctl
+
+# automatically pulled starfleetctl source & binaries
+/src/starfleetctl/
+/src/bin/
 `
 
 func verifyStarfleetAIGitignore(b *Bootstrap) (bool, string) {
