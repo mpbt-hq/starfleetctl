@@ -26,8 +26,18 @@ cleared:
   decision still pending), update its entry **in the same session**. Use the CLI (`starfleetctl
   dashboard` subcommands) for every read and write — never edit the index file directly.
 - **Notice something worth a look while doing unrelated work → park it immediately.** A suspicious
-  code path, a possible follow-up cleanup, an untriaged idea — add a dashboard Parked entry
-  right away rather than just mentioning it in the response and moving on.
+   code path, a possible follow-up cleanup, an untriaged idea — add a dashboard Parked entry
+   right away rather than just mentioning it in the response and moving on.
+
+- **"Take on / pick up / capture a (new) task" always means: write it into the dashboard, NOT just
+   say you'll do it.** When the praetor or another ship hands you a task, or you decide to track a
+   to-do for the fleet, run the sanctioned capture command — it records a `dashboard/topics/<slug>.md`
+   entry (never edit dashboard files by hand):
+   `starfleetctl task capture --title "<short title>" --desc "<what to do / acceptance criteria>"`
+   The command prints `task-captured: slug=…`; forward that summary to the sender. "Aufgabe
+   aufnehmen", "neue Aufgabe", "track this" and "capture a task" all mean the same thing. If the task
+   is meant for another ship, pass `--assign <ship>`; otherwise leave it open. Small/fast models:
+   this is the ONLY correct way to accept a task — do not just acknowledge it in chat.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
