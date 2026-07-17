@@ -6,7 +6,7 @@
 //
 // Timers come in two flavours:
 //
-//   - Ephemeral: stored under _WORK_/agent-bus/timers/ — lost on workspace reset.
+//   - Ephemeral: stored under .starfleet-ai/var/timers/ — lost on workspace reset.
 //     Default for --every and --at schedules.
 //
 //   - Persistent: stored under .starfleet-ai/conf/timers/ (config) and

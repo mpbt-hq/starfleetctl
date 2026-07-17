@@ -663,7 +663,7 @@ type TimerDir struct {
 // TimerDirs returns all timer directories for the given workspace root.
 func TimerDirs(root string) []TimerDir {
 	return []TimerDir{
-		{filepath.Join(root, "_WORK_", "agent-bus", "timers"), "e"},
+		{filepath.Join(root, ".starfleet-ai", "var", "timers"), "e"},
 		{filepath.Join(root, ".starfleet-ai", "conf", "timers"), "p"},
 	}
 }
@@ -673,7 +673,7 @@ func PickStore(root string, persistent bool) (*Store, error) {
 	if persistent {
 		return NewStore(filepath.Join(root, ".starfleet-ai", "conf", "timers"), "p")
 	}
-	return NewStore(filepath.Join(root, "_WORK_", "agent-bus", "timers"), "e")
+	return NewStore(filepath.Join(root, ".starfleet-ai", "var", "timers"), "e")
 }
 
 // NotifyWorker sends SIGHUP to the running timer worker (if any) for immediate pickup.

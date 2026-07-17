@@ -60,7 +60,7 @@ func RunWorker(root string) error {
 	defer logFile.Close()
 
 	// Build stores for ephemeral and persistent timers.
-	ephemeralDir := filepath.Join(root, "_WORK_", "agent-bus", "timers")
+	ephemeralDir := filepath.Join(root, ".starfleet-ai", "var", "timers")
 	persistentConfDir := filepath.Join(root, ".starfleet-ai", "conf", "timers")
 	persistentVarDir := filepath.Join(root, ".starfleet-ai", "var", "timers")
 	_ = os.MkdirAll(persistentConfDir, 0o755)
