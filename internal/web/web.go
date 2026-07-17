@@ -22,6 +22,7 @@ import (
 	"github.com/metux/starfleetctl/internal/agentbus"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/task"
 	"github.com/metux/starfleetctl/internal/timer"
 )
@@ -73,6 +74,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/timer/", s.apiTimerDispatch)
 	s.mux.HandleFunc("/api/timer/worker", s.apiTimerWorker)
 	s.mux.HandleFunc("/api/web/restart", s.apiWebRestart)
+	s.mux.HandleFunc("/api/ship", s.apiShipLaunch)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -495,6 +497,51 @@ func (s *Server) apiWebRestart(w http.ResponseWriter, r *http.Request) {
 // the port after the current process is killed.
 func webRestart(root string) error {
 	return Restart(root)
+}
+
+// apiShipLaunch POSTs a new ship (the web console's "new ship" action).
+// Body: {"name":"", "model":"provider/model", "parent":""}.
+//   name   — optional; empty => next free ship name
+//   model  — optional opencode model id (provider derived from it)
+//   parent — optional ship to hang under; empty => flagship (Enterprise),
+//            since a web-GUI launch is treated as an auto-launch under the
+//            flagship. The launch_type is always "auto" for web launches.
+// Delegates to session.LaunchShip — the same code path as `session ship-run`,
+// so the detached termctl terminal, registry, and heartbeat are identical.
+func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	var p struct {
+		Name     string `json:"name"`
+		Model    string `json:"model"`
+		Provider string `json:"provider"`
+		Parent   string `json:"parent"`
+	}
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeErr(w, 400, "bad json")
+			return
+		}
+	} else {
+		p.Name = r.FormValue("name")
+		p.Model = r.FormValue("model")
+		p.Provider = r.FormValue("provider")
+		p.Parent = r.FormValue("parent")
+	}
+	shipID, err := session.LaunchShip(s.Root, session.LaunchShipOpts{
+		Name:       p.Name,
+		Model:      p.Model,
+		Provider:   p.Provider,
+		Parent:     p.Parent,
+		LaunchType: "auto",
+	})
+	if err != nil {
+		writeErr(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "ship_id": shipID})
 }
 
 // apiTimerWorker handles worker start/stop/status.

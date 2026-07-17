@@ -25,6 +25,12 @@ type LaunchVars struct {
 	ShellCmd    string // the full shell command to run in the terminal
 	Tier        string
 	Supervisor  string
+	// Launch metadata recorded in the initial agent-bus heartbeat so the
+	// board/web console can show the command hierarchy and provider/model.
+	LaunchType string // "terminal" | "background" | "auto"
+	Parent     string // ship this one was launched under ("" = flagship)
+	Provider   string // model provider (derived from Model when empty)
+	Model      string // model id (opencode --model value)
 }
 
 // runLaunch implements `session run <release> [flags...] [-- <args...>]`.
@@ -112,6 +118,9 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	permissionMode := ""
 	tier := ""
 	supervisor := ""
+	model := ""
+	parent := ""
+	launchType := "background"
 	var clientArgs []string
 
 	for len(args) > 0 {
@@ -145,6 +154,24 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 				return nil, fmt.Errorf("session run: --supervisor needs a value")
 			}
 			supervisor = args[1]
+			args = args[2:]
+		case "--model":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --model needs a value")
+			}
+			model = args[1]
+			args = args[2:]
+		case "--parent":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --parent needs a value")
+			}
+			parent = args[1]
+			args = args[2:]
+		case "--launch-type":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --launch-type needs a value")
+			}
+			launchType = args[1]
 			args = args[2:]
 		case "--":
 			args = args[1:]
@@ -266,6 +293,10 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		ShellCmd:    inner,
 		Tier:        tier,
 		Supervisor:  supervisor,
+		LaunchType:  launchType,
+		Parent:      parent,
+		Provider:    providerFromModel(model),
+		Model:       model,
 	}, nil
 }
 
@@ -286,8 +317,15 @@ Returns immediately; the terminal keeps running until stopped via
 
 Flags:
   --name <id>     explicit ship ID (default: next free ship name). The caller
-                  may pre-allocate the name; if given, it is reserved here.
-  --model <model> opencode model (e.g. nvidia/nvidia/nemotron-3-nano-30b-a3b)
+                   may pre-allocate the name; if given, it is reserved here.
+  --model <model> opencode model (e.g. nvidia/nvidia/nemotron-3-nano-30b-a3b).
+                   The provider is derived from the model id (the part before
+                   the first '/'); pass --provider to override.
+  --parent <ship> ship this one is launched under (default: flagship Enterprise).
+                   Auto-launches from the web GUI hang under the flagship; a ship
+                   spawned by another AI lists that ship as parent.
+  --launch-type <t>  how the ship was started: "terminal" (direct at a terminal),
+                   "background" (detached, the default here), or "auto" (web/timer).
   --              everything after is passed verbatim to opencode
 
 Example:
@@ -298,6 +336,8 @@ Example:
 
 	name := ""
 	model := ""
+	parent := ""
+	launchType := "background"
 	var oaArgs []string
 	for len(args) > 0 {
 		switch args[0] {
@@ -315,6 +355,20 @@ Example:
 			}
 			model = args[1]
 			args = args[2:]
+		case "--parent":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --parent needs a value")
+				return 2
+			}
+			parent = args[1]
+			args = args[2:]
+		case "--launch-type":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --launch-type needs a value")
+				return 2
+			}
+			launchType = args[1]
+			args = args[2:]
 		case "--":
 			oaArgs = args[1:]
 			args = nil
@@ -324,30 +378,69 @@ Example:
 		}
 	}
 
+	shipID, err := LaunchShip(root, LaunchShipOpts{
+		Name:      name,
+		Model:     model,
+		Parent:    parent,
+		LaunchType: launchType,
+		ExtraArgs: oaArgs,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "session ship-run:", err)
+		return 1
+	}
+
+	fmt.Printf("agent-run: launched ship '%s' (opencode, role=ship) detached.\n", shipID)
+	fmt.Printf("  pipe path    : (see agent-bus board / session attach %s)\n", shipID)
+	fmt.Printf("  attach       : starfleetctl session attach %s\n", shipID)
+	fmt.Printf("  stop         : starfleetctl session stop %s\n", shipID)
+	return 0
+}
+
+// LaunchShipOpts are the inputs to LaunchShip.
+type LaunchShipOpts struct {
+	Name       string   // explicit ship ID; empty => next free name
+	Model      string   // opencode --model value (provider derived from it)
+	Provider   string   // explicit provider override (when the model id has none)
+	Parent     string   // ship launched under; empty => flagship
+	LaunchType string   // "terminal" | "background" | "auto"; empty => "background"
+	ExtraArgs  []string // passed verbatim to opencode after --prompt
+}
+
+// LaunchShip starts a detached opencode control-agent ship and returns its
+// assigned ship ID. It is the in-process core of `session ship-run`, also used
+// by the web console's "new ship" action. The terminal survives the caller's
+// return (it runs in a detached child process).
+func LaunchShip(root string, o LaunchShipOpts) (string, error) {
+	name := o.Name
+	model := o.Model
+	parent := o.Parent
+	launchType := o.LaunchType
+	if launchType == "" {
+		launchType = "background"
+	}
+
 	// Resolve / reserve the ship name. The caller may pass an already
 	// allocated name (reserved elsewhere); otherwise assign the next free one.
 	shipReg := shipnames.New(root)
 	if name == "" {
 		assigned, err := shipReg.AssignName()
 		if err != nil || assigned == "" {
-			fmt.Fprintln(os.Stderr, "session ship-run: failed to assign ship name:", err)
-			return 1
+			return "", fmt.Errorf("failed to assign ship name: %w", err)
 		}
 		name = assigned
 	} else {
 		// Ensure a reservation exists for the given name so stop/gc are
 		// consistent (idempotent: keeps an existing reservation).
 		if err := shipReg.Reserve(name); err != nil {
-			fmt.Fprintln(os.Stderr, "session ship-run: failed to reserve name:", err)
-			return 1
+			return "", fmt.Errorf("failed to reserve name: %w", err)
 		}
 	}
 
 	// Refuse if a terminal with this ship ID is already registered.
 	reg := NewRegistry(root)
 	if _, exists := reg.Get(name); exists {
-		fmt.Fprintf(os.Stderr, "session ship-run: '%s' already running — stop it first (session stop %s)\n", name, name)
-		return 1
+		return "", fmt.Errorf("'%s' already running — stop it first (session stop %s)", name, name)
 	}
 
 	// State files under .starfleet-ai/var/ships/
@@ -370,7 +463,7 @@ Example:
 	inner += " --prompt " + shellQuote(
 		"You are fleet ship "+name+", report to flagship "+flagship+
 			". Fleet identity loaded via OPENCODE_CONFIG_CONTENT.") + " "
-	for _, a := range oaArgs {
+	for _, a := range o.ExtraArgs {
 		inner += shellQuote(a) + " "
 	}
 
@@ -380,18 +473,19 @@ Example:
 		ReleaseFull: "",
 		Client:      "opencode-ship",
 		ShellCmd:    inner,
+		LaunchType:  launchType,
+		Parent:      parent,
+		Provider:    o.Provider,
+		Model:       model,
+	}
+	if vars.Provider == "" {
+		vars.Provider = providerFromModel(model)
 	}
 	// Override the log path to live under var/ships/.
 	if err := spawnSessionAt(root, vars, logPath); err != nil {
-		fmt.Fprintln(os.Stderr, "session ship-run:", err)
-		return 1
+		return "", err
 	}
-
-	fmt.Printf("agent-run: launched ship '%s' (opencode, role=ship) detached.\n", name)
-	fmt.Printf("  pipe path    : %s\n", pipePath)
-	fmt.Printf("  attach       : starfleetctl session attach %s\n", name)
-	fmt.Printf("  stop         : starfleetctl session stop %s\n", name)
-	return 0
+	return name, nil
 }
 
 // spawnSession creates the termctl terminal for the given launch vars and posts
@@ -469,7 +563,24 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 		os.Setenv("PROJECT", vars.ReleaseFull)
 	}
 	if bus, err := agentbus.New(root); err == nil {
-		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")", agentbus.StatusPatch{})
+		provider := vars.Provider
+		if provider == "" {
+			provider = providerFromModel(vars.Model)
+		}
+		launchType := vars.LaunchType
+		if launchType == "" {
+			launchType = "background"
+		}
+		parent := vars.Parent
+		if parent == "" {
+			parent = shipnames.Flagship
+		}
+		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")", agentbus.StatusPatch{
+			LaunchType: launchType,
+			Parent:     parent,
+			Provider:   provider,
+			Model:      vars.Model,
+		})
 	}
 	return nil
 }

@@ -26,12 +26,16 @@ type boardEntryJSON struct {
 	Stale      bool   `json:"stale"`
 	// Structured detail (status/<ship>.json); absent when the ship never
 	// reported one. Mirrors the fields of StatusDetail.
-	Task     string `json:"task,omitempty"`
-	Progress int    `json:"progress,omitempty"`
-	Blocker  string `json:"blocker,omitempty"`
-	ETA      string `json:"eta,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	Updated  string `json:"updated,omitempty"`
+	Task       string `json:"task,omitempty"`
+	Progress   int    `json:"progress,omitempty"`
+	Blocker    string `json:"blocker,omitempty"`
+	ETA        string `json:"eta,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	LaunchType string `json:"launch_type,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Updated    string `json:"updated,omitempty"`
 }
 
 // BoardEntries returns the same board data that `agent-bus board --json`
@@ -57,6 +61,10 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 			e.Blocker = d.Blocker
 			e.ETA = d.ETA
 			e.Branch = d.Branch
+			e.LaunchType = d.LaunchType
+			e.Parent = d.Parent
+			e.Provider = d.Provider
+			e.Model = d.Model
 			e.Updated = d.Updated
 		}
 		out = append(out, e)

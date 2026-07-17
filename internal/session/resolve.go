@@ -15,6 +15,17 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
+// providerFromModel derives a human-readable provider name from a model id.
+// opencode model ids are typically "provider/.../model" or "vendor/model";
+// the leading path component (before the first '/') is the provider. Falls
+// back to "" when the id has no provider prefix.
+func providerFromModel(model string) string {
+	if i := strings.IndexByte(model, '/'); i >= 0 {
+		return model[:i]
+	}
+	return ""
+}
+
 const sessPrefix = "mpbt-"
 
 // tmuxSafe sanitizes a string to tmux-safe characters (same as bash's

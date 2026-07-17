@@ -158,7 +158,8 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	// Structured detail: only when at least one detail flag was given, so a
 	// plain `status <state>` (legacy) leaves any existing JSON untouched.
 	if patch.Task != "" || patch.Progress >= 0 || patch.Blocker != "" ||
-		patch.ETA != "" || patch.Branch != "" || patch.Note != "" {
+		patch.ETA != "" || patch.Branch != "" || patch.Note != "" ||
+		patch.LaunchType != "" || patch.Parent != "" || patch.Provider != "" || patch.Model != "" {
 		if err := b.WriteStatusDetail(b.ShipID, state, patch); err != nil {
 			return err
 		}

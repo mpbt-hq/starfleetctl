@@ -289,6 +289,26 @@ func parseStatusArgs(args []string) (state, note string, patch StatusPatch) {
 				patch.Note = rest[i+1]
 				i++
 			}
+		case a == "--launch-type":
+			if i+1 < len(rest) {
+				patch.LaunchType = rest[i+1]
+				i++
+			}
+		case a == "--parent":
+			if i+1 < len(rest) {
+				patch.Parent = rest[i+1]
+				i++
+			}
+		case a == "--provider":
+			if i+1 < len(rest) {
+				patch.Provider = rest[i+1]
+				i++
+			}
+		case a == "--model":
+			if i+1 < len(rest) {
+				patch.Model = rest[i+1]
+				i++
+			}
 		case strings.HasPrefix(a, "--"):
 			// unknown flag: ignore
 		default:

@@ -107,6 +107,24 @@
 
 <main>
   <section class="page on" id="status">
+    <div class="card">
+      <b>Neues Schiff</b>
+      <div class="grid2" style="margin-top:8px">
+        <input id="ns_name" placeholder="Name (leer = freier)">
+        <input id="ns_model" placeholder="Modell (z.B. nvidia/… / openai/gpt-4o)">
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <input id="ns_parent" placeholder="Übergeordnet (leer = Flagship)">
+        <select id="ns_provider"><option value="">Provider (aus Modell)</option>
+          <option value="openai">openai</option>
+          <option value="anthropic">anthropic</option>
+          <option value="google">google</option>
+          <option value="nvidia">nvidia</option>
+          <option value="mistral">mistral</option>
+          <option value="meta">meta</option></select>
+      </div>
+      <div class="actions"><button onclick="shipLaunch()">Starten</button></div>
+    </div>
     <div class="card" id="board"></div>
   </section>
 
@@ -289,6 +307,11 @@ async function loadBoard(){
       if (r.branch) detail.push(`<span class="pill dim">${esc(r.branch)}</span>`);
       if (r.blocker) detail.push(`<span class="pill bad">⛔ ${esc(r.blocker)}</span>`);
       if (r.eta) detail.push(`<span class="muted">ETA ${esc(r.eta)}</span>`);
+      const meta = [];
+      if (r.model) meta.push(`<span class="pill dim">🧠 ${esc(r.model)}</span>`);
+      else if (r.provider) meta.push(`<span class="pill dim">🧠 ${esc(r.provider)}</span>`);
+      if (r.launch_type) meta.push(`<span class="pill dim">${esc(r.launch_type)}</span>`);
+      if (r.parent) meta.push(`<span class="muted">↳ ${esc(r.parent)}</span>`);
       return `<div class="card ship${stale}" onclick="openShip('${esc(r.agent)}')">
         <div class="row"><span class="agent grow">${esc(r.agent)}</span>
           <span class="pill ${cls}">${esc(st)}</span></div>
@@ -299,6 +322,7 @@ async function loadBoard(){
           ${r.stale?'<span class="pill bad">STALE</span>':''}
         </div>
         ${detail.length?`<div class="row" style="margin-top:6px">${detail.join(' ')}</div>`:''}
+        ${meta.length?`<div class="row" style="margin-top:6px">${meta.join(' ')}</div>`:''}
         ${bar?`<div class="row" style="margin-top:6px;align-items:center">${bar}</div>`:''}
         ${r.note?`<div class="muted" style="margin-top:6px">${esc(r.note)}</div>`:''}
       </div>`;
@@ -353,6 +377,10 @@ async function loadShip(name){
     add('Branch', s.branch);
     add('Blocker', s.blocker);
     add('ETA', s.eta);
+    add('Modell', s.model);
+    add('Provider', s.provider);
+    add('Launch-Typ', s.launch_type);
+    add('Übergeordnet', s.parent);
     add('Note', s.note);
     add('Zuletzt', s.updated ? age(s.age_seconds)+' her' : '');
     document.getElementById('ship_detail').innerHTML = kv.join('') || '<span class="muted">keine Detaildaten</span>';
@@ -440,6 +468,26 @@ async function taskUnassign(slug){
   const fd = new FormData(); fd.set('slug', slug); fd.set('unassign','1');
   try { await api('/api/task', {method:'POST', body: fd}); toast('frei'); loadTasks(); }
   catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
+// shipLaunch starts a new ship from the web "Neues Schiff" form. Provider is
+// taken from the explicit select when set, otherwise derived server-side from
+// the model id. Web launches are auto-launches under the flagship.
+async function shipLaunch(){
+  const name = document.getElementById('ns_name').value.trim();
+  const model = document.getElementById('ns_model').value.trim();
+  const parent = document.getElementById('ns_parent').value.trim();
+  const provider = document.getElementById('ns_provider').value.trim();
+  const body = { name, model, parent };
+  if (provider) body.provider = provider;
+  try {
+    const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)});
+    toast('Schiff gestartet: '+(r.ship_id||name||'?'));
+    document.getElementById('ns_name').value=''; document.getElementById('ns_model').value='';
+    document.getElementById('ns_parent').value=''; document.getElementById('ns_provider').value='';
+    refresh();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
 let threadMode = false;

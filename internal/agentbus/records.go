@@ -39,19 +39,43 @@ type StatusDetail struct {
 	ETA      string `json:"eta,omitempty"`   // free-form, e.g. "2026-07-17" or "~30m"
 	Branch   string `json:"branch,omitempty"` // PR/branch the ship is on
 	Note     string `json:"note,omitempty"`
-	Updated  string `json:"updated"` // ISO timestamp, set on every write
+
+	// Launch metadata — how/where this ship was started, so the board and web
+	// console can show the command hierarchy and let the user pick an
+	// alternate provider/model when one is overloaded/quota'd.
+	//
+	//   LaunchType: "terminal" (started directly at a terminal),
+	//               "background" (detached, e.g. session run/ship-run),
+	//               "auto" (launched via web GUI or timer).
+	//   Parent:     the ship this one was launched under. Auto-launches from
+	//               the web GUI hang under the flagship (Enterprise); a ship
+	//               spawned by another AI/ship lists that ship as parent.
+	//   Provider:   model provider (e.g. "openai", "anthropic", "nvidia"),
+	//               derived from the model string when not given explicitly.
+	//   Model:      the model id the ship runs (e.g. "gpt-4o", a
+	//               "nvidia/..." style id, etc.).
+	LaunchType string `json:"launch_type,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Model      string `json:"model,omitempty"`
+
+	Updated string `json:"updated"` // ISO timestamp, set on every write
 }
 
 // statusPatch carries only the fields a `status report` invocation wants to
 // set. Progress < 0 means "not specified" so a caller can distinguish "leave
 // unchanged" from "set to 0".
 type StatusPatch struct {
-	Task     string
-	Progress int
-	Blocker  string
-	ETA      string
-	Branch   string
-	Note     string
+	Task       string
+	Progress   int
+	Blocker    string
+	ETA        string
+	Branch     string
+	Note       string
+	LaunchType string
+	Parent     string
+	Provider   string
+	Model      string
 }
 
 // msgRecord mirrors one msgs/<id>.tsv line:
@@ -179,6 +203,18 @@ func (b *Bus) WriteStatusDetail(agent, state string, patch StatusPatch) error {
 	}
 	if patch.Note != "" {
 		cur.Note = patch.Note
+	}
+	if patch.LaunchType != "" {
+		cur.LaunchType = patch.LaunchType
+	}
+	if patch.Parent != "" {
+		cur.Parent = patch.Parent
+	}
+	if patch.Provider != "" {
+		cur.Provider = patch.Provider
+	}
+	if patch.Model != "" {
+		cur.Model = patch.Model
 	}
 	if cur.State == "" {
 		cur.State = state
