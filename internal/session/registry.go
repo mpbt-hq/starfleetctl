@@ -13,27 +13,19 @@ import (
 )
 
 // Registry is the caller-owned (starfleetctl) name → termctl pipe path map.
-// It lives under _WORK_/session-registry.txt and is managed entirely by
+// It lives under .starfleet-ai/session-registry.txt and is managed entirely by
 // starfleetctl — termctl knows nothing about it.
 type Registry struct {
 	root string
 	mu   sync.Mutex
 }
 
-var registryOnce struct {
-	sync.Once
-	r *Registry
-}
-
 func NewRegistry(root string) *Registry {
-	registryOnce.Do(func() {
-		registryOnce.r = &Registry{root: root}
-	})
-	return registryOnce.r
+	return &Registry{root: root}
 }
 
 func (r *Registry) path() string {
-	return filepath.Join(r.root, "_WORK_", "session-registry.txt")
+	return filepath.Join(r.root, ".starfleet-ai", "session-registry.txt")
 }
 
 // Get returns the pipe path for a ship ID, or ("", false) if not found.

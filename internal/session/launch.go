@@ -6,7 +6,9 @@ package session
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
 	"github.com/metux/starfleetctl/internal/agentbus"
@@ -19,6 +21,7 @@ type LaunchVars struct {
 	PipePath    string // termctl control pipe path
 	ReleaseFull string
 	Client      string
+	ShellCmd    string // the full shell command to run in the terminal
 	Tier        string
 	Supervisor  string
 }
@@ -198,8 +201,8 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		return nil, nil
 	}
 
-	// termctl control pipe path (caller-chosen, under _WORK_)
-	pipePath := filepath.Join(root, "_WORK_", "term-pipes", shipID+".pipe")
+	// termctl control pipe path (caller-chosen, under .starfleet-ai)
+	pipePath := filepath.Join(root, ".starfleet-ai", "term-pipes", shipID+".pipe")
 
 	var clientPath string
 	switch client {
@@ -253,13 +256,16 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		PipePath:    pipePath,
 		ReleaseFull: project,
 		Client:      client,
+		ShellCmd:    inner,
 		Tier:        tier,
 		Supervisor:  supervisor,
 	}, nil
 }
 
 // spawnSession creates the termctl terminal for the given launch vars and posts
-// the initial agent-bus heartbeat.
+// the initial agent-bus heartbeat. It spawns a child process that runs the
+// terminal and blocks on h.Run(), so the terminal survives after this function
+// returns.
 func spawnSession(root string, vars *LaunchVars) error {
 	// Register pipe path before starting (so attach/stop can find it)
 	reg := NewRegistry(root)
@@ -272,32 +278,46 @@ func spawnSession(root string, vars *LaunchVars) error {
 		return fmt.Errorf("mkdir pipe dir: %w", err)
 	}
 
-	// Build termctl handle
-	opts := []termctl.Opt{
-		termctl.WithName(vars.ShipID),
-		termctl.WithControlPipe(vars.PipePath),
-		termctl.WithShell("/bin/sh"),
-		termctl.WithExtraEnv([]string{
-			"STARFLEET_SHIP_ID=" + vars.ShipID,
-			"STARFLEET_AGENT_HANDLE=" + vars.ShipID, // termctl doesn't use this but agent inside will
-		}),
-		termctl.WithOnExit(func() {
-			// Cleanup registry on shell exit
-			_ = reg.Delete(vars.ShipID)
-		}),
-	}
-
-	h, err := termctl.New(opts...)
+	// Spawn child process that runs termctl-run and blocks on h.Run()
+	// The child inherits the workspace root via MPBT_WORKSPACE_ROOT
+	self, err := os.Executable()
 	if err != nil {
-		_ = reg.Delete(vars.ShipID)
-		return fmt.Errorf("termctl.New: %w", err)
+		return fmt.Errorf("os.Executable: %w", err)
 	}
 
-	// Start detached (no initial attach). The shell runs in background.
-	// Run() blocks until shell exits; we run it in a goroutine.
-	go func() {
-		_ = h.Run()
-	}()
+	// Build environment for child: include workspace root and ship ID
+	childEnv := append(os.Environ(),
+		"MPBT_WORKSPACE_ROOT="+root,
+		"STARFLEET_SHIP_ID="+vars.ShipID,
+	)
+
+	// Open log file for child output (so it doesn't inherit parent's stdout/stderr
+	// which get closed when starfleetctl exits)
+	logDir := filepath.Join(root, ".starfleet-ai", "logs")
+	_ = os.MkdirAll(logDir, 0o755)
+	logPath := filepath.Join(logDir, vars.ShipID+".log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	cmd := exec.Command(self, "termctl-run", vars.ShipID, vars.PipePath, vars.ShellCmd)
+	cmd.Env = childEnv
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	// Run in a new session so the child is independent of the parent
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true,
+	}
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		_ = reg.Delete(vars.ShipID)
+		return fmt.Errorf("spawn termctl-run: %w", err)
+	}
+
+	// Don't wait - the child process runs independently and cleans up
+	// registry on exit via its own OnExit callback.
+	// The log file will be closed when the child exits (we don't close it here).
 
 	// Post initial heartbeat
 	os.Setenv("STARFLEET_SHIP_ID", vars.ShipID)
@@ -377,5 +397,62 @@ func runStop(root string, args []string) int {
 	_ = shipReg.DoRelease(id)
 
 	fmt.Printf("agent-run: stopped session '%s'\n", id)
+	return 0
+}
+
+// RunTermctl runs a termctl terminal in the foreground (blocking on h.Run()).
+// This is meant to be spawned as a child process by `session run`.
+// Args: <ship-id> <pipe-path> <shell-command>
+func RunTermctl(root string, args []string) int {
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "termctl-run: need <ship-id> <pipe-path> <shell-cmd>")
+		return 2
+	}
+	shipID := args[0]
+	pipePath := args[1]
+	shellCmd := args[2]
+
+	fmt.Fprintf(os.Stderr, "termctl-run: shipID=%s pipePath=%s shellCmd=%s\n", shipID, pipePath, shellCmd)
+
+	// The shellCmd is a script like "export FOO=bar; exec bash -i"
+	// We run it via /bin/sh -c "shellCmd"
+	shellBin := "/bin/sh"
+	shellArgs := []string{"-c", shellCmd}
+
+	// Ensure pipe directory exists (termctl creates the FIFO but needs the dir)
+	if err := os.MkdirAll(filepath.Dir(pipePath), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "termctl-run: mkdir pipe dir: %v\n", err)
+		return 1
+	}
+
+	reg := NewRegistry(root)
+
+	// Build termctl handle
+	h, err := termctl.New(
+		termctl.WithName(shipID),
+		termctl.WithControlPipe(pipePath),
+		termctl.WithShell(shellBin),
+		termctl.WithShellArgs(shellArgs),
+		termctl.WithExtraEnv([]string{
+			"STARFLEET_SHIP_ID=" + shipID,
+		}),
+		termctl.WithOnExit(func() {
+			// Cleanup registry on shell exit
+			fmt.Fprintf(os.Stderr, "termctl-run: OnExit callback for %s\n", shipID)
+			_ = reg.Delete(shipID)
+		}),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "termctl.New: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(os.Stderr, "termctl-run: starting Run()\n")
+	// Block until shell exits
+	if err := h.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "termctl.Run: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "termctl-run: Run() returned\n")
 	return 0
 }

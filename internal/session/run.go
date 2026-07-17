@@ -152,11 +152,7 @@ func attachPipe(pipePath, mode string) error {
 		display = ":0"
 	}
 
-	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
-		return fmt.Errorf("agent-attach: not a terminal — attach from an interactive shell")
-	}
-
-	fmt.Printf("agent-attach: attaching to terminal via pipe %s (mode: shared). Detach with Ctrl-b d; the agent keeps running.\n", pipePath)
+	fmt.Printf("agent-attach: attaching to terminal via pipe %s (mode: shared) on display %s. Detach with SIGUSR1 or 'detach' via control pipe; the agent keeps running.\n", pipePath, display)
 
 	if err := rem.Attach(display); err != nil {
 		return fmt.Errorf("attach: %w", err)
