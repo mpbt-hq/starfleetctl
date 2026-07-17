@@ -583,6 +583,7 @@ func RunTermctl(root string, args []string) int {
 	// Build termctl handle
 	h, err := termctl.New(
 		termctl.WithName(shipID),
+		termctl.WithTitle("starfleet: "+shipID),
 		termctl.WithControlPipe(pipePath),
 		termctl.WithShell(shellBin),
 		termctl.WithShellArgs(shellArgs),
