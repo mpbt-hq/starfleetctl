@@ -152,6 +152,11 @@ func Checks() []Check {
 			Fix:    fixClaudeHooks,
 		},
 		{
+			Name:   ".starfleet-ai/.gitignore (ephemeral dirs only)",
+			Verify: verifyStarfleetAIGitignore,
+			Fix:    fixStarfleetAIGitignore,
+		},
+		{
 			Name:   ".gitignore: claude hooks entry",
 			Verify: verifyGitignoreClaudeHooks,
 			Fix:    fixGitignoreClaudeHooks,
@@ -984,6 +989,37 @@ func fixClaudeHooks(b *Bootstrap) error {
 }
 
 const gitignoreClaudeHooksEntry = "/.claude/hooks/"
+
+const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persisted to git)
+/agent-bus/
+/logs/
+/var/
+/term-pipes/
+
+# Runtime state files
+/session-registry.txt
+/DASHBOARD.md
+
+# Built binary (built from src/)
+/bin/starfleetctl
+`
+
+func verifyStarfleetAIGitignore(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, ".starfleet-ai", ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, "missing .starfleet-ai/.gitignore"
+	}
+	if string(data) == starfleetAIGitignoreContent {
+		return true, "present, up to date"
+	}
+	return false, "content differs from template"
+}
+
+func fixStarfleetAIGitignore(b *Bootstrap) error {
+	path := filepath.Join(b.Root, ".starfleet-ai", ".gitignore")
+	return os.WriteFile(path, []byte(starfleetAIGitignoreContent), 0o644)
+}
 
 func verifyGitignoreClaudeHooks(b *Bootstrap) (bool, string) {
 	path := filepath.Join(b.Root, ".gitignore")
