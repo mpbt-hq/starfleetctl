@@ -453,6 +453,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	inner := "export STARFLEET_SHIP_ID=" + shellQuote(name) + "; "
 	inner += "export STARFLEET_ROLE=" + shellQuote("ship") + "; "
 	inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
+	inner += "export STARFLEET_LAUNCH_TYPE=" + shellQuote(launchType) + "; "
 	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
 		`{"username":"`+name+`","instructions":[".starfleet-ai/agents.d/index.md"]}`) + "; "
 	inner += "cd " + shellQuote(root) + "; "
@@ -460,9 +461,15 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if model != "" {
 		inner += " --model " + shellQuote(model)
 	}
-	inner += " --prompt " + shellQuote(
-		"You are fleet ship "+name+", report to flagship "+flagship+
-			". Fleet identity loaded via OPENCODE_CONFIG_CONTENT.") + " "
+	shipPrompt := "You are fleet ship " + name + ", report to flagship " + flagship +
+		". Fleet identity loaded via OPENCODE_CONFIG_CONTENT."
+	if launchType == "background" || launchType == "auto" {
+		shipPrompt += " You were launched in " + launchType + " mode (detached, no human at your " +
+			"console): never prompt for input on your console and never block waiting for stdin — " +
+			"communicate only via the agent bus (starfleetctl agent-bus tell/ask). Act autonomously " +
+			"and report results back over the bus."
+	}
+	inner += " --prompt " + shellQuote(shipPrompt) + " "
 	for _, a := range o.ExtraArgs {
 		inner += shellQuote(a) + " "
 	}

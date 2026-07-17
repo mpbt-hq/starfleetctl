@@ -38,6 +38,14 @@ cleared:
    aufnehmen", "neue Aufgabe", "track this" and "capture a task" all mean the same thing. If the task
    is meant for another ship, pass `--assign <ship>`; otherwise leave it open. Small/fast models:
    this is the ONLY correct way to accept a task — do not just acknowledge it in chat.
+
+- **Background / auto ships never prompt on their console.** If `STARFLEET_LAUNCH_TYPE` is
+   `background` or `auto` (detached, no human at the terminal), do NOT ask clarifying questions on
+   the console and never block waiting for stdin — there is nobody there to answer. Act autonomously
+   from the directive you were given; if you genuinely must ask, do it ONLY over the agent bus
+   (`starfleetctl agent-bus ask "<question>"` or `tell <sender>`), which the praetor/another ship can
+   answer asynchronously. The launch prompt already states this; treat it as binding. Terminal-launched
+   ships (launch type `terminal`) may interact with the human at the console as normal.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
