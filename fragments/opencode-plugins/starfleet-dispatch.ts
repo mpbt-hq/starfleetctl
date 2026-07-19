@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-import { readFileSync, readdirSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdirSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
@@ -77,6 +77,8 @@ interface HealthData {
   model_last_action: string // ISO timestamp
   state: 'idle' | 'working' | 'blocked'
   pid: number
+  model?: string            // current model ID (e.g. "openai/gpt-4o")
+  server?: string           // model server/provider name
 }
 
 function healthFile(): string {
@@ -94,6 +96,8 @@ function writeHealth(patch: Partial<HealthData>): void {
       model_last_action: patch.model_last_action ?? prev.model_last_action ?? now,
       state: patch.state ?? prev.state ?? 'idle',
       pid: patch.pid ?? prev.pid ?? process.pid,
+      model: patch.model ?? prev.model,
+      server: patch.server ?? prev.server,
     }
     writeFileSync(healthFile(), JSON.stringify(merged, null, 2) + '\n')
   } catch { /* ignore */ }
@@ -154,16 +158,26 @@ function isUserAbort(detail: string): boolean {
 export const plugin = async ({ client, $ }: any) => {
   mkdirSync(SEEN_DIR, { recursive: true })
 
-  const heartbeatTimer = setInterval(() => {
-    try { $`.starfleet-ai/bin/starfleetctl agent-bus touch`.quiet() } catch { /* ignore */ }
+  const heartbeatTimer = setInterval(async () => {
+    try {
+      // currentModel is tracked in-memory via message.updated events —
+      // no API call needed. Model appears in health after first assistant turn.
+      writeHealth({ plugin_last_run: new Date().toISOString(), ...currentModel })
+      $`.starfleet-ai/bin/starfleetctl agent-bus touch`.quiet()
+    } catch { /* ignore */ }
   }, HEARTBEAT_MS)
 
   let tuiReady = false
   let sessionNeedsIdentity = true // first turn after session creation
   let submitted = new Set<string>() // in-memory dedup für Polling
   let turnCount = 0 // track turns for model_last_action
+  let currentModel: { model?: string; server?: string } = {} // tracked via message.updated events
 
-  // Write initial health marker
+  // Write initial health marker — model will be populated by message.updated
+  // events on the first assistant turn; no need to poll the API at startup
+  // (which would pick the wrong session in multi-session environments).
+  // Delete stale health from previous run to avoid model leaking across restarts.
+  try { unlinkSync(healthFile()) } catch { /* first run */ }
   writeHealth({ state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
 
   // seed: ack all current inbox messages so they don't keep showing up
@@ -316,7 +330,17 @@ export const plugin = async ({ client, $ }: any) => {
       if (event.type === 'session.cleared' || event.type === 'session.reset') {
         sessionNeedsIdentity = true
         turnCount = 0
+        currentModel = {} // model state is stale after clear/reset
         writeHealth({ model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
+      }
+      // Track model changes in-memory: every assistant message carries
+      // the exact providerID/modelID that processed it. This fires on
+      // every turn, so currentModel is always current — no polling needed.
+      if (event.type === 'message.updated') {
+        const info = event.properties?.info as any
+        if (info?.role === 'assistant' && info?.modelID) {
+          currentModel = { model: info.modelID, server: info.providerID }
+        }
       }
       if (event.type === 'session.error') {
         writeHealth({ state: 'blocked', pid: process.pid })
