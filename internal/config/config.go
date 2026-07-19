@@ -23,6 +23,12 @@ type WebConfig struct {
 	AutostartEnabled bool   `yaml:"autostart_enabled"`
 	PIDFile         string `yaml:"pid_file"`
 	LogFile         string `yaml:"log_file"`
+	// ShipID is the fleet identity (ship name) under which the web frontend
+	// appears on the agent bus. When empty, the bus identity is taken from the
+	// environment (STARFLEET_SHIP_ID / AGENT_ID) like `agent-bus` does.
+	ShipID string `yaml:"ship_id"`
+	// ShipHandle is the optional human-readable handle shown alongside ShipID.
+	ShipHandle string `yaml:"ship_handle"`
 }
 
 // DefaultConfig returns defaults.

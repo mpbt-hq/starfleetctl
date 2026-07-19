@@ -87,6 +87,15 @@
   .bubble .meta a { font-size: 11px; }
   .bubble pre { white-space: pre-wrap; word-break: break-word; margin: 0;
     font: 13px/1.4 ui-monospace, monospace; }
+  .terminal { background: #000; color: #00ff00; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; line-height: 1.3; padding: 8px; border-radius: 8px;
+    overflow-x: auto; white-space: pre; min-height: 200px; max-height: 600px;
+    overflow-y: auto; border: 1px solid var(--line); }
+  .terminal .cursor { animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .terminal-controls { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .terminal-controls .pill { cursor: pointer; }
+  .terminal-controls .pill.active { background: var(--acc); color: #04121f; }
 </style>
 </head>
 <body>
@@ -236,7 +245,21 @@
       <div class="card">
         <div class="kv" id="ship_detail"></div>
       </div>
-      <div id="ship_chat"></div>
+      <div class="tabs" style="border:0;padding:0 0 8px;margin:0">
+        <div class="tab on" data-s="chat" onclick="shipTab('chat')">Chat</div>
+        <div class="tab" data-s="screen" onclick="shipTab('screen')">Terminal</div>
+      </div>
+      <div id="ship_chat_tab">
+        <div id="ship_chat"></div>
+      </div>
+      <div id="ship_screen_tab" style="display:none">
+        <div class="terminal-controls">
+          <span class="pill active" id="term_auto" onclick="termAutoToggle()">Auto-Update: an</span>
+          <span class="pill" id="term_scrollback" onclick="termShowScrollback()">Scrollback</span>
+          <span class="muted" id="term_status"></span>
+        </div>
+        <div class="terminal" id="term_content">Lade Terminal...</div>
+      </div>
     </div>
     <div class="compose">
       <textarea id="ship_msg" placeholder="Nachricht an Schiff…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();shipSend()}"></textarea>
@@ -342,6 +365,7 @@ async function openShip(name){
 }
 function closeShip(){
   shipCurrent = null;
+  stopTermAutoUpdate();
   document.getElementById('ship_overlay').classList.remove('on');
 }
 window.addEventListener('popstate', (e)=>{
@@ -417,6 +441,75 @@ async function shipSend(){
     toast('gesendet → '+shipCurrent+' ('+r.id+')');
     await loadShipChat(shipCurrent);
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
+// --- Terminal tab ---
+let termAutoUpdate = true;
+let termInterval = null;
+let termMode = 'screen'; // 'screen' or 'scrollback'
+
+function shipTab(tab){
+  document.querySelectorAll('#ship_overlay .tabs .tab').forEach(t=>t.classList.toggle('on', t.dataset.s===tab));
+  document.getElementById('ship_chat_tab').style.display = tab==='chat' ? '' : 'none';
+  document.getElementById('ship_screen_tab').style.display = tab==='screen' ? '' : 'none';
+  if (tab==='screen') {
+    loadScreen();
+    startTermAutoUpdate();
+  } else {
+    stopTermAutoUpdate();
+  }
+}
+
+function termAutoToggle(){
+  termAutoUpdate = !termAutoUpdate;
+  const el = document.getElementById('term_auto');
+  el.textContent = 'Auto-Update: ' + (termAutoUpdate ? 'an' : 'aus');
+  el.classList.toggle('active', termAutoUpdate);
+  if (termAutoUpdate) startTermAutoUpdate();
+  else stopTermAutoUpdate();
+}
+
+function termShowScrollback(){
+  termMode = termMode === 'scrollback' ? 'screen' : 'scrollback';
+  const el = document.getElementById('term_scrollback');
+  el.textContent = termMode === 'scrollback' ? 'Live-Screen' : 'Scrollback';
+  el.classList.toggle('active', termMode === 'scrollback');
+  loadScreen();
+}
+
+function startTermAutoUpdate(){
+  stopTermAutoUpdate();
+  if (termAutoUpdate && shipCurrent) {
+    termInterval = setInterval(loadScreen, 1000);
+  }
+}
+
+function stopTermAutoUpdate(){
+  if (termInterval) {
+    clearInterval(termInterval);
+    termInterval = null;
+  }
+}
+
+async function loadScreen(){
+  if (!shipCurrent) return;
+  const el = document.getElementById('term_content');
+  const statusEl = document.getElementById('term_status');
+  try {
+    let url = '/api/ship/' + encodeURIComponent(shipCurrent) + '/screen';
+    if (termMode === 'scrollback') url += '?scrollback=100';
+    const data = await api(url);
+    if (data.lines && data.lines.length > 0) {
+      el.innerHTML = data.lines.map(l => esc(l)).join('\n');
+      statusEl.textContent = data.lines.length + ' Zeilen';
+    } else {
+      el.innerHTML = '<span class="muted">kein Terminal-Inhalt verfügbar</span>';
+      statusEl.textContent = '';
+    }
+  } catch(e) {
+    el.innerHTML = '<span class="muted">Fehler: ' + esc(e.message) + '</span>';
+    statusEl.textContent = '';
+  }
 }
 
 async function loadTasks(){
@@ -771,7 +864,15 @@ loadIdentity().then(()=>{ refresh(); loadModels(); });
 history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
   if (c==='status'||c==='log'||c==='bus'||c==='talk'||c==='timers') refresh();
-  if (shipCurrent) loadShipChat(shipCurrent); }, 15000);
+  if (shipCurrent) {
+    loadShipChat(shipCurrent);
+    // Refresh terminal if screen tab is active and auto-update is on
+    const screenTab = document.getElementById('ship_screen_tab');
+    if (screenTab && screenTab.style.display !== 'none' && termAutoUpdate) {
+      loadScreen();
+    }
+  }
+}, 15000);
 </script>
 </body>
 </html>

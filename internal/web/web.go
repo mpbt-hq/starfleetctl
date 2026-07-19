@@ -47,6 +47,28 @@ func New(root, addr string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("web: agent-bus: %w", err)
 	}
+	// Allow the web frontend's bus identity to be configured via the web
+	// config file (web.ship_id / web.ship_handle) or the STARFLEET_WEB_SHIP_ID
+	// env override, independent of the process environment the server was
+	// launched from. Without this, the frontend would appear on the bus under
+	// whatever STARFLEET_SHIP_ID / AGENT_ID the launching shell happened to
+	// export (or user@host), which is why it could show the wrong ship name.
+	if cfg, cerr := config.Load(root); cerr == nil {
+		shipID := os.Getenv("STARFLEET_WEB_SHIP_ID")
+		if shipID == "" {
+			shipID = cfg.Web.ShipID
+		}
+		if shipID != "" {
+			b.ShipID = shipID
+			b.ShipIDSet = true
+			// Propagate so any spawn/child shares the same bus identity.
+			_ = os.Setenv("STARFLEET_SHIP_ID", shipID)
+			if h := cfg.Web.ShipHandle; h != "" {
+				b.Handle = h
+				_ = os.Setenv("STARFLEET_AGENT_HANDLE", h)
+			}
+		}
+	}
 	d, err := dashboard.New(root)
 	if err != nil {
 		return nil, fmt.Errorf("web: dashboard: %w", err)
@@ -76,6 +98,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/timer/worker", s.apiTimerWorker)
 	s.mux.HandleFunc("/api/web/restart", s.apiWebRestart)
 	s.mux.HandleFunc("/api/ship", s.apiShipLaunch)
+	s.mux.HandleFunc("/api/ship/", s.apiShipScreen)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -543,6 +566,54 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "ship_id": shipID})
+}
+
+// apiShipScreen returns the current terminal screen content for a ship.
+// GET /api/ship/<id>/screen returns the visible screen as JSON {ship_id, lines}.
+// GET /api/ship/<id>/screen?scrollback=<n> returns n scrollback lines.
+func (s *Server) apiShipScreen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+
+	// Parse path: /api/ship/<id>/screen
+	rest := strings.TrimPrefix(r.URL.Path, "/api/ship/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 2 || parts[1] != "screen" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	id := parts[0]
+
+	// Resolve the ship's termctl pipe
+	pipePath, ok := session.ResolvePipe(s.Root, id)
+	if !ok {
+		writeErr(w, 404, "no running terminal for "+id)
+		return
+	}
+
+	// Check if scrollback is requested
+	scrollbackStr := r.URL.Query().Get("scrollback")
+	if scrollbackStr != "" {
+		n := 100
+		fmt.Sscanf(scrollbackStr, "%d", &n)
+		lines, err := session.ScreenDumpScrollback(pipePath, n)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ship_id": id, "lines": lines, "type": "scrollback"})
+		return
+	}
+
+	// Default: dump visible screen
+	lines, err := session.ScreenDump(pipePath)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ship_id": id, "lines": lines, "type": "screen"})
 }
 
 // apiModels returns the list of available models from models.yaml.
