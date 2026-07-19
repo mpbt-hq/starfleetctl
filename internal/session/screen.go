@@ -187,13 +187,17 @@ func screenDump(pipePath string) ([]string, error) {
 		return nil, fmt.Errorf("open pipe: %w", err)
 	}
 
-	// Create a temporary file for the response
+	// Create a temporary file for the response. Remove it first so the
+	// read loop below does not pick up a stale/empty file from a previous
+	// (failed) call — os.CreateTemp would leave it empty and the first
+	// read would fail with "unexpected end of JSON input".
 	tmpFile, err := os.CreateTemp("", "screen-dump-*.json")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
+	os.Remove(tmpPath)
 	defer os.Remove(tmpPath)
 
 	// Send dump command with response path
@@ -201,11 +205,11 @@ func screenDump(pipePath string) ([]string, error) {
 		return nil, fmt.Errorf("send dump command: %w", err)
 	}
 
-	// Wait for the response file to appear (with timeout)
+	// Wait for the response file to appear with non-empty content (timeout).
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(tmpPath)
-		if err == nil {
+		if err == nil && len(data) > 0 {
 			var lines []string
 			if err := json.Unmarshal(data, &lines); err != nil {
 				return nil, fmt.Errorf("parse response: %w", err)
@@ -225,13 +229,15 @@ func screenDumpScrollback(pipePath string, n int) ([]string, error) {
 		return nil, fmt.Errorf("open pipe: %w", err)
 	}
 
-	// Create a temporary file for the response
+	// Create a temporary file for the response. Remove it first so the read
+	// loop does not pick up a stale/empty file from a previous failed call.
 	tmpFile, err := os.CreateTemp("", "screen-scrollback-*.json")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
+	os.Remove(tmpPath)
 	defer os.Remove(tmpPath)
 
 	// Send dump-scrollback command with response path
@@ -239,11 +245,11 @@ func screenDumpScrollback(pipePath string, n int) ([]string, error) {
 		return nil, fmt.Errorf("send dump-scrollback command: %w", err)
 	}
 
-	// Wait for the response file to appear (with timeout)
+	// Wait for the response file to appear with non-empty content (timeout).
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(tmpPath)
-		if err == nil {
+		if err == nil && len(data) > 0 {
 			var lines []string
 			if err := json.Unmarshal(data, &lines); err != nil {
 				return nil, fmt.Errorf("parse response: %w", err)
