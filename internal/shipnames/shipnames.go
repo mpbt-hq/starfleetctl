@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/fsutil"
 )
 
@@ -31,15 +32,12 @@ type Registry struct {
 // New resolves a Registry rooted at the given workspace root. WORK_DIR
 // (env, default <root>/_WORK_) matches the bash original's override.
 func New(root string) *Registry {
-	workDir := os.Getenv("WORK_DIR")
-	if workDir == "" {
-		workDir = filepath.Join(root, "_WORK_")
-	}
+	busDir := config.BusDir(root)
 	return &Registry{
 		Root:      root,
 		NamesFile: filepath.Join(root, ".starfleet-ai", "etc", "ship-names.txt"),
-		ShipsDir:  filepath.Join(workDir, "agent-bus", "ships"),
-		StatusDir: filepath.Join(workDir, "agent-bus", "status"),
+		ShipsDir:  filepath.Join(busDir, "ships"),
+		StatusDir: filepath.Join(busDir, "status"),
 	}
 }
 

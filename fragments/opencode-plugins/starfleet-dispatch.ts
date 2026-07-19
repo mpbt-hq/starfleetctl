@@ -10,9 +10,9 @@ import { readFileSync, readdirSync, mkdirSync, writeFileSync, appendFileSync, un
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
-const SEEN_DIR = join(ROOT, '_WORK_', 'agent-bus', 'monitor-seen')
-const SHIPS_DIR = join(ROOT, '_WORK_', 'agent-bus', 'ships')
-const HEALTH_DIR = join(ROOT, '_WORK_', 'agent-bus', 'health')
+const SEEN_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'monitor-seen')
+const SHIPS_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'ships')
+const HEALTH_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'health')
 const HEARTBEAT_MS = 300_000
 const POLL_MS = 3_000
 const BLOCKED_THRESHOLD_MS = 120_000 // 2 min without plugin run → blocked
@@ -59,7 +59,7 @@ function markSeen(id: string): void {
 
 function logEvent(msg: string): void {
   try {
-    appendFileSync(join(ROOT, '_WORK_', 'agent-bus', 'events.log'),
+    appendFileSync(join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'events.log'),
       `${new Date().toISOString()}\tplugin\t${aid()}\t${msg}\n`)
   } catch { /* ignore */ }
 }

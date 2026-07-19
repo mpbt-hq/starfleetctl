@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/config"
 )
 
 // TopicMeta is one topic file's frontmatter.
@@ -231,7 +233,7 @@ func (d *Dashboard) DoTopicLoad(slug string) (TopicMeta, string, error) {
 // and body, via the sanctioned dashboard path (never hand-edits the file).
 // It is the in-place counterpart to DoTopicWrite (which takes a source file).
 func (d *Dashboard) DoTopicUpdate(slug string, m TopicMeta, body string) error {
-	tmpDir := filepath.Join(d.Root, "_WORK_", ".tmp")
+	tmpDir := filepath.Join(config.WorkDir(d.Root), "tmp")
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return err
 	}

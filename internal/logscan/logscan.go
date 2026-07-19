@@ -23,6 +23,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/config"
 )
 
 // Finding is one extracted, de-duplicated failure signature.
@@ -167,10 +169,7 @@ func LogFiles(root string) []string {
 			files = append(files, filepath.Join(shipDir, e.Name()))
 		}
 	}
-	work := os.Getenv("WORK_DIR")
-	if work == "" {
-		work = filepath.Join(root, "_WORK_")
-	}
+	work := config.BusDir(root)
 	ev := filepath.Join(work, "agent-bus", "events.log")
 	if _, err := os.Stat(ev); err == nil {
 		files = append(files, ev)

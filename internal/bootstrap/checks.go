@@ -34,13 +34,13 @@ type Check struct {
 // all up in one pass (e.g. right after a fresh clone, before any subcommand
 // has run yet) instead of relying on each one's own first invocation.
 var requiredDirs = []string{
-	filepath.Join("_WORK_", "agent-bus", "status"),
-	filepath.Join("_WORK_", "agent-bus", "msgs"),
-	filepath.Join("_WORK_", "agent-bus", "acks"),
-	filepath.Join("_WORK_", "agent-bus", "ships"),
-	filepath.Join("_WORK_", "agent-bus", "monitor-seen"),
-	filepath.Join("_WORK_", "agent-bus", "notify", ".popup-once"),
-	filepath.Join("_WORK_", "agent-claims"),
+	filepath.Join(".starfleet-ai", "var", "agent-bus", "status"),
+	filepath.Join(".starfleet-ai", "var", "agent-bus", "msgs"),
+	filepath.Join(".starfleet-ai", "var", "agent-bus", "acks"),
+	filepath.Join(".starfleet-ai", "var", "agent-bus", "ships"),
+	filepath.Join(".starfleet-ai", "var", "agent-bus", "monitor-seen"),
+	filepath.Join(".starfleet-ai", "var", "agent-bus", "notify", ".popup-once"),
+	filepath.Join(".starfleet-ai", "var", "prclaims"),
 	filepath.Join(".starfleet-ai", "conf"),
 }
 

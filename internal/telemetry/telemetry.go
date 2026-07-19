@@ -24,6 +24,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/config"
 )
 
 // Event is one observed tool call that did not auto-match an allow rule.
@@ -52,14 +54,14 @@ const (
 // LogPath returns the absolute path of the events file for a given
 // workspace root.
 func LogPath(root string) string {
-	return filepath.Join(root, "_WORK_", logSubdir, logDir, logName)
+	return filepath.Join(config.BusDir(root), logDir, logName)
 }
 
 // Append writes one event to the shared log, serialized with an exclusive
 // flock so concurrent hook invocations across ships cannot interleave or
 // truncate each other's lines.
 func Append(root string, e Event) error {
-	dir := filepath.Join(root, "_WORK_", logSubdir, logDir)
+	dir := filepath.Join(config.BusDir(root), logDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

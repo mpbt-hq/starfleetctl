@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/identity"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
@@ -256,7 +257,7 @@ func spawnShips(root string, spawn int, release, client, supervisor, permissionM
 // fleetCounts reads the status directory and returns (total, idle) counts of
 // non-stale entries.
 func fleetCounts(root string) (total, idle int) {
-	statDir := filepath.Join(root, "_WORK_", statusDir)
+	statDir := filepath.Join(config.BusDir(root), "status")
 	entries, err := os.ReadDir(statDir)
 	if err != nil {
 		return 0, 0
@@ -292,7 +293,7 @@ func fleetCounts(root string) (total, idle int) {
 // appendAudit appends a line to the autoscale audit log, creating the log
 // directory if needed.
 func appendAudit(root, msg string) {
-	logPath := filepath.Join(root, "_WORK_", auditLog)
+	logPath := filepath.Join(config.BusDir(root), "autoscale-events.log")
 	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
 	callerID := identity.ShipID()
 	if callerID == "" {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/robfig/cron/v3"
 )
 
@@ -32,7 +33,7 @@ Flags for set:
   --target <ship|fleet|fleet-all>   where to send (default: ship = self)
   --tz <timezone>                   display timezone (default: UTC)
   --persistent                      store in .starfleet-ai/ (survive reset)
-  --ephemeral                       store in _WORK_/ (default for --every/--at)
+  --ephemeral                       store in .starfleet-ai/var/ (default for --every/--at)
   --id <id>                         explicit timer ID (auto-assigned if omitted)
 
   timer list [--all] [--json]      list timers
@@ -474,7 +475,7 @@ func StartWorker(root string) error {
 		return fmt.Errorf("timer worker: already running")
 	}
 
-	logDir := filepath.Join(root, "_WORK_", "agent-bus", "logs")
+	logDir := filepath.Join(config.BusDir(root), "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return fmt.Errorf("timer worker: mkdir logs: %w", err)
 	}

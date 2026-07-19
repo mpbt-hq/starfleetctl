@@ -43,6 +43,20 @@ func DefaultConfig() *Config {
 	}
 }
 
+// WorkDir returns the root of all ephemeral runtime state. Override via
+// MPBT_WORK_DIR; default is .starfleet-ai/var/ under the workspace root.
+func WorkDir(root string) string {
+	if d := os.Getenv("MPBT_WORK_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join(root, ".starfleet-ai", "var")
+}
+
+// BusDir returns the agent-bus directory under WorkDir.
+func BusDir(root string) string {
+	return filepath.Join(WorkDir(root), "agent-bus")
+}
+
 // Load reads configuration from .starfleet-ai/conf/web.yaml.
 func Load(root string) (*Config, error) {
 	cfg := DefaultConfig()

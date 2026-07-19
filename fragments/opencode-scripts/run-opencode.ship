@@ -59,7 +59,7 @@ if [ -z "$NAME" ]; then
     fi
     # Ensure the assigned name is reserved (covers ws-<pid> from Go fallback
     # where the Go code does not create a reservation file)
-    SHIPS_DIR="$WORKSPACE_ROOT/_WORK_/agent-bus/ships"
+    SHIPS_DIR="$WORKSPACE_ROOT/.starfleet-ai/var/agent-bus/ships"
     mkdir -p "$SHIPS_DIR" 2>/dev/null || true
     [ -f "$SHIPS_DIR/$NAME" ] || echo "$$:$(date +%s)" > "$SHIPS_DIR/$NAME" 2>/dev/null || true
 fi

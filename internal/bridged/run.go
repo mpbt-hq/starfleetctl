@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/config"
 )
 
 const usage = `bridged <command> [args…]
@@ -18,7 +20,7 @@ const usage = `bridged <command> [args…]
                               workspace; bridged does not self-daemonize)
   status [--socket <path>]   connect and report whether a daemon is up
 
-Default socket: _WORK_/agent-bus/bridged.sock
+Default socket: .starfleet-ai/var/agent-bus/bridged.sock
 
 NOT wired into any hook/script/existing caller — this is a new, additive,
 opt-in access path only. See DASHBOARD.md "Long-term fleet architecture
@@ -27,7 +29,7 @@ vision" for the full design writeup.
 
 // DefaultSockPath returns the default bridged socket path for a workspace root.
 func DefaultSockPath(root string) string {
-	return filepath.Join(root, "_WORK_", "agent-bus", "bridged.sock")
+	return filepath.Join(config.BusDir(root), "bridged.sock")
 }
 
 // Run implements `starfleetctl bridged <command>`.

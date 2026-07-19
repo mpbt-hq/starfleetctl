@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/fsutil"
 	"github.com/metux/starfleetctl/internal/identity"
 )
@@ -44,7 +45,7 @@ type Bus struct {
 func New(root string) (*Bus, error) {
 	busDir := os.Getenv("BUS_DIR")
 	if busDir == "" {
-		busDir = filepath.Join(root, "_WORK_", "agent-bus")
+		busDir = config.BusDir(root)
 	}
 	ttl := int64(900)
 	if v := os.Getenv("BUS_TTL"); v != "" {

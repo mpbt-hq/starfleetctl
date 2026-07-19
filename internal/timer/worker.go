@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/robfig/cron/v3"
 )
 
@@ -249,7 +250,7 @@ func advanceOrDelete(store *Store, t *TimerRecord, persistentVarDir string) {
 // --- helpers ---
 
 func workerPath(root, file string) string {
-	return filepath.Join(root, "_WORK_", "agent-bus", file)
+	return filepath.Join(config.BusDir(root), file)
 }
 
 func ensurePIDFile(pidFile string) error {
@@ -280,7 +281,7 @@ func removePIDFile(pidFile string) {
 }
 
 func openLogFile(root string) (*os.File, error) {
-	logDir := filepath.Join(root, "_WORK_", "agent-bus", "logs")
+	logDir := filepath.Join(config.BusDir(root), "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return nil, fmt.Errorf("timer worker: mkdir logs: %w", err)
 	}

@@ -41,6 +41,9 @@ func Run(root string, args []string) int {
 		}
 	}
 
+	// Auto-migrate old _WORK_/ layout to .starfleet-ai/var/ on first run.
+	maybeMigrateWork(root)
+
 	b := New(root)
 	allOK := true
 	for _, c := range Checks() {

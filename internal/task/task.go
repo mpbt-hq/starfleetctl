@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 )
 
@@ -301,7 +302,7 @@ func buildTopicFile(slug, title, status, assignedTo, desc string) string {
 // writeTopicContent writes the generated topic content to a temp file and
 // commits it via the dashboard package's sanctioned write path.
 func writeTopicContent(d *dashboard.Dashboard, slug, content string) error {
-	tmpDir := filepath.Join(d.Root, "_WORK_", ".tmp")
+	tmpDir := filepath.Join(config.WorkDir(d.Root), "tmp")
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return err
 	}

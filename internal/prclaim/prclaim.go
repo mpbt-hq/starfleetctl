@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/fsutil"
 	"github.com/metux/starfleetctl/internal/identity"
 )
@@ -38,7 +39,7 @@ type Claims struct {
 func New(root string) (*Claims, error) {
 	dir := os.Getenv("CLAIM_DIR")
 	if dir == "" {
-		dir = filepath.Join(root, "_WORK_", "agent-claims")
+		dir = filepath.Join(config.WorkDir(root), "prclaims")
 	}
 	ttl := int64(3600)
 	if v := os.Getenv("CLAIM_TTL"); v != "" {

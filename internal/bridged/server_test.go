@@ -24,7 +24,7 @@ func newScratchRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	if err := os.MkdirAll(filepath.Join(root, "_WORK_", "agent-bus"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".starfleet-ai", "var", "agent-bus"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
