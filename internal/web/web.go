@@ -98,7 +98,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/timer/worker", s.apiTimerWorker)
 	s.mux.HandleFunc("/api/web/restart", s.apiWebRestart)
 	s.mux.HandleFunc("/api/ship", s.apiShipLaunch)
-	s.mux.HandleFunc("/api/ship/", s.apiShipScreen)
+	s.mux.HandleFunc("/api/ship/", s.apiShipDispatch)
+	s.mux.HandleFunc("/api/ships", s.apiShips)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -568,23 +569,86 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "ship_id": shipID})
 }
 
-// apiShipScreen returns the current terminal screen content for a ship.
-// GET /api/ship/<id>/screen returns the visible screen as JSON {ship_id, lines}.
-// GET /api/ship/<id>/screen?scrollback=<n> returns n scrollback lines.
-func (s *Server) apiShipScreen(w http.ResponseWriter, r *http.Request) {
+// apiShipDispatch routes /api/ship/<id>/... to the appropriate handler.
+func (s *Server) apiShipDispatch(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/ship/")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 2 {
+		writeErr(w, 404, "not found — use /api/ship/<id>/screen or /api/ship/<id>/stop")
+		return
+	}
+	id, action := parts[0], parts[1]
+	switch action {
+	case "screen":
+		s.apiShipScreen(w, r, id)
+	case "stop":
+		s.apiShipStop(w, r, id)
+	default:
+		writeErr(w, 404, "unknown action: "+action)
+	}
+}
+
+// apiShipStop stops a running ship.
+func (s *Server) apiShipStop(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	if err := session.StopShip(s.Root, id); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "ship_id": id})
+}
+
+// apiShips returns all known ships with their status, model, and health info.
+func (s *Server) apiShips(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "method not allowed")
 		return
 	}
+	records := s.bus.AllStatusRecords()
+	type shipInfo struct {
+		Name   string `json:"name"`
+		State  string `json:"state"`
+		PID    string `json:"pid,omitempty"`
+		Handle string `json:"handle,omitempty"`
+		Note   string `json:"note,omitempty"`
+		Model  string `json:"model,omitempty"`
+		Server string `json:"server,omitempty"`
+	}
+	var ships []shipInfo
+	for _, rec := range records {
+		info := shipInfo{
+			Name:   rec.Agent,
+			State:  rec.State,
+			PID:    rec.PID,
+			Handle: rec.Handle,
+			Note:   rec.Note,
+		}
+		// Read health file for model info
+		healthPath := s.Root + "/_WORK_/agent-bus/health/" + rec.Agent + ".json"
+		if data, err := os.ReadFile(healthPath); err == nil {
+			var h struct {
+				Model  string `json:"model"`
+				Server string `json:"server"`
+			}
+			if json.Unmarshal(data, &h) == nil {
+				info.Model = h.Model
+				info.Server = h.Server
+			}
+		}
+		ships = append(ships, info)
+	}
+	writeJSON(w, ships)
+}
 
-	// Parse path: /api/ship/<id>/screen
-	rest := strings.TrimPrefix(r.URL.Path, "/api/ship/")
-	parts := strings.SplitN(rest, "/", 2)
-	if len(parts) < 2 || parts[1] != "screen" {
-		writeErr(w, 404, "not found")
+// apiShipScreen returns the current terminal screen content for a ship.
+func (s *Server) apiShipScreen(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
 		return
 	}
-	id := parts[0]
 
 	// Resolve the ship's termctl pipe
 	pipePath, ok := session.ResolvePipe(s.Root, id)

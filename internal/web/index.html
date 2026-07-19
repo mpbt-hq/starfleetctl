@@ -239,6 +239,9 @@
     <header>
       <span class="agent" id="ship_name"></span>
       <span class="pill" id="ship_state"></span>
+      <span class="pill" id="ship_model" style="font-size:11px"></span>
+      <span style="flex:1"></span>
+      <span class="pill" style="background:#c33;color:#fff;cursor:pointer" onclick="shipStop()">Stop</span>
       <button class="x" onclick="history.back()">×</button>
     </header>
     <div class="body">
@@ -393,6 +396,10 @@ async function loadShip(name){
     const cls = st==='done'?'ok':(st==='blocked'?'bad':(st==='working'||st==='building'?'warn':'dim'));
     document.getElementById('ship_state').className = 'pill '+cls;
     document.getElementById('ship_state').textContent = st;
+    // Show model in header pill
+    const modelEl = document.getElementById('ship_model');
+    if (s.model) { modelEl.textContent = s.model; modelEl.style.display = ''; }
+    else { modelEl.style.display = 'none'; }
     const kv = [];
     const add = (k,v)=>{ if(v) kv.push(`<b>${k}</b><span>${esc(v)}</span>`); };
     add('Projekt', s.project);
@@ -440,6 +447,16 @@ async function shipSend(){
     ta.value='';
     toast('gesendet → '+shipCurrent+' ('+r.id+')');
     await loadShipChat(shipCurrent);
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+async function shipStop(){
+  if (!shipCurrent) return;
+  if (!confirm(shipCurrent+' stoppen?')) return;
+  try {
+    await api('/api/ship/'+encodeURIComponent(shipCurrent)+'/stop', {method:'POST'});
+    toast(shipCurrent+' gestoppt');
+    history.back();
+    refresh();
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 

@@ -495,6 +495,52 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	return name, nil
 }
 
+// StopShip stops a running ship by ID, cleans up its termctl pipe, agent-bus
+// heartbeat, and ship-name reservation. It is the in-process core of
+// `session stop`, also usable from the web console's "stop ship" action.
+func StopShip(root string, id string) error {
+	reg := NewRegistry(root)
+	pipePath, ok := reg.Get(id)
+	if !ok {
+		// Fallback: check agent-bus status records
+		bus, err := agentbus.New(root)
+		if err == nil {
+			for _, r := range bus.AllStatusRecords() {
+				if r.Agent == id || r.Handle == id {
+					if p, found := reg.Get(r.Agent); found {
+						pipePath = p
+						id = r.Agent
+						ok = true
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Stop via termctl pipe (best effort)
+	if ok {
+		if rem, err := termctl.OpenPipe(pipePath); err == nil {
+			_ = rem.Stop()
+		}
+	}
+
+	// Heartbeat cleanup + ship name release
+	shipReg := shipnames.New(root)
+	_, nameReserved := shipReg.Lookup(id)
+	_ = reg.Delete(id)
+	_ = os.Setenv("STARFLEET_SHIP_ID", id)
+	if bus, err := agentbus.New(root); err == nil {
+		_ = bus.DoClear()
+	}
+	_ = shipReg.DoRelease(id)
+
+	if !ok && !nameReserved {
+		return fmt.Errorf("no such session: %s", id)
+	}
+	return nil
+}
+
 // spawnSession creates the termctl terminal for the given launch vars and posts
 // the initial agent-bus heartbeat. It spawns a child process that runs the
 // terminal and blocks on h.Run(), so the terminal survives after this function
