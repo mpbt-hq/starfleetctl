@@ -31,6 +31,8 @@ Commands:
       Launch a detached terminal for an agent/CLI and post the initial
       heartbeat (replaces scripts/agent-run).  Pass --print to emit the
       shell-evaluable launch variables instead.  See 'session run --help'.
+  screen <command> [args...]
+      Terminal screen dump commands.  See 'session screen --help'.
   ship-run [--name <id>] [--model <model>] [-- <args...>]
       Start an opencode control-agent session in ship role, detached in the
       background (like run-opencode.ship, but a detachable termctl terminal).
@@ -55,6 +57,8 @@ func Run(root string, args []string) int {
 		return runAutoscale(root, args[1:])
 	case "run":
 		return runLaunch(root, args[1:])
+	case "screen":
+		return runScreen(root, args[1:])
 	case "ship-run":
 		return runShipRun(root, args[1:])
 	case "stop":
@@ -188,4 +192,9 @@ func resolvePipe(root, id string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ResolvePipe is the exported version of resolvePipe for use by other packages.
+func ResolvePipe(root, id string) (string, bool) {
+	return resolvePipe(root, id)
 }
