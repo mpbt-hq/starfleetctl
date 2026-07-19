@@ -79,6 +79,7 @@ interface HealthData {
   pid: number
   model?: string            // current model ID (e.g. "openai/gpt-4o")
   server?: string           // model server/provider name
+  error_tag?: string        // model-API failure class: nim-overload | zen-ratelimit
 }
 
 function healthFile(): string {
@@ -98,6 +99,7 @@ function writeHealth(patch: Partial<HealthData>): void {
       pid: patch.pid ?? prev.pid ?? process.pid,
       model: patch.model ?? prev.model,
       server: patch.server ?? prev.server,
+      error_tag: patch.error_tag ?? prev.error_tag,
     }
     writeFileSync(healthFile(), JSON.stringify(merged, null, 2) + '\n')
   } catch { /* ignore */ }
@@ -153,6 +155,25 @@ function isUserAbort(detail: string): boolean {
   const d = detail.toLowerCase()
   if (d === '' || d === 'unknown error') return true
   return /(^|\W)(abort|cancel|interrupt|signal|sigint|econnaborted|context (deadline|canceled))/.test(d)
+}
+
+// classifyModelError detects model-API failure modes so the fleet can tell
+// apart transient infra hiccups from provider-side throttling. Returns a short
+// tag the health record and flagship notification carry, or '' if the error
+// does not look model-API related.
+//   nim-overload  — NVIDIA inference microservice overloaded (5xx / conn reset)
+//   zen-ratelimit — ZEN temporarily blocks the account (429 / usage limit / quota)
+function classifyModelError(detail: string): string {
+  const d = detail.toLowerCase()
+  // ZEN rate-limit / usage cap (user just hit this — had to switch models)
+  if (/(429|rate[ -_]?limit|too many requests|usage limit|usage cap|quota|exceeded|access denied|temporarily blocked|try again later|toomanyrequests)/.test(d)) {
+    return 'zen-ratelimit'
+  }
+  // NIM overload: server-side 5xx or connection-level failures
+  if (/(nim|5\d\d|500|502|503|504|overload|service unavailable|bad gateway|gateway timeout|connection reset|econnreset|econnrefused|upstream|inference.*(down|unavailable|error))/).test(d)) {
+    return 'nim-overload'
+  }
+  return ''
 }
 
 export const plugin = async ({ client, $ }: any) => {
@@ -340,10 +361,12 @@ export const plugin = async ({ client, $ }: any) => {
         const info = event.properties?.info as any
         if (info?.role === 'assistant' && info?.modelID) {
           currentModel = { model: info.modelID, server: info.providerID }
+          // Auto-recovery: a successful assistant turn means the model API
+          // is responsive again — clear any prior error_tag / blocked state.
+          writeHealth({ state: 'working', error_tag: undefined, plugin_last_run: new Date().toISOString() })
         }
       }
       if (event.type === 'session.error') {
-        writeHealth({ state: 'blocked', pid: process.pid })
         const detail =
           (event.properties?.error as { message?: string; code?: string })?.message ||
           (event.properties?.error as { code?: string })?.code ||
@@ -358,11 +381,16 @@ export const plugin = async ({ client, $ }: any) => {
           logEvent(`error (user abort, suppressed): ${detail}`)
           return
         }
-        logEvent(`error: ${detail}`)
+        const tag = classifyModelError(detail)
+        // Report a model-API failure class in the health record so the fleet
+        // console can distinguish a throttled ship from a hard crash.
+        writeHealth({ state: 'blocked', error_tag: tag || undefined, pid: process.pid })
+        const label = tag ? ` [${tag}]` : ''
+        logEvent(`error${label}: ${detail}`)
         // Tell the CONTROL agent (flagship) only, never broadcast to all —
         // a broadcast would land in the errored ship's own inbox and the
         // self-loop would restart even for genuine (non-abort) errors.
-        try { await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise ⚠️ ${aid()} session.error: ${detail}`.quiet() } catch { /* ignore */ }
+        try { await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise ⚠️ ${aid()} session.error${label}: ${detail}`.quiet() } catch { /* ignore */ }
       }
     },
   }
