@@ -167,10 +167,14 @@ export const plugin = async ({ client, $ }: any) => {
   writeHealth({ state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
 
   // seed: ack all current inbox messages so they don't keep showing up
-  // as "new" after a restart. Also mark as seen for poll-loop dedup.
+  // as "unread" after a restart. IMPORTANT: do NOT markSeen() them here —
+  // writing them into monitor-seen would poison brand-new directives that
+  // arrived just before/at session start, so the poll loop and the
+  // system.transform injection would both skip them and an idle ship would
+  // never wake. Only messages this session *actually* injects get marked
+  // seen (see poll()/transform), which is the correct cross-restart dedup.
   const inbox = await getInbox($)
   for (const msg of inbox) {
-    markSeen(msg.id)
     try { await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${msg.id} init-seen`.quiet() } catch { /* ignore */ }
   }
   // seed submitted set with THIS ship's seen messages only —
@@ -265,12 +269,15 @@ export const plugin = async ({ client, $ }: any) => {
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
-      const seen = loadSeenAll()
       const lines: string[] = []
       const msgs = await getInbox($)
 
       for (const msg of msgs) {
-        if (seen.has(msg.id)) continue
+        // Use the per-ship in-memory dedup (this session's actual handling),
+        // not loadSeenAll(): a directive addressed to THIS ship must be
+        // injected even if another ship coincidentally marked it seen, and a
+        // message skipped by the startup seed must still wake an idle ship.
+        if (submitted.has(msg.id)) continue
         markSeen(msg.id)
         submitted.add(msg.id) // sync with polling dedup
         lines.push(`[${msg.id}] from ${msg.from}: ${msg.text}`)
