@@ -51,6 +51,10 @@ cleared:
    daemonizes a fresh one. `starfleetctl web autostart` (for cron) only starts if not already
    running. Never use `nohup starfleetctl web …` — it bypasses PID tracking and leaves orphan
    processes.
+- **Always respond to bus messages over the bus.** When a `tell` or `ask` arrives in your inbox,
+   always send a reply via `starfleetctl agent-bus tell <sender> <reply>` — never only process
+   it internally without answering. The sender expects a bus response; silence means the message
+   was lost. Ack the message (`agent-bus ack <id>`) after responding.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
