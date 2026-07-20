@@ -65,12 +65,12 @@ export const plugin = async ({ client, $ }: any) => {
     if (!currentSessionID) return
     let status: any
     try {
-      status = await client.session.status({ path: { id: currentSessionID } })
+      status = await client.session.status()
     } catch { return }
     const body = status?.body ?? status
     if (!body || typeof body !== 'object') return
-    // status is keyed by session id -> SessionStatus
-    const st: any = Object.values(body)[0]
+    // status returns { [sessionID]: SessionStatus } for all sessions.
+    const st: any = body[currentSessionID] ?? Object.values(body)[0]
     if (!st || st.type !== 'retry') { lastRetryDetail = ''; return }
     const detail =
       st.action?.message || st.action?.reason || st.message ||
