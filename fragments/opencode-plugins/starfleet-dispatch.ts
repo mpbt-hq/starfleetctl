@@ -6,20 +6,18 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-import { appendFileSync } from 'node:fs'
+import { readFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
+const SEEN_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'monitor-seen')
+const SHIPS_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'ships')
 
 // Plugin tuning knobs — fetched from starfleetctl config at startup,
 // falling back to hardcoded defaults if the CLI is unavailable.
 let HEARTBEAT_MS = 300_000
 let POLL_MS = 3_000
-
-function aid(): string {
-  return process.env.STARFLEET_SHIP_ID || 'default'
-}
 
 function loadConfig(): void {
   try {
@@ -30,16 +28,23 @@ function loadConfig(): void {
   } catch { /* use defaults */ }
 }
 
-// Load this ship's seen IDs from starfleetctl (not from files directly).
-function loadSeenShipSync(): Set<string> {
+function aid(): string {
+  return process.env.STARFLEET_SHIP_ID || 'default'
+}
+
+function seenFile(): string {
+  return join(SEEN_DIR, aid())
+}
+
+function loadSeenShip(): Set<string> {
   const s = new Set<string>()
   try {
-    const raw = execSync(`.starfleet-ai/bin/starfleetctl agent-bus monitor-seen load`, { cwd: ROOT, timeout: 3000, stdio: ['pipe', 'pipe', 'ignore'] }).toString()
-    for (const line of raw.split('\n')) {
+    const content = readFileSync(seenFile(), 'utf-8')
+    for (const line of content.split('\n')) {
       const id = line.trim()
       if (id) s.add(id)
     }
-  } catch { /* starfleetctl broken → visible error on console */ }
+  } catch { /* ignore missing file */ }
   return s
 }
 
@@ -140,7 +145,7 @@ export const plugin = async ({ client, $ }: any) => {
   // seed submitted set with THIS ship's seen messages only —
   // using all ships' IDs caused submitted.size > 100 guard to
   // kill the poll loop permanently on busy repos.
-  for (const id of loadSeenShipSync()) {
+  for (const id of loadSeenShip()) {
     submitted.add(id)
   }
 
@@ -301,34 +306,8 @@ export const plugin = async ({ client, $ }: any) => {
           (event.properties?.error as { message?: string; code?: string })?.message ||
           (event.properties?.error as { code?: string })?.code ||
           'unknown error'
-        // User-initiated aborts (Ctrl-C / SIGINT / context cancelled) surface as
-        // a session.error with an empty or generic detail. They are expected, not
-        // actionable fleet events — and crucially, broadcasting them back to
-        // ALL ships (including the one that errored) makes that ship's own
-        // plugin re-pick its own error as a new inbox directive, react, and
-        // chatter the bus in a loop. Suppress those: log locally only.
-        try {
-          const abortOut = await $`.starfleet-ai/bin/starfleetctl agent-bus error is-abort '${esc(detail)}'`.text()
-          if (abortOut.trim() === 'true') {
-            logEvent(`error (user abort, suppressed): ${detail}`)
-            return
-          }
-        } catch { /* fall through to classify */ }
-        let tag = ''
-        try {
-          const classifyOut = await $`.starfleet-ai/bin/starfleetctl agent-bus error classify '${esc(detail)}'`.text()
-          tag = classifyOut.trim()
-          if (tag === '(none)') tag = ''
-        } catch { /* ignore */ }
-        // Report a model-API failure class in the health record so the fleet
-        // console can distinguish a throttled ship from a hard crash.
-        await healthUpdate($, { state: 'blocked', errorTag: tag || undefined, pid: String(process.pid) })
-        const label = tag ? ` [${tag}]` : ''
-        logEvent(`error${label}: ${detail}`)
-        // Tell the CONTROL agent (flagship) only, never broadcast to all —
-        // a broadcast would land in the errored ship's own inbox and the
-        // self-loop would restart even for genuine (non-abort) errors.
-        try { await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise ⚠️ ${aid()} session.error${label}: ${detail}`.quiet() } catch { /* ignore */ }
+        const payload = JSON.stringify({ detail, ship: aid(), pid: process.pid })
+        try { await $`.starfleet-ai/bin/starfleetctl agent-bus error handle --stdin`.stdin(payload).quiet() } catch { /* ignore */ }
       }
     },
   }
