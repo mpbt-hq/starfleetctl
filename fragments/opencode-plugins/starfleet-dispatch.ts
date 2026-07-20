@@ -62,12 +62,17 @@ export const plugin = async ({ client, $ }: any) => {
   const RETRY_COOLDOWN_MS = 5 * 60 * 1000
 
   const pollRetryStatus = async () => {
+    client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll tick: sid=${currentSessionID || '(empty)'} hasStatus=${typeof client?.session?.status}` } }).catch(() => {})
     if (!currentSessionID) return
     let status: any
     try {
       status = await client.session.status()
-    } catch { return }
+    } catch (e) {
+      client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `retry-poll status() threw: ${String(e).slice(0, 120)}` } }).catch(() => {})
+      return
+    }
     const body = status?.body ?? status
+    client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll raw: sid=${currentSessionID} keys=${body && typeof body === 'object' ? Object.keys(body).join(',') : typeof body} sample=${JSON.stringify(body).slice(0, 200)}` } }).catch(() => {})
     if (!body || typeof body !== 'object') return
     // status returns { [sessionID]: SessionStatus } for all sessions.
     const st: any = body[currentSessionID] ?? Object.values(body)[0]
