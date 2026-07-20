@@ -62,13 +62,6 @@ export const plugin = async ({ client, $ }: any) => {
     }
   }, 3000)
 
-  const autoPong = (id: string, from: string, text: string) => {
-    if (from === 'Enterprise' && /ping/i.test(text)) {
-      bus({ cmd: 'ack', id, note: 'auto-pong' })
-      bus({ cmd: 'tell', target: 'Enterprise', text: `Pong! (auto-reply to ${id})`, reply_to: id })
-    }
-  }
-
   const poll = async () => {
     if (!tuiReady || !currentSessionID) return
     const r = bus({ cmd: 'inbox' })
@@ -78,7 +71,6 @@ export const plugin = async ({ client, $ }: any) => {
       submitted.add(msg.id)
       client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
       client.tui.showToast({ body: { title: `[fleet] ${msg.id} von ${msg.from}`, message: msg.text, variant: 'info', duration: 10000 } }).catch(() => {})
-      autoPong(msg.id, msg.from, msg.text)
     }
     try {
       await client.session.promptAsync({
@@ -139,7 +131,6 @@ export const plugin = async ({ client, $ }: any) => {
         bus({ cmd: 'seen_mark', id: msg.id })
         submitted.add(msg.id)
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
-        autoPong(msg.id, msg.from, msg.text)
       }
       if (lines.length > 0) {
         output.system.push(
