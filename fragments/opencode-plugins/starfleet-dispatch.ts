@@ -6,8 +6,6 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-import { appendFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
@@ -28,13 +26,6 @@ function loadConfig(): void {
 
 function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
-}
-
-function logEvent(msg: string): void {
-  try {
-    appendFileSync(join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'events.log'),
-      `${new Date().toISOString()}\tplugin\t${aid()}\t${msg}\n`)
-  } catch { /* ignore */ }
 }
 
 // shell-escape for safe interpolation into $`...` template literals.
@@ -85,7 +76,6 @@ async function autoPong($: any, id: string, from: string, text: string): Promise
     try {
       await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${id} auto-pong`.quiet()
       await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise --reply ${id} Pong! (auto-reply to ${id})`.quiet()
-      logEvent(`auto-pong ${id} → Enterprise`)
     } catch { /* ignore */ }
   }
 }
