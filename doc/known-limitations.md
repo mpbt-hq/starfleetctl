@@ -8,6 +8,15 @@ Current caveats and workarounds.
 
 **Workaround:** Use the bash originals (`scripts/agent-bus-monitor-loop`, `scripts/agent-bus-fleet-watch`), or use opencode's plugin-based polling instead.
 
+### opencode plugin polling (agent-facing)
+
+opencode has no `Monitor` tool, so the `starfleet-dispatch.ts` plugin polls the agent-bus and delivers incoming tell/broadcast directives in two ways:
+
+1. **Toast notification** — each new message appears as a TUI toast popup with title `[fleet] <id> von <sender>` and full message text (auto-dismisses after ~10s). Implemented via `client.tui.showToast()`.
+2. **System prompt injection** — at each turn, unseen directives are injected into the system prompt via `experimental.chat.system.transform` (fallback if polling hasn't run yet).
+
+The legacy `autoPong()` responder (hardcoded to answer only Enterprise pings) has been removed. Ships now handle all messages natively through their model.
+
 ## backport-commit path-remap
 
 Uses `strings.ReplaceAll` (literal string replace) instead of regex, unlike the bash original which uses `sed` (basic regex where `.` matches any character). Behaviourally identical for all real paths in the source tree — plain `word/word/word.c` names with no regex metacharacters.
