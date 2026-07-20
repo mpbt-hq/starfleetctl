@@ -40,6 +40,8 @@ Control agent:
   prune                     drop stale heartbeats + fully-acked old directives
   health [--json] [--loop]  fleet liveness watchdog (reads health/<SHIP>.json;
                             Go port of scripts/fleet-health)
+  dispatch --stdin          JSON-RPC entry point for the opencode plugin
+                            (reads dispatchRequest, returns dispatchResponse)
 
 Large inline directives (>768 bytes, e.g. a full hard-reset broadcast) are
 auto-spilled into an attachment automatically: the inline text becomes a short
@@ -204,6 +206,8 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoErrorRun(args[1:])
 	case "config":
 		cmdErr = b.DoConfig()
+	case "dispatch":
+		cmdErr = b.DoDispatch(args[1:])
 	case "monitor-loop":
 		cmdErr = b.DoMonitorLoop()
 	case "fleet-watch":
