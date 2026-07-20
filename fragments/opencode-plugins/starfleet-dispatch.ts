@@ -8,12 +8,25 @@
 
 import { readFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
 const SEEN_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'monitor-seen')
 const SHIPS_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'ships')
-const HEARTBEAT_MS = 300_000
-const POLL_MS = 3_000
+
+// Plugin tuning knobs — fetched from starfleetctl config at startup,
+// falling back to hardcoded defaults if the CLI is unavailable.
+let HEARTBEAT_MS = 300_000
+let POLL_MS = 3_000
+
+function loadConfig(): void {
+  try {
+    const raw = execSync(`.starfleet-ai/bin/starfleetctl agent-bus config`, { cwd: ROOT, timeout: 3000, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim()
+    const cfg = JSON.parse(raw)
+    if (cfg.heartbeat_ms) HEARTBEAT_MS = cfg.heartbeat_ms
+    if (cfg.poll_ms) POLL_MS = cfg.poll_ms
+  } catch { /* use defaults */ }
+}
 
 function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
@@ -96,6 +109,9 @@ async function autoPong($: any, id: string, from: string, text: string): Promise
 }
 
 export const plugin = async ({ client, $ }: any) => {
+  // Fetch tuning knobs from starfleetctl config (heartbeat, poll intervals).
+  loadConfig()
+
   // Write initial health marker via Go CLI (delete-then-write =
   // --delete on stale file, then fresh update). The Go CLI does
   // read-modify-write internally, so we just supply current fields.
