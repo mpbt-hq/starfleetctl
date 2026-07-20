@@ -829,6 +829,15 @@ func Run(root string, args []string) int {
 		return RunAutostart(root, args[1:])
 	}
 
+	if len(args) > 0 && args[0] == "restart" {
+		if err := Restart(root); err != nil {
+			fmt.Fprintln(os.Stderr, "web restart:", err)
+			return 1
+		}
+		fmt.Println("web server restarted")
+		return 0
+	}
+
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-h", "--help":

@@ -46,6 +46,11 @@ cleared:
    (`starfleetctl agent-bus ask "<question>"` or `tell <sender>`), which the praetor/another ship can
    answer asynchronously. The launch prompt already states this; treat it as binding. Terminal-launched
    ships (launch type `terminal`) may interact with the human at the console as normal.
+- **Never `nohup` the web server.** Use `starfleetctl web restart` to start or restart the fleet
+   web console as a daemon. It kills any existing instance, waits for the port to free, then
+   daemonizes a fresh one. `starfleetctl web autostart` (for cron) only starts if not already
+   running. Never use `nohup starfleetctl web …` — it bypasses PID tracking and leaves orphan
+   processes.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
