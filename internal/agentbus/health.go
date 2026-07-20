@@ -65,6 +65,19 @@ func (b *Bus) healthDir() string {
 	return filepath.Join(b.BusDir, "health")
 }
 
+// readHealth reads health/<agent>.json and returns it, or nil on any error.
+func (b *Bus) readHealth(agent string) *healthData {
+	data, err := os.ReadFile(filepath.Join(b.healthDir(), fsafe(agent)+".json"))
+	if err != nil {
+		return nil
+	}
+	var h healthData
+	if err := json.Unmarshal(data, &h); err != nil {
+		return nil
+	}
+	return &h
+}
+
 // DoHealth implements `agent-bus health` — the liveness watchdog.
 func (b *Bus) DoHealth(args []string) error {
 	jsonOut := false
@@ -261,9 +274,13 @@ func modelTs(h healthEntry) string {
 	return fmt.Sprintf("%ds ago", h.ModelAgeS)
 }
 
-// healthData is the per-ship health JSON written by the plugin (or by
-// DoHealthUpdate). Fields are optional — only supplied fields are merged
-// into the existing file (read-modify-write).
+// healthData is the per-ship JSON written to health/<ship>.json — the single
+// source of truth for both plugin liveness and ship task status. Fields are
+// optional; only supplied fields are merged (read-modify-write).
+//
+// The plugin writes plugin_last_run, model_last_action, state, pid, model,
+// server, error_tag. The Go CLI writes task/progress/blocker/eta/branch/note
+// and launch_* fields via DoHealthUpdate or DoStatus.
 type healthData struct {
 	PluginLastRun   string `json:"plugin_last_run"`
 	ModelLastAction string `json:"model_last_action"`
@@ -272,19 +289,30 @@ type healthData struct {
 	Model           string `json:"model,omitempty"`
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
+
+	// Task status — set by the Go CLI (status report, health update --task, etc.)
+	Task     string `json:"task,omitempty"`
+	Progress int    `json:"progress,omitempty"` // 0-100, omitted when unknown
+	Blocker  string `json:"blocker,omitempty"`
+	ETA      string `json:"eta,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Note     string `json:"note,omitempty"`
+
+	// Launch metadata — set by the Go CLI on ship startup.
+	LaunchType string `json:"launch_type,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Updated    string `json:"updated,omitempty"`
 }
 
 // DoHealthUpdate implements `agent-bus health update` — a structured
-// write to health/<ship>.json used by the opencode plugin. Only supplied
-// flags are merged into the existing file (read-modify-write), so the
-// plugin doesn't need to read-then-write itself.
-//
-// Usage:
-//   agent-bus health update [--state <s>] [--plugin-ts <iso>] [--model-ts <iso>]
-//                           [--pid <n>] [--model <m>] [--server <s>] [--error-tag <t>]
-//                           [--delete]
+// write to health/<ship>.json. Only supplied flags are merged into the
+// existing file (read-modify-write). Used by both the opencode plugin
+// (plugin liveness) and the Go CLI (task status, launch metadata).
 func (b *Bus) DoHealthUpdate(args []string) error {
 	var state, pluginTS, modelTS, model, server, errorTag string
+	var task, blocker, eta, branch, note, launchType, parent, provider, updated string
+	progress := -1
 	pid := 0
 	delete := false
 
@@ -304,6 +332,26 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 			if i+1 < len(args) { server = args[i+1]; i++ }
 		case "--error-tag":
 			if i+1 < len(args) { errorTag = args[i+1]; i++ }
+		case "--task":
+			if i+1 < len(args) { task = args[i+1]; i++ }
+		case "--progress":
+			if i+1 < len(args) { fmt.Sscanf(args[i+1], "%d", &progress); i++ }
+		case "--blocker":
+			if i+1 < len(args) { blocker = args[i+1]; i++ }
+		case "--eta":
+			if i+1 < len(args) { eta = args[i+1]; i++ }
+		case "--branch":
+			if i+1 < len(args) { branch = args[i+1]; i++ }
+		case "--note":
+			if i+1 < len(args) { note = args[i+1]; i++ }
+		case "--launch-type":
+			if i+1 < len(args) { launchType = args[i+1]; i++ }
+		case "--parent":
+			if i+1 < len(args) { parent = args[i+1]; i++ }
+		case "--provider":
+			if i+1 < len(args) { provider = args[i+1]; i++ }
+		case "--updated":
+			if i+1 < len(args) { updated = args[i+1]; i++ }
 		case "--delete":
 			delete = true
 		case "-h", "--help":
@@ -336,6 +384,16 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		Model:           coalesce(model, prev.Model),
 		Server:          coalesce(server, prev.Server),
 		ErrorTag:        coalesce(errorTag, prev.ErrorTag),
+		Task:            coalesce(task, prev.Task),
+		Progress:        coalesceProgress(progress, prev.Progress),
+		Blocker:         coalesce(blocker, prev.Blocker),
+		ETA:             coalesce(eta, prev.ETA),
+		Branch:          coalesce(branch, prev.Branch),
+		Note:            coalesce(note, prev.Note),
+		LaunchType:      coalesce(launchType, prev.LaunchType),
+		Parent:          coalesce(parent, prev.Parent),
+		Provider:        coalesce(provider, prev.Provider),
+		Updated:         coalesce(updated, prev.Updated, now),
 	}
 
 	if err := os.MkdirAll(b.healthDir(), 0o755); err != nil {
@@ -350,11 +408,11 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 
 const healthUpdateUsage = `agent-bus health update [flags]
 
-Write/merge per-ship health data to health/<ship>.json. Used by the opencode
-plugin to report plugin liveness, model activity, and error state. Only
-supplied flags are merged into the existing file (read-modify-write).
+Write/merge per-ship health data to health/<ship>.json — the single source
+of truth for both plugin liveness and ship task status. Only supplied flags
+are merged into the existing file (read-modify-write).
 
-Flags:
+Plugin flags (used by opencode plugin):
   --state <s>        idle|working|blocked
   --plugin-ts <iso>  ISO timestamp of last plugin run
   --model-ts <iso>   ISO timestamp of last model action
@@ -362,6 +420,21 @@ Flags:
   --model <m>        model identifier (e.g. "openai/gpt-4o")
   --server <s>       provider/server name
   --error-tag <t>    error classification tag
+
+Task status flags (used by Go CLI / status report):
+  --task <s>         current task description
+  --progress <n>     0-100 (-1 or omit to leave unchanged)
+  --blocker <s>      what blocks progress
+  --eta <s>          estimated completion (free-form)
+  --branch <s>       PR/branch the ship is on
+  --note <s>         human-readable note
+
+Launch metadata (set on ship startup):
+  --launch-type <s>  terminal|background|auto
+  --parent <s>       parent ship
+  --provider <s>     model provider
+  --updated <s>      override timestamp
+
   --delete           remove the health file (session end)
   -h, --help         this help
 `
@@ -378,6 +451,16 @@ func coalesce(vals ...string) string {
 func coalesceInt(vals ...int) int {
 	for _, v := range vals {
 		if v != 0 {
+			return v
+		}
+	}
+	return 0
+}
+
+// coalesceProgress picks the first non-negative value (-1 means "unspecified").
+func coalesceProgress(vals ...int) int {
+	for _, v := range vals {
+		if v >= 0 {
 			return v
 		}
 	}

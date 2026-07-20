@@ -131,7 +131,7 @@ func dispText(m msgRecord) string {
 
 // DoStatus implements `agent-bus status <state> [note]` and, when a structured
 // detail patch is supplied (via the --task/--progress/--blocker/--eta/--branch/
-// --note flags), also writes status/<ship>.json for the fleet console.
+// --note flags), also writes health/<ship>.json (the single source of truth).
 func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if state == "" {
 		return usageErr("agent-bus: status needs a <state> (e.g. working|building|blocked|idle|done)")
@@ -155,12 +155,42 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if err := os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644); err != nil {
 		return err
 	}
-	// Structured detail: only when at least one detail flag was given, so a
-	// plain `status <state>` (legacy) leaves any existing JSON untouched.
+	// Structured detail: merge into health/<ship>.json (single source of truth).
 	if patch.Task != "" || patch.Progress >= 0 || patch.Blocker != "" ||
 		patch.ETA != "" || patch.Branch != "" || patch.Note != "" ||
 		patch.LaunchType != "" || patch.Parent != "" || patch.Provider != "" || patch.Model != "" {
-		if err := b.WriteStatusDetail(b.ShipID, state, patch); err != nil {
+		args := []string{"--state", state}
+		if patch.Task != "" {
+			args = append(args, "--task", patch.Task)
+		}
+		if patch.Progress >= 0 {
+			args = append(args, "--progress", fmt.Sprintf("%d", patch.Progress))
+		}
+		if patch.Blocker != "" {
+			args = append(args, "--blocker", patch.Blocker)
+		}
+		if patch.ETA != "" {
+			args = append(args, "--eta", patch.ETA)
+		}
+		if patch.Branch != "" {
+			args = append(args, "--branch", patch.Branch)
+		}
+		if patch.Note != "" {
+			args = append(args, "--note", patch.Note)
+		}
+		if patch.LaunchType != "" {
+			args = append(args, "--launch-type", patch.LaunchType)
+		}
+		if patch.Parent != "" {
+			args = append(args, "--parent", patch.Parent)
+		}
+		if patch.Provider != "" {
+			args = append(args, "--provider", patch.Provider)
+		}
+		if patch.Model != "" {
+			args = append(args, "--model", patch.Model)
+		}
+		if err := b.DoHealthUpdate(args); err != nil {
 			return err
 		}
 	}

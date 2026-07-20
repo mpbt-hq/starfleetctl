@@ -55,17 +55,42 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 			Note:       r.Note,
 			Stale:      b.stale(r.Epoch, r.State),
 		}
-		if d := b.ReadStatusDetail(r.Agent); d.State != "" || d.Task != "" || d.Note != "" {
-			e.Task = d.Task
-			e.Progress = d.Progress
-			e.Blocker = d.Blocker
-			e.ETA = d.ETA
-			e.Branch = d.Branch
-			e.LaunchType = d.LaunchType
-			e.Parent = d.Parent
-			e.Provider = d.Provider
-			e.Model = d.Model
-			e.Updated = d.Updated
+		// Read health/<ship>.json for task status + model info (single source of truth).
+		if d := b.readHealth(r.Agent); d != nil {
+			if d.Task != "" {
+				e.Task = d.Task
+			}
+			if d.Progress > 0 {
+				e.Progress = d.Progress
+			}
+			if d.Blocker != "" {
+				e.Blocker = d.Blocker
+			}
+			if d.ETA != "" {
+				e.ETA = d.ETA
+			}
+			if d.Branch != "" {
+				e.Branch = d.Branch
+			}
+			if d.LaunchType != "" {
+				e.LaunchType = d.LaunchType
+			}
+			if d.Parent != "" {
+				e.Parent = d.Parent
+			}
+			if d.Provider != "" {
+				e.Provider = d.Provider
+			}
+			if d.Model != "" {
+				e.Model = d.Model
+			}
+			if d.Updated != "" {
+				e.Updated = d.Updated
+			}
+			// Use health note as fallback when TSV note is empty.
+			if e.Note == "" && d.Note != "" {
+				e.Note = d.Note
+			}
 		}
 		out = append(out, e)
 	}

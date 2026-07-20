@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -626,12 +627,15 @@ func (s *Server) apiShips(w http.ResponseWriter, r *http.Request) {
 			Handle: rec.Handle,
 			Note:   rec.Note,
 		}
-		// Read health file for model info
-		healthPath := s.Root + "/_WORK_/agent-bus/health/" + rec.Agent + ".json"
+		// Read health file for model info + task status (single source of truth).
+		healthPath := filepath.Join(s.bus.BusDir, "health", rec.Agent+".json")
 		if data, err := os.ReadFile(healthPath); err == nil {
 			var h struct {
-				Model  string `json:"model"`
-				Server string `json:"server"`
+				Model    string `json:"model"`
+				Server   string `json:"server"`
+				Task     string `json:"task,omitempty"`
+				Progress int    `json:"progress,omitempty"`
+				Blocker  string `json:"blocker,omitempty"`
 			}
 			if json.Unmarshal(data, &h) == nil {
 				info.Model = h.Model

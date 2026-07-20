@@ -4,7 +4,6 @@
 package agentbus
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,46 +24,9 @@ type StatusRecord struct {
 	Note    string
 }
 
-// StatusDetail is the richer, structured per-ship status written alongside the
-// legacy TSV heartbeat (status/<agent>.json). Agents may report what they are
-// currently working on, how far along, what blocks them, and an ETA — so a
-// fleet console can show more than a one-line note. All fields are optional
-// except State; a plain `agent-bus status <state>` still writes only the TSV
-// and leaves the JSON untouched (or seeds it from the TSV on first report).
-type StatusDetail struct {
-	State    string `json:"state"`
-	Task     string `json:"task,omitempty"`
-	Progress int    `json:"progress,omitempty"` // 0-100, omitted when unknown
-	Blocker  string `json:"blocker,omitempty"`
-	ETA      string `json:"eta,omitempty"`   // free-form, e.g. "2026-07-17" or "~30m"
-	Branch   string `json:"branch,omitempty"` // PR/branch the ship is on
-	Note     string `json:"note,omitempty"`
-
-	// Launch metadata — how/where this ship was started, so the board and web
-	// console can show the command hierarchy and let the user pick an
-	// alternate provider/model when one is overloaded/quota'd.
-	//
-	//   LaunchType: "terminal" (started directly at a terminal),
-	//               "background" (detached, e.g. session run/ship-run),
-	//               "auto" (launched via web GUI or timer).
-	//   Parent:     the ship this one was launched under. Auto-launches from
-	//               the web GUI hang under the flagship (Enterprise); a ship
-	//               spawned by another AI/ship lists that ship as parent.
-	//   Provider:   model provider (e.g. "openai", "anthropic", "nvidia"),
-	//               derived from the model string when not given explicitly.
-	//   Model:      the model id the ship runs (e.g. "gpt-4o", a
-	//               "nvidia/..." style id, etc.).
-	LaunchType string `json:"launch_type,omitempty"`
-	Parent     string `json:"parent,omitempty"`
-	Provider   string `json:"provider,omitempty"`
-	Model      string `json:"model,omitempty"`
-
-	Updated string `json:"updated"` // ISO timestamp, set on every write
-}
-
-// statusPatch carries only the fields a `status report` invocation wants to
+// StatusPatch carries the fields a `status report` invocation wants to
 // set. Progress < 0 means "not specified" so a caller can distinguish "leave
-// unchanged" from "set to 0".
+// unchanged" from "set to 0". Written to health/<ship>.json via DoHealthUpdate.
 type StatusPatch struct {
 	Task       string
 	Progress   int
@@ -165,66 +127,6 @@ func (b *Bus) AllStatusRecords() []StatusRecord {
 		}
 	}
 	return out
-}
-
-// ReadStatusDetail reads status/<agent>.json if present, else returns the
-// zero value (callers treat a zero Task/Note as "no detail reported").
-func (b *Bus) ReadStatusDetail(agent string) StatusDetail {
-	var d StatusDetail
-	data, err := os.ReadFile(b.dfile(agent))
-	if err != nil {
-		return d
-	}
-	_ = json.Unmarshal(data, &d)
-	return d
-}
-
-// WriteStatusDetail merges the given partial patch into the on-disk JSON for
-// agent, preserving any fields not explicitly overridden (so a later
-// `status report --task X` doesn't wipe a previously-set blocker). State is
-// always taken from the latest TSV heartbeat when the patch doesn't carry one.
-// Progress is only overwritten when patch.Progress >= 0.
-func (b *Bus) WriteStatusDetail(agent, state string, patch StatusPatch) error {
-	cur := b.ReadStatusDetail(agent)
-	if patch.Task != "" {
-		cur.Task = patch.Task
-	}
-	if patch.Progress >= 0 {
-		cur.Progress = patch.Progress
-	}
-	if patch.Blocker != "" {
-		cur.Blocker = patch.Blocker
-	}
-	if patch.ETA != "" {
-		cur.ETA = patch.ETA
-	}
-	if patch.Branch != "" {
-		cur.Branch = patch.Branch
-	}
-	if patch.Note != "" {
-		cur.Note = patch.Note
-	}
-	if patch.LaunchType != "" {
-		cur.LaunchType = patch.LaunchType
-	}
-	if patch.Parent != "" {
-		cur.Parent = patch.Parent
-	}
-	if patch.Provider != "" {
-		cur.Provider = patch.Provider
-	}
-	if patch.Model != "" {
-		cur.Model = patch.Model
-	}
-	if cur.State == "" {
-		cur.State = state
-	}
-	cur.Updated = isots()
-	data, err := json.MarshalIndent(cur, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(b.dfile(agent), data, 0o644)
 }
 
 func (b *Bus) allMsgRecords() []msgRecord {
