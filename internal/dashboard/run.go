@@ -30,6 +30,9 @@ const topicUsage = `dashboard topic <command> [args…]
   show <slug>
   write <slug> <file|->
   new <slug> --title "<t>" [--status "<s>"] [--parked]
+  update <slug> [--status "<s>"] [--title "<t>"] [--category <c>]
+                [--kind <k>] [--assigned-to <a>] [--doc-ref <d>]
+                [--noted-by <n>] [--since <s>]
   commit <slug> -m "<msg>" [--no-push]
 `
 
@@ -146,6 +149,46 @@ func runTopic(d *Dashboard, args []string) int {
 			return 2
 		}
 		cmdErr = d.DoTopicCommit(slug, msg, push)
+	case "update":
+		if len(args) < 2 {
+			fmt.Fprint(os.Stderr, topicUsage)
+			return 2
+		}
+		slug := args[1]
+		m, body, lerr := d.DoTopicLoad(slug)
+		if lerr != nil {
+			fmt.Fprintln(os.Stderr, "dashboard topic update:", lerr)
+			return 1
+		}
+		changed := false
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--status":
+				if i+1 < len(args) { m.Status = args[i+1]; changed = true; i++ }
+			case "--title":
+				if i+1 < len(args) { m.Title = args[i+1]; changed = true; i++ }
+			case "--category":
+				if i+1 < len(args) { m.Category = args[i+1]; changed = true; i++ }
+			case "--kind":
+				if i+1 < len(args) { m.Kind = args[i+1]; changed = true; i++ }
+			case "--assigned-to":
+				if i+1 < len(args) { m.AssignedTo = args[i+1]; changed = true; i++ }
+			case "--doc-ref":
+				if i+1 < len(args) { m.DocRef = args[i+1]; changed = true; i++ }
+			case "--noted-by":
+				if i+1 < len(args) { m.NotedBy = args[i+1]; changed = true; i++ }
+			case "--since":
+				if i+1 < len(args) { m.Since = args[i+1]; changed = true; i++ }
+			default:
+				fmt.Fprintf(os.Stderr, "dashboard topic update: unknown option: %s\n", args[i])
+				return 2
+			}
+		}
+		if !changed {
+			fmt.Fprintln(os.Stderr, "dashboard topic update: no fields to update")
+			return 2
+		}
+		cmdErr = d.DoTopicUpdate(slug, m, body)
 	default:
 		fmt.Fprintf(os.Stderr, "dashboard topic: unknown command: %s\n\n%s", args[0], topicUsage)
 		return 2
