@@ -10,123 +10,59 @@ import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
 
-// Plugin tuning knobs — always fetched from starfleetctl config;
-// the Go CLI applies defaults, so these are always valid after loadConfig().
+// Generic JSON-RPC to starfleetctl agent-bus dispatch.
+// JSON in via stdin → JSON out. No shell escaping, no text parsing.
+function bus(cmd: Record<string, unknown>): any {
+  try {
+    const raw = execSync(
+      `.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
+      { input: JSON.stringify(cmd), cwd: ROOT, timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'] }
+    ).toString().trim()
+    return JSON.parse(raw)
+  } catch { return { ok: false, error: 'cli failed' } }
+}
+
+// Fetch tuning knobs from starfleetctl config.
 let HEARTBEAT_MS = 0
 let POLL_MS = 0
-
 function loadConfig(): void {
-  try {
-    const raw = execSync(`.starfleet-ai/bin/starfleetctl agent-bus config`, { cwd: ROOT, timeout: 3000, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim()
-    const cfg = JSON.parse(raw)
-    HEARTBEAT_MS = cfg.heartbeat_ms
-    POLL_MS = cfg.poll_ms
-  } catch { /* starfleetctl missing — plugin is useless without it anyway */ }
+  const r = bus({ cmd: 'config' })
+  if (r.ok) { HEARTBEAT_MS = r.heartbeat_ms; POLL_MS = r.poll_ms }
 }
 
 function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
 }
 
-// shell-escape for safe interpolation into $`...` template literals.
-function esc(s: string): string {
-  return s.replace(/'/g, "'\\''")
-}
-
-// Write health data via starfleetctl Go CLI (read-modify-write in Go,
-// so we only pass the fields that changed).
-async function healthUpdate($: any, patch: Record<string, string | undefined>): Promise<void> {
-  const args: string[] = []
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === undefined || v === '') continue
-    const flag = k.replace(/([A-Z])/g, '-$1').toLowerCase()
-    args.push(`--${flag} '${esc(v)}'`)
-  }
-  if (args.length === 0) return
-  try { await $`.starfleet-ai/bin/starfleetctl agent-bus health update ${args.join(' ')}`.quiet() } catch { /* ignore */ }
-}
-
-// agent-bus inbox uses fixed-width columns:
-//   %-6s  %-7s  %-18s  %-4s  %s
-//   0-5    8-14   17-34   37-40  41+
-function parseInboxLine(line: string): { id: string; from: string; text: string } | null {
-  if (!line || line.startsWith('ID') || line.startsWith('---') || line.startsWith('(inbox')) return null
-  const id = line.slice(0, 6).trim()
-  if (!id.startsWith('m')) return null
-  const from = line.slice(17, 35).trim()
-  const text = line.slice(41).trim()
-  if (!text) return null
-  return { id, from, text }
-}
-
-async function getInbox($: any): Promise<{ id: string; from: string; text: string }[]> {
-    try {
-      const output = await $`.starfleet-ai/bin/starfleetctl agent-bus inbox`.text()
-      const msgs: { id: string; from: string; text: string }[] = []
-      for (const line of output.split('\n')) {
-        const msg = parseInboxLine(line)
-        if (msg) msgs.push(msg)
-      }
-      return msgs
-    } catch { return [] }
-  }
-
-async function autoPong($: any, id: string, from: string, text: string): Promise<void> {
-  if (from === 'Enterprise' && /ping/i.test(text)) {
-    try {
-      await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${id} auto-pong`.quiet()
-      await $`.starfleet-ai/bin/starfleetctl agent-bus tell Enterprise --reply ${id} Pong! (auto-reply to ${id})`.quiet()
-    } catch { /* ignore */ }
-  }
-}
-
 export const plugin = async ({ client, $ }: any) => {
-  // Fetch tuning knobs from starfleetctl config (heartbeat, poll intervals).
   loadConfig()
 
-  // Write initial health marker via Go CLI (delete-then-write =
-  // --delete on stale file, then fresh update). The Go CLI does
-  // read-modify-write internally, so we just supply current fields.
-  try { await $`.starfleet-ai/bin/starfleetctl agent-bus health update --delete`.quiet() } catch { /* ignore */ }
-  await healthUpdate($, { state: 'working', pluginLastRun: new Date().toISOString(), pid: String(process.pid) })
+  // Initial health: delete stale + fresh write.
+  bus({ cmd: 'health', delete: true })
+  bus({ cmd: 'health', state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
 
-  const heartbeatTimer = setInterval(async () => {
-    try {
-      await healthUpdate($, { pluginLastRun: new Date().toISOString(), ...currentModel })
-      $`.starfleet-ai/bin/starfleetctl agent-bus touch`.quiet()
-    } catch { /* ignore */ }
+  const heartbeatTimer = setInterval(() => {
+    bus({ cmd: 'health', plugin_last_run: new Date().toISOString(), ...currentModel })
+    bus({ cmd: 'touch' })
   }, HEARTBEAT_MS)
 
   let tuiReady = false
-  let sessionNeedsIdentity = true // first turn after session creation
-  let submitted = new Set<string>() // in-memory dedup für Polling
-  let turnCount = 0 // track turns for model_last_action
-  let currentModel: { model?: string; server?: string } = {} // tracked via message.updated events
+  let sessionNeedsIdentity = true
+  let submitted = new Set<string>()
+  let turnCount = 0
+  let currentModel: { model?: string; server?: string } = {}
 
-  // seed: ack all current inbox messages so they don't keep showing up
-  // as "unread" after a restart. IMPORTANT: do NOT markSeen() them here —
-  // writing them into monitor-seen would poison brand-new directives that
-  // arrived just before/at session start, so the poll loop and the
-  // system.transform injection would both skip them and an idle ship would
-  // never wake. Only messages this session *actually* injects get marked
-  // seen (see poll()/transform), which is the correct cross-restart dedup.
-  const inbox = await getInbox($)
-  for (const msg of inbox) {
-    try { await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${msg.id} init-seen`.quiet() } catch { /* ignore */ }
+  // Seed: ack all current inbox so they don't reappear as "unread".
+  const inbox = bus({ cmd: 'inbox' })
+  for (const msg of (inbox.messages || [])) {
+    bus({ cmd: 'ack', id: msg.id, note: 'init-seen' })
   }
-  // seed submitted set with THIS ship's seen messages via CLI —
-  // using all ships' IDs caused submitted.size > 100 guard to
-  // kill the poll loop permanently on busy repos.
-  try {
-    const seenOut = await $`.starfleet-ai/bin/starfleetctl agent-bus monitor-seen load`.text()
-    for (const id of seenOut.split('\n')) {
-      const trimmed = id.trim()
-      if (trimmed) submitted.add(trimmed)
-    }
-  } catch { /* ignore */ }
+  // Seed submitted set with THIS ship's seen messages.
+  const seen = bus({ cmd: 'seen_load' })
+  for (const id of (seen.seen || [])) { submitted.add(id) }
 
-  try { await $`.starfleet-ai/bin/starfleetctl agent-bus prune`.quiet() } catch { /* ignore */ }
-  try { await $`.starfleet-ai/bin/starfleetctl agent-bus status idle opencode ship`.quiet() } catch { /* ignore */ }
+  bus({ cmd: 'prune' })
+  bus({ cmd: 'status', state: 'idle', note: 'opencode ship' })
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -144,39 +80,43 @@ export const plugin = async ({ client, $ }: any) => {
     } catch { return false }
   }
 
+  const autoPong = (id: string, from: string, text: string) => {
+    if (from === 'Enterprise' && /ping/i.test(text)) {
+      bus({ cmd: 'ack', id, note: 'auto-pong' })
+      bus({ cmd: 'tell', target: 'Enterprise', text: `Pong! (auto-reply to ${id})`, reply_to: id })
+    }
+  }
+
   const poll = async () => {
     if (!tuiReady) return
-    try {
-      const msgs = await getInbox($)
-      for (const msg of msgs) {
-        if (submitted.has(msg.id)) continue
-        submitted.add(msg.id)
-        client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
-        await autoPong($, msg.id, msg.from, msg.text)
-
-        const ok = await submit(`[${msg.id}] from ${msg.from}: ${msg.text}`)
-        if (!ok) {
-          // submit failed → retry next poll
-          submitted.delete(msg.id)
-        }
-      }
-    } catch { /* ignore */ }
+    const r = bus({ cmd: 'inbox' })
+    for (const msg of (r.messages || [])) {
+      if (submitted.has(msg.id)) continue
+      submitted.add(msg.id)
+      client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
+      autoPong(msg.id, msg.from, msg.text)
+      const ok = await submit(`[${msg.id}] from ${msg.from}: ${msg.text}`)
+      if (!ok) submitted.delete(msg.id)
+    }
   }
 
   const pollTimer = setInterval(poll, POLL_MS)
 
-  // SIGTERM/SIGINT get async cleanup via beforeExit; 'exit' is a
-  // synchronous last-resort that can't await — write health directly.
+  // Sync cleanup on process exit (can't await here).
   process.on('exit', () => {
     clearInterval(heartbeatTimer)
     clearInterval(pollTimer)
-    // Best-effort sync write via child_process.execSync (block but don't hang).
     try {
       const { execSync } = require('node:child_process')
-      execSync(`.starfleet-ai/bin/starfleetctl agent-bus health update --state idle --pid ${process.pid}`,
+      const payload = JSON.stringify({ cmd: 'health', state: 'idle', pid: process.pid })
+      execSync(`.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
+        { input: payload, cwd: ROOT, timeout: 2000, stdio: ['pipe', 'ignore', 'ignore'] })
+    } catch { /* ignore */ }
+    try {
+      const { execSync } = require('node:child_process')
+      execSync(`.starfleet-ai/bin/starfleetctl agent-bus clear`,
         { cwd: ROOT, timeout: 2000, stdio: 'ignore' })
     } catch { /* ignore */ }
-    try { execSync(`.starfleet-ai/bin/starfleetctl agent-bus clear`, { cwd: ROOT, timeout: 2000, stdio: 'ignore' }) } catch { /* ignore */ }
   })
 
   return {
@@ -185,22 +125,16 @@ export const plugin = async ({ client, $ }: any) => {
       output: { system: string[] },
     ) => {
       turnCount++
-      // Health: every system.transform = plugin ran. If turnCount > 1,
-      // the model just finished an action (tool call / response) since
-      // the last transform → update model_last_action.
-      await healthUpdate($, {
-        pluginLastRun: new Date().toISOString(),
-        modelLastAction: turnCount > 1 ? new Date().toISOString() : undefined,
+      bus({
+        cmd: 'health',
+        plugin_last_run: new Date().toISOString(),
+        model_last_action: turnCount > 1 ? new Date().toISOString() : undefined,
         state: 'working',
-        pid: String(process.pid),
+        pid: process.pid,
       })
+      bus({ cmd: 'status', state: 'working', note: 'opencode ship' })
 
-      try { await $`.starfleet-ai/bin/starfleetctl agent-bus status working opencode ship`.quiet() } catch { /* ignore */ }
-
-      // Fleet identity: injected on session.created / session.cleared /
-      // session.reset (via sessionNeedsIdentity flag).  Safety-net: also
-      // re-inject if the marker is absent from the system context (covers
-      // edge cases where /clear fires no recognizable event).
+      // Fleet identity injection.
       const hasIdentity = output.system.some(l => l.includes('--- fleet identity ---'))
       if (sessionNeedsIdentity || !hasIdentity) {
         sessionNeedsIdentity = false
@@ -208,35 +142,23 @@ export const plugin = async ({ client, $ }: any) => {
         const role = process.env.STARFLEET_ROLE || 'ship'
         const target = process.env.STARFLEET_TARGET || ''
         const parts = [`You are ${role} ${shipId}.`]
-        if (target) {
-          parts.push(`Report to ${target}.`)
-        }
+        if (target) parts.push(`Report to ${target}.`)
         parts.push('Re-read and follow the agent instructions in agents.d/index.md.')
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
+      // Fetch inbox and inject new directives.
       const lines: string[] = []
-      const msgs = await getInbox($)
-
-      for (const msg of msgs) {
-        // Use the per-ship in-memory dedup (this session's actual handling),
-        // not loadSeenAll(): a directive addressed to THIS ship must be
-        // injected even if another ship coincidentally marked it seen, and a
-        // message skipped by the startup seed must still wake an idle ship.
+      const r = bus({ cmd: 'inbox' })
+      for (const msg of (r.messages || [])) {
         if (submitted.has(msg.id)) continue
-        try { await $`.starfleet-ai/bin/starfleetctl agent-bus monitor-seen mark '${esc(msg.id)}'`.quiet() } catch { /* ignore */ }
-        submitted.add(msg.id) // sync with polling dedup
+        bus({ cmd: 'seen_mark', id: msg.id })
+        submitted.add(msg.id)
         lines.push(`[${msg.id}] from ${msg.from}: ${msg.text}`)
-        await autoPong($, msg.id, msg.from, msg.text)
+        autoPong(msg.id, msg.from, msg.text)
       }
-
       if (lines.length > 0) {
-        output.system.push(
-          '',
-          '--- agent-bus inbox ---',
-          ...lines,
-          '--- end agent-bus inbox ---',
-        )
+        output.system.push('', '--- agent-bus inbox ---', ...lines, '--- end agent-bus inbox ---')
       }
     },
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
@@ -244,37 +166,26 @@ export const plugin = async ({ client, $ }: any) => {
         tuiReady = true
         sessionNeedsIdentity = true
         turnCount = 0
-        await healthUpdate($, { modelLastAction: new Date().toISOString(), state: 'working', pid: String(process.pid) })
-        // Label the TUI session/tab title with the ship name (formerly
-        // the standalone session-title.ts plugin).
+        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
         const shipName = process.env.STARFLEET_SHIP_ID
         if (shipName) {
           try {
             const sessionId = (event.properties?.info as { id?: string })?.id
-            if (sessionId) {
-              await client.session.update({ path: { id: sessionId }, body: { title: shipName } })
-            }
+            if (sessionId) await client.session.update({ path: { id: sessionId }, body: { title: shipName } })
           } catch { /* ignore */ }
         }
       }
-      // /clear, /new, /compact may emit session.cleared or session.reset
-      // instead of session.created — re-inject fleet identity in all cases.
       if (event.type === 'session.cleared' || event.type === 'session.reset') {
         sessionNeedsIdentity = true
         turnCount = 0
-        currentModel = {} // model state is stale after clear/reset
-        await healthUpdate($, { modelLastAction: new Date().toISOString(), state: 'working', pid: String(process.pid) })
+        currentModel = {}
+        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
       }
-      // Track model changes in-memory: every assistant message carries
-      // the exact providerID/modelID that processed it. This fires on
-      // every turn, so currentModel is always current — no polling needed.
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
         if (info?.role === 'assistant' && info?.modelID) {
           currentModel = { model: info.modelID, server: info.providerID }
-          // Auto-recovery: a successful assistant turn means the model API
-          // is responsive again — clear any prior error_tag / blocked state.
-          await healthUpdate($, { state: 'working', errorTag: undefined, pluginLastRun: new Date().toISOString() })
+          bus({ cmd: 'health', state: 'working', error_tag: undefined, plugin_last_run: new Date().toISOString() })
         }
       }
       if (event.type === 'session.error') {
@@ -282,8 +193,7 @@ export const plugin = async ({ client, $ }: any) => {
           (event.properties?.error as { message?: string; code?: string })?.message ||
           (event.properties?.error as { code?: string })?.code ||
           'unknown error'
-        const payload = JSON.stringify({ detail, ship: aid(), pid: process.pid })
-        try { await $`.starfleet-ai/bin/starfleetctl agent-bus error handle --stdin`.stdin(payload).quiet() } catch { /* ignore */ }
+        bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
       }
     },
   }
