@@ -7,6 +7,7 @@
 // Edit the canonical copy in the starfleetctl repo instead.
 
 import { execSync } from 'node:child_process'
+import { appendFileSync, mkdirSync } from 'node:fs'
 
 const ROOT = process.cwd()
 
@@ -34,16 +35,21 @@ function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
 }
 
-// Visible TUI toast so the operator can confirm the plugin is alive and the
-// retry-poll actually fires (client.app.log only lands in opencode.log).
+// Reliable, TUI-independent tick log: appends a line per poll so the operator
+// can `tail -f` it (client.app.log only lands in opencode.log; client.tui.toast
+// is unreliable in background/detached ship mode).
+const TICK_DIR = ROOT + '/.starfleet-ai/var/agent-bus/poll'
+mkdirSync(TICK_DIR, { recursive: true })
+function tickLog(line: string): void {
+  try { appendFileSync(TICK_DIR + '/' + aid() + '.tick', new Date().toISOString() + ' ' + line + '\n') } catch { /* ignore */ }
+}
+
+// Visible TUI toast (best-effort; may be a no-op in detached mode).
 function toast(variant: string, title: string, message: string, duration = 2500): void {
   try {
     const t: any = (client as any).tui
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `toast dbg: tui=${typeof t} showToast=${typeof t?.showToast}` } }).catch(() => {})
     t.showToast({ body: { variant: variant as any, title, message, duration } })
-  } catch (e) {
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `toast threw: ${String(e).slice(0, 140)}` } }).catch(() => {})
-  }
+  } catch { /* tui not ready / unavailable */ }
 }
 
 export const plugin = async ({ client, $ }: any) => {
@@ -74,6 +80,7 @@ export const plugin = async ({ client, $ }: any) => {
   const RETRY_COOLDOWN_MS = 5 * 60 * 1000
 
   const pollRetryStatus = async () => {
+    tickLog(`retry-poll tick sid=${currentSessionID || '(empty)'}`)
     toast('info', 'starfleet-dispatch', `retry-poll tick (sid=${currentSessionID || '(empty)'})`, 1500)
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll tick: sid=${currentSessionID || '(empty)'} hasStatus=${typeof client?.session?.status}` } }).catch(() => {})
     if (!currentSessionID) return
@@ -99,6 +106,7 @@ export const plugin = async ({ client, $ }: any) => {
     lastRetryDetail = detail
     retryCooldownUntil = now + RETRY_COOLDOWN_MS
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `session retry status: ${detail}` } }).catch(() => {})
+    tickLog(`MODEL RETRY (quota/zen): ${detail}`)
     toast('warning', 'starfleet-dispatch', `model retry: ${detail}`, 6000)
     bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
   }
