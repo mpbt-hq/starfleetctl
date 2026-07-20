@@ -111,6 +111,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchError(req)
 	case "clear":
 		return b.dispatchClear()
+	case "exit":
+		return b.dispatchExit(req)
 	default:
 		return dispatchResponse{OK: false, Error: "unknown cmd: " + req.Cmd}
 	}
@@ -279,6 +281,17 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 
 func (b *Bus) dispatchClear() dispatchResponse {
 	if err := b.DoClear(); err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
+	return dispatchResponse{OK: true}
+}
+
+func (b *Bus) dispatchExit(req dispatchRequest) dispatchResponse {
+	note := req.Note
+	if note == "" {
+		note = "exit"
+	}
+	if err := b.DoExit(note); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
 	return dispatchResponse{OK: true}

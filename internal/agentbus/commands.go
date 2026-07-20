@@ -258,6 +258,27 @@ func (b *Bus) DoClear() error {
 	return nil
 }
 
+// DoExit implements `agent-bus exit` — clean ship shutdown. Updates the
+// health record to "offline" (intentional, not a crash), deletes the
+// heartbeat TSV, and logs the event. Single atomic operation for the
+// plugin's process.on('exit') handler.
+func (b *Bus) DoExit(reason string) error {
+	lock, err := b.lockBus()
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	// Update health to offline — the watchdog treats this as intentional.
+	_ = b.DoHealthUpdate([]string{"--state", "offline"})
+	// Remove heartbeat TSV so the board no longer shows this ship.
+	_ = os.Remove(b.sfile(b.ShipID))
+	if reason == "" {
+		reason = "exit"
+	}
+	b.logEvent("exit", reason)
+	return nil
+}
+
 // DoInbox implements `agent-bus inbox`.
 func (b *Bus) DoInbox() error {
 	found := false

@@ -223,6 +223,8 @@ func evalHealth(ship string, rh rawHealth, stalePlugin, staleModel int) healthEn
 
 	effective := rh.State
 	switch {
+	case rh.State == "offline":
+		effective = "OFFLINE" // intentional shutdown, not a problem
 	case rh.State == "blocked":
 		effective = "BLOCKED"
 	case rh.PID > 0 && !pidAlive:

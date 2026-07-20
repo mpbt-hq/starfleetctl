@@ -108,14 +108,8 @@ export const plugin = async ({ client, $ }: any) => {
     clearInterval(pollTimer)
     try {
       const { execSync } = require('node:child_process')
-      const payload = JSON.stringify({ cmd: 'health', state: 'idle', pid: process.pid })
       execSync(`.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
-        { input: payload, cwd: ROOT, timeout: 2000, stdio: ['pipe', 'ignore', 'ignore'] })
-    } catch { /* ignore */ }
-    try {
-      const { execSync } = require('node:child_process')
-      execSync(`.starfleet-ai/bin/starfleetctl agent-bus clear`,
-        { cwd: ROOT, timeout: 2000, stdio: 'ignore' })
+        { input: '{"cmd":"exit","note":"process exit"}', cwd: ROOT, timeout: 2000, stdio: ['pipe', 'ignore', 'ignore'] })
     } catch { /* ignore */ }
   })
 
