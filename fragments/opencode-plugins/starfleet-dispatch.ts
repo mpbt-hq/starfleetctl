@@ -6,18 +6,20 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-import { readFileSync, appendFileSync } from 'node:fs'
+import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
-const SEEN_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'monitor-seen')
-const SHIPS_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'ships')
 
 // Plugin tuning knobs — fetched from starfleetctl config at startup,
 // falling back to hardcoded defaults if the CLI is unavailable.
 let HEARTBEAT_MS = 300_000
 let POLL_MS = 3_000
+
+function aid(): string {
+  return process.env.STARFLEET_SHIP_ID || 'default'
+}
 
 function loadConfig(): void {
   try {
@@ -28,23 +30,16 @@ function loadConfig(): void {
   } catch { /* use defaults */ }
 }
 
-function aid(): string {
-  return process.env.STARFLEET_SHIP_ID || 'default'
-}
-
-function seenFile(): string {
-  return join(SEEN_DIR, aid())
-}
-
-function loadSeenShip(): Set<string> {
+// Load this ship's seen IDs from starfleetctl (not from files directly).
+function loadSeenShipSync(): Set<string> {
   const s = new Set<string>()
   try {
-    const content = readFileSync(seenFile(), 'utf-8')
-    for (const line of content.split('\n')) {
+    const raw = execSync(`.starfleet-ai/bin/starfleetctl agent-bus monitor-seen load`, { cwd: ROOT, timeout: 3000, stdio: ['pipe', 'pipe', 'ignore'] }).toString()
+    for (const line of raw.split('\n')) {
       const id = line.trim()
       if (id) s.add(id)
     }
-  } catch { /* ignore missing file */ }
+  } catch { /* starfleetctl broken → visible error on console */ }
   return s
 }
 
@@ -145,7 +140,7 @@ export const plugin = async ({ client, $ }: any) => {
   // seed submitted set with THIS ship's seen messages only —
   // using all ships' IDs caused submitted.size > 100 guard to
   // kill the poll loop permanently on busy repos.
-  for (const id of loadSeenShip()) {
+  for (const id of loadSeenShipSync()) {
     submitted.add(id)
   }
 
