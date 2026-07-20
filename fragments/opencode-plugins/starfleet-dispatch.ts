@@ -37,7 +37,7 @@ function aid(): string {
 // Visible TUI toast so the operator can confirm the plugin is alive and the
 // retry-poll actually fires (client.app.log only lands in opencode.log).
 function toast(variant: string, title: string, message: string, duration = 2500): void {
-  try { client.tui.toast({ variant: variant as any, title, message, duration }) } catch { /* tui not ready */ }
+  try { client.tui.showToast({ body: { variant: variant as any, title, message, duration } }) } catch { /* tui not ready */ }
 }
 
 export const plugin = async ({ client, $ }: any) => {
