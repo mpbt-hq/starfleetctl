@@ -34,6 +34,12 @@ function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
 }
 
+// Visible TUI toast so the operator can confirm the plugin is alive and the
+// retry-poll actually fires (client.app.log only lands in opencode.log).
+function toast(variant: string, title: string, message: string, duration = 2500): void {
+  try { client.tui.toast({ variant: variant as any, title, message, duration }) } catch { /* tui not ready */ }
+}
+
 export const plugin = async ({ client, $ }: any) => {
   loadConfig()
 
@@ -62,6 +68,7 @@ export const plugin = async ({ client, $ }: any) => {
   const RETRY_COOLDOWN_MS = 5 * 60 * 1000
 
   const pollRetryStatus = async () => {
+    toast('info', 'starfleet-dispatch', `retry-poll tick (sid=${currentSessionID || '(empty)'})`, 1500)
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll tick: sid=${currentSessionID || '(empty)'} hasStatus=${typeof client?.session?.status}` } }).catch(() => {})
     if (!currentSessionID) return
     let status: any
@@ -86,6 +93,7 @@ export const plugin = async ({ client, $ }: any) => {
     lastRetryDetail = detail
     retryCooldownUntil = now + RETRY_COOLDOWN_MS
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `session retry status: ${detail}` } }).catch(() => {})
+    toast('warning', 'starfleet-dispatch', `model retry: ${detail}`, 6000)
     bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
   }
 
