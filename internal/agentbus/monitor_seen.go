@@ -60,6 +60,19 @@ func (b *Bus) DoMonitorSeenLoadAll() error {
 	return nil
 }
 
+// DoMonitorSeenLoad implements `agent-bus monitor-seen load` —
+// prints all seen IDs for the current ship (one per line).
+func (b *Bus) DoMonitorSeenLoad() error {
+	seen, err := b.loadSeen(b.ShipID)
+	if err != nil {
+		return err
+	}
+	for id := range seen {
+		fmt.Println(id)
+	}
+	return nil
+}
+
 // loadSeen returns the set of seen IDs for a specific ship.
 func (b *Bus) loadSeen(shipID string) (map[string]bool, error) {
 	seen := make(map[string]bool)

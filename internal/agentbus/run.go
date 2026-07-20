@@ -185,7 +185,7 @@ func Run(root string, args []string) int {
 		}
 	case "monitor-seen":
 		if len(args) < 2 {
-			cmdErr = usageErr("agent-bus monitor-seen: need <subcommand> (mark|check|load-all)")
+			cmdErr = usageErr("agent-bus monitor-seen: need <subcommand> (mark|check|load|load-all)")
 			break
 		}
 		switch args[1] {
@@ -193,6 +193,8 @@ func Run(root string, args []string) int {
 			cmdErr = b.DoMonitorSeenMark(arg(args, 2))
 		case "check":
 			cmdErr = b.DoMonitorSeenCheck(arg(args, 2))
+		case "load":
+			cmdErr = b.DoMonitorSeenLoad()
 		case "load-all":
 			cmdErr = b.DoMonitorSeenLoadAll()
 		default:
