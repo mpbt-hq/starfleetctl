@@ -49,6 +49,7 @@ export const plugin = async ({ client, $ }: any) => {
   let submitted = new Set<string>()
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
+  let currentSessionID = ''
 
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
@@ -61,15 +62,6 @@ export const plugin = async ({ client, $ }: any) => {
     }
   }, 3000)
 
-  const submit = async (text: string) => {
-    if (!tuiReady) return false
-    try {
-      await client.tui.appendPrompt({ body: { text: `\n📨 ${text}` } })
-      await client.tui.submitPrompt()
-      return true
-    } catch { return false }
-  }
-
   const autoPong = (id: string, from: string, text: string) => {
     if (from === 'Enterprise' && /ping/i.test(text)) {
       bus({ cmd: 'ack', id, note: 'auto-pong' })
@@ -78,16 +70,23 @@ export const plugin = async ({ client, $ }: any) => {
   }
 
   const poll = async () => {
-    if (!tuiReady) return
+    if (!tuiReady || !currentSessionID) return
     const r = bus({ cmd: 'inbox' })
-    for (const msg of (r.messages || [])) {
-      if (submitted.has(msg.id)) continue
+    const msgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
+    if (msgs.length === 0) return
+    for (const msg of msgs) {
       submitted.add(msg.id)
       client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
       autoPong(msg.id, msg.from, msg.text)
-      const ok = await submit(`[${msg.id}] from ${msg.from}: ${msg.text}`)
-      if (!ok) submitted.delete(msg.id)
     }
+    try {
+      await client.session.promptAsync({
+        path: { id: currentSessionID },
+        body: {
+          parts: [{ type: 'text', text: `(Fleet directive${msgs.length > 1 ? 's' : ''} received)`, synthetic: true }],
+        },
+      })
+    } catch { /* ignore */ }
   }
 
   const pollTimer = setInterval(poll, POLL_MS)
@@ -138,11 +137,17 @@ export const plugin = async ({ client, $ }: any) => {
         if (submitted.has(msg.id)) continue
         bus({ cmd: 'seen_mark', id: msg.id })
         submitted.add(msg.id)
-        lines.push(`[${msg.id}] from ${msg.from}: ${msg.text}`)
+        lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
         autoPong(msg.id, msg.from, msg.text)
       }
       if (lines.length > 0) {
-        output.system.push('', '--- agent-bus inbox ---', ...lines, '--- end agent-bus inbox ---')
+        output.system.push(
+          '', '--- fleet directives (from other ships via agent-bus) ---',
+          'These are directives received from other ships in the fleet.',
+          'Process each directive and carry out the requested action.',
+          '', ...lines,
+          '--- end fleet directives ---',
+        )
       }
     },
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
@@ -150,12 +155,13 @@ export const plugin = async ({ client, $ }: any) => {
         tuiReady = true
         sessionNeedsIdentity = true
         turnCount = 0
+        const sessionId = (event.properties?.info as { id?: string })?.id
+        if (sessionId) currentSessionID = sessionId
         bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
         const shipName = process.env.STARFLEET_SHIP_ID
-        if (shipName) {
+        if (shipName && sessionId) {
           try {
-            const sessionId = (event.properties?.info as { id?: string })?.id
-            if (sessionId) await client.session.update({ path: { id: sessionId }, body: { title: shipName } })
+            await client.session.update({ path: { id: sessionId }, body: { title: shipName } })
           } catch { /* ignore */ }
         }
       }
