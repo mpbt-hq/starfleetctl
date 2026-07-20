@@ -4,7 +4,10 @@
 package agentbus
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -76,10 +79,86 @@ var (
 	userAbortRe = regexp.MustCompile(`(^|\W)(abort|cancel|interrupt|signal|sigint|econnaborted|context (deadline|canceled))`)
 )
 
+// errorHandlePayload is the JSON the opencode plugin pipes via stdin.
+type errorHandlePayload struct {
+	Detail string `json:"detail"`
+	Ship   string `json:"ship,omitempty"`
+	PID    int    `json:"pid,omitempty"`
+}
+
+// DoErrorHandle implements `agent-bus error handle --stdin` — the single
+// entry point for session.error handling. Reads a JSON payload from stdin,
+// then performs the full pipeline: abort check → classify → health update →
+// log → tell flagship. Designed so the plugin can delegate all error
+// handling to Go with one subprocess call.
+func (b *Bus) DoErrorHandle(args []string) error {
+	useStdin := false
+	for _, a := range args {
+		if a == "--stdin" {
+			useStdin = true
+		}
+	}
+	if !useStdin {
+		return usageErr("agent-bus error handle: requires --stdin")
+	}
+
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("agent-bus error handle: reading stdin: %w", err)
+	}
+
+	var payload errorHandlePayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return fmt.Errorf("agent-bus error handle: invalid JSON: %w", err)
+	}
+
+	detail := payload.Detail
+	if detail == "" {
+		detail = "unknown error"
+	}
+
+	// User-initiated aborts are expected, not actionable fleet events.
+	// Suppress: log locally only, do not notify the flagship.
+	if IsUserAbort(detail) {
+		b.logEvent("plugin", fmt.Sprintf("error (user abort, suppressed): %s", detail))
+		return nil
+	}
+
+	tag := ClassifyModelError(detail)
+
+	// Update health record so the fleet console can distinguish a
+	// throttled ship from a hard crash.
+	if err := b.DoHealthUpdate([]string{
+		"--state", "blocked",
+		"--error-tag", tag,
+		"--pid", fmt.Sprintf("%d", coalesceInt(payload.PID, os.Getpid())),
+	}); err != nil {
+		// best-effort: health write failure must not block error handling
+	}
+
+	label := ""
+	if tag != "" {
+		label = " [" + tag + "]"
+	}
+	b.logEvent("plugin", fmt.Sprintf("error%s: %s", label, detail))
+
+	// Tell the CONTROL agent (flagship) only, never broadcast — a broadcast
+	// would land in the errored ship's own inbox and restart the self-loop.
+	shipID := b.ShipID
+	if payload.Ship != "" {
+		shipID = payload.Ship
+	}
+	_ = b.DoPost("Enterprise", []string{
+		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
+	}, false, "", "")
+
+	return nil
+}
+
 // DoErrorRun dispatches `agent-bus error <subcommand>`.
 func (b *Bus) DoErrorRun(args []string) error {
 	if len(args) == 0 {
-		return usageErr("agent-bus error: need <subcommand> (classify|is-abort)")
+		return usageErr("agent-bus error: need <subcommand> (classify|is-abort|handle)")
 	}
 	switch args[0] {
 	case "classify":
@@ -92,6 +171,8 @@ func (b *Bus) DoErrorRun(args []string) error {
 			return usageErr("agent-bus error is-abort needs <detail>")
 		}
 		return b.DoErrorIsAbort(args[1])
+	case "handle":
+		return b.DoErrorHandle(args[1:])
 	default:
 		return usageErr("agent-bus error: unknown subcommand: " + args[0])
 	}
