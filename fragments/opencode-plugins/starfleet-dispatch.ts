@@ -77,6 +77,7 @@ export const plugin = async ({ client, $ }: any) => {
     for (const msg of msgs) {
       submitted.add(msg.id)
       client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
+      client.tui.showToast({ body: { title: `[fleet] ${msg.id} von ${msg.from}`, message: msg.text, variant: 'info', duration: 10000 } }).catch(() => {})
       autoPong(msg.id, msg.from, msg.text)
     }
     try {
