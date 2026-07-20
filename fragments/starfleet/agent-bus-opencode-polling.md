@@ -11,16 +11,28 @@ owner: "starfleetctl"
 
 opencode has no `Monitor` tool (Claude Code only), so the background
 `agent-bus-monitor-loop` cannot surface directives as in-context events.
-Instead, the `.opencode/plugins/starfleet-dispatch.ts` plugin injects new
-tell/broadcast directives into the system prompt at the start of each
-turn via the `experimental.chat.system.transform` hook. No manual check
-command is needed — new messages appear automatically in context.
+Instead, the `.opencode/plugins/starfleet-dispatch.ts` plugin handles
+incoming messages in two ways:
+
+1. **Visible toast notification** — each new tell/broadcast directive
+   appears as a toast popup in the TUI with title `[fleet] <id> von <sender>`
+   and the full message text (auto-dismisses after ~10s). This is implemented
+   via `client.tui.showToast()`.
+
+2. **System prompt injection** — at the start of each turn, the plugin
+   injects unseen directives into the system prompt via
+   `experimental.chat.system.transform` (as before). No manual check
+   command is needed — the model sees directives automatically in context.
 
 If new directives are shown, the assistant should handle them as it would
 if they had surfaced via a Monitor event — ack, act, or defer as
 appropriate. The plugin shares dedup state with `agent-bus-monitor-loop`
 so the same message is only shown once regardless of which mechanism
 surfaced it first.
+
+The legacy `autoPong()` responder (hardcoded to answer only Enterprise
+pings) has been removed. Ships now handle all messages natively through
+their model.
 
 ### Rules for the assistant
 
