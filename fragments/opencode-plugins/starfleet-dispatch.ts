@@ -180,7 +180,7 @@ function classifyModelError(detail: string): string {
     return 'resource-exhausted'
   }
   // NIM overload: server-side 5xx or connection-level failures
-  if (/(nim|5\d\d|500|502|503|504|overload|service unavailable|bad gateway|gateway timeout|connection reset|econnreset|econnrefused|upstream|inference.*(down|unavailable|error))/).test(d)) {
+  if (d.includes('nim') || /5\d\d|overload|bad gateway|connection reset|econnreset|econnrefused|upstream/.test(d)) {
     return 'nim-overload'
   }
   return ''

@@ -455,7 +455,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
 	inner += "export STARFLEET_LAUNCH_TYPE=" + shellQuote(launchType) + "; "
 	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
-		`{"username":"`+name+`","instructions":[".starfleet-ai/agents.d/index.md"]}`) + "; "
+		`{"username":"`+name+`","instructions":[".starfleet-ai/agents.d/index.md"],"plugin":["./plugins/starfleet-dispatch.ts"]}`) + "; "
 	inner += "cd " + shellQuote(root) + "; "
 	inner += "exec opencode"
 	if model != "" {
