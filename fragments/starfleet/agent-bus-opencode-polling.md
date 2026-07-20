@@ -51,7 +51,11 @@ failures via `classifyModelError()`:
 - `nim-overload` — NIM (NVIDIA inference microservice) overloaded: 5xx,
   connection reset / refused, gateway timeouts.
 - `zen-ratelimit` — ZEN temporarily blocks the account: HTTP 429, "usage
-  limit", "quota exceeded", "access denied", "try again later".
+  limit", "quota exceeded", "request limit reached", "access denied",
+  "try again later".
+- `resource-exhausted` — worker/model capacity reached: gRPC
+  `ResourceExhausted` ("Worker local total request limit reached"),
+  token quota, or context-length / maximum-context exceeded.
 
 The detected class is written into the health record as `error_tag` and
 reported to the flagship (Enterprise) as part of the error message. A

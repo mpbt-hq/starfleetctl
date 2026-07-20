@@ -79,7 +79,7 @@ interface HealthData {
   pid: number
   model?: string            // current model ID (e.g. "openai/gpt-4o")
   server?: string           // model server/provider name
-  error_tag?: string        // model-API failure class: nim-overload | zen-ratelimit
+  error_tag?: string        // model-API failure class: zen-ratelimit | resource-exhausted | nim-overload
 }
 
 function healthFile(): string {
@@ -161,13 +161,23 @@ function isUserAbort(detail: string): boolean {
 // apart transient infra hiccups from provider-side throttling. Returns a short
 // tag the health record and flagship notification carry, or '' if the error
 // does not look model-API related.
-//   nim-overload  — NVIDIA inference microservice overloaded (5xx / conn reset)
-//   zen-ratelimit — ZEN temporarily blocks the account (429 / usage limit / quota)
+//   zen-ratelimit      — ZEN/account blocks the request (429 / usage limit /
+//                        quota / request limit reached / rate limit)
+//   resource-exhausted — worker or model capacity reached: gRPC
+//                        ResourceExhausted, "request limit reached", token
+//                        quota, or context-length exceeded
+//   nim-overload       — NVIDIA inference microservice overloaded (5xx /
+//                        conn reset / inference unavailable)
 function classifyModelError(detail: string): string {
   const d = detail.toLowerCase()
-  // ZEN rate-limit / usage cap (user just hit this — had to switch models)
-  if (/(429|rate[ -_]?limit|too many requests|usage limit|usage cap|quota|exceeded|access denied|temporarily blocked|try again later|toomanyrequests)/.test(d)) {
+  // ZEN rate-limit / usage cap / request limit (user hit this — had to switch models)
+  if (/(429|rate[ -_]?limit|too many requests|usage limit|usage cap|quota|exceeded|access denied|temporarily blocked|try again later|toomanyrequests|request limit reached|request limit)/.test(d)) {
     return 'zen-ratelimit'
+  }
+  // ResourceExhausted: worker capacity / token quota / context length
+  // (gRPC code 8 — e.g. "ResourceExhausted: Worker local total request limit reached")
+  if (/(resourceexhausted|resource exhausted|request limit reached|context length|maximum context|context window|token.{0,12}(limit|quota)|too many tokens|input.{0,12}too long)/.test(d)) {
+    return 'resource-exhausted'
   }
   // NIM overload: server-side 5xx or connection-level failures
   if (/(nim|5\d\d|500|502|503|504|overload|service unavailable|bad gateway|gateway timeout|connection reset|econnreset|econnrefused|upstream|inference.*(down|unavailable|error))/).test(d)) {
