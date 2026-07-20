@@ -57,7 +57,19 @@ func ClassifyModelError(detail string) string {
 	if nimOverloadRe.MatchString(d) {
 		return "nim-overload"
 	}
+	// Streaming response failed: mid-stream disconnect from the model API.
+	// Transient — the ship can simply resume the previous prompt.
+	if streamingFailedRe.MatchString(d) {
+		return "streaming-response-failed"
+	}
 	return ""
+}
+
+// isAutoRestartTag reports whether a model-error tag is transient and the
+// affected ship should be told to simply re-run its last prompt (resume),
+// rather than only notifying the flagship.
+func isAutoRestartTag(tag string) bool {
+	return tag == "streaming-response-failed" || tag == "nim-overload"
 }
 
 // IsUserAbort reports whether a session.error detail is a user-initiated
@@ -76,6 +88,7 @@ var (
 	ratelimitRe = regexp.MustCompile(`(429|rate[ -_]?limit|too many requests|usage limit|usage cap|quota|exceeded|access denied|temporarily blocked|try again later|toomanyrequests|request limit reached|request limit)`)
 	resourceExhaustedRe = regexp.MustCompile(`(resourceexhausted|resource exhausted|request limit reached|context length|maximum context|context window|token.{0,12}(limit|quota)|too many tokens|input.{0,12}too long)`)
 	nimOverloadRe = regexp.MustCompile(`(nim|5\d\d|overload|bad gateway|connection reset|econnreset|econnrefused|upstream)`)
+	streamingFailedRe = regexp.MustCompile(`(streaming (response|request) failed|stream interrupted|response stream|connection closed|broken pipe|unexpected eof|stream closed)`)
 	userAbortRe = regexp.MustCompile(`(^|\W)(abort|cancel|interrupt|signal|sigint|econnaborted|context (deadline|canceled))`)
 )
 
@@ -117,6 +130,11 @@ func (b *Bus) DoErrorHandle(args []string) error {
 		detail = "unknown error"
 	}
 
+	shipID := b.ShipID
+	if payload.Ship != "" {
+		shipID = payload.Ship
+	}
+
 	// User-initiated aborts are expected, not actionable fleet events.
 	// Suppress: log locally only, do not notify the flagship.
 	if IsUserAbort(detail) {
@@ -142,12 +160,24 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	}
 	b.logEvent("plugin", fmt.Sprintf("error%s: %s", label, detail))
 
+	// Transient model errors: tell the affected ship to simply resume its
+	// last prompt (re-run with an empty/synthetic prompt) instead of only
+	// notifying the flagship. The plugin picks this directive up on its
+	// next poll and re-issues session.promptAsync — no human in the loop.
+	if isAutoRestartTag(tag) {
+		restartMsg := fmt.Sprintf(
+			"⚡ Model-Fehler [%s] erkannt. Setze fort: starte den vorigen Prompt erneut (leeres Prompt reicht, um einfach weiterzumachen). Fehlerdetail: %s",
+			tag, detail,
+		)
+		if _, err := b.Tell(shipID, restartMsg, ""); err != nil {
+			b.logEvent("plugin", fmt.Sprintf("error: failed to queue restart directive to %s: %v", shipID, err))
+		} else {
+			b.logEvent("plugin", fmt.Sprintf("error: queued auto-restart directive → %s [%s]", shipID, tag))
+		}
+	}
+
 	// Tell the CONTROL agent (flagship) only, never broadcast — a broadcast
 	// would land in the errored ship's own inbox and restart the self-loop.
-	shipID := b.ShipID
-	if payload.Ship != "" {
-		shipID = payload.Ship
-	}
 	_ = b.DoPost("Enterprise", []string{
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
 	}, false, "", "")
