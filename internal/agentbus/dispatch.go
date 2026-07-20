@@ -91,6 +91,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 	switch req.Cmd {
 	case "config":
 		return b.dispatchConfig()
+	case "init":
+		return b.dispatchInit(req)
 	case "health":
 		return b.dispatchHealth(req)
 	case "inbox":
@@ -130,6 +132,18 @@ func (b *Bus) dispatchConfig() dispatchResponse {
 		HeartbeatMS: cfg.AgentBus.HeartbeatMS,
 		PollMS:      cfg.AgentBus.PollMS,
 	}
+}
+
+func (b *Bus) dispatchInit(req dispatchRequest) dispatchResponse {
+	note := req.Note
+	if note == "" {
+		note = "opencode ship"
+	}
+	messages, seen, err := b.DoInit(note)
+	if err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
+	return dispatchResponse{OK: true, Messages: orEmptyInbox(messages), Seen: orEmpty(seen)}
 }
 
 func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {

@@ -279,6 +279,107 @@ func (b *Bus) DoExit(reason string) error {
 	return nil
 }
 
+// DoInit consolidates the plugin's startup sequence into a single bus call:
+// ack all unacked inbox, load seen set, prune stale data, set status to idle.
+// Returns the acked messages and seen set so the plugin can populate its state.
+func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
+	lock, err := b.lockBus()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer lock.Close()
+
+	// 1. Ack all unacked inbox for this ship.
+	var acked []inboxMsg
+	for _, m := range b.allMsgRecords() {
+		if m.Target != "all" && m.Target != b.ShipID {
+			continue
+		}
+		if b.acked(m.ID, b.ShipID) {
+			continue
+		}
+		apath, err := b.ackmark(m.ID, b.ShipID)
+		if err != nil {
+			continue
+		}
+		f, err := os.Create(apath)
+		if err != nil {
+			continue
+		}
+		f.Close()
+		acked = append(acked, inboxMsg{ID: m.ID, From: m.From, Text: m.Text})
+		b.logEvent("ack", m.ID+" init-seen")
+	}
+
+	// 2. Load seen set.
+	seenMap, _ := b.loadSeen(b.ShipID)
+	seen := make([]string, 0, len(seenMap))
+	for id := range seenMap {
+		seen = append(seen, id)
+	}
+
+	// 3. Prune stale heartbeats + old directives.
+	statusCnt := 0
+	live := make(map[string]bool)
+	for _, r := range b.AllStatusRecords() {
+		if b.stale(r.Epoch, r.State) {
+			os.Remove(filepath.Join(b.StatusDir, fsafe(r.Agent)+".tsv"))
+			statusCnt++
+			continue
+		}
+		live[r.Agent] = true
+	}
+	msgCnt := 0
+	for _, m := range b.allMsgRecords() {
+		if !b.stale(m.Epoch, "") {
+			continue
+		}
+		keep := false
+		for agent := range live {
+			if m.Target != "all" && m.Target != agent {
+				continue
+			}
+			if !b.acked(m.ID, agent) {
+				keep = true
+				break
+			}
+		}
+		if !keep {
+			if mpath, err := b.mfile(m.ID); err == nil {
+				os.Remove(mpath)
+			}
+			entries, _ := os.ReadDir(b.AckDir)
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), m.ID+"__") {
+					os.Remove(filepath.Join(b.AckDir, e.Name()))
+				}
+			}
+			msgCnt++
+		}
+	}
+	if statusCnt+msgCnt > 0 {
+		b.logEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
+	}
+
+	// 4. Set status to idle.
+	if note == "" {
+		note = "opencode ship"
+	}
+	pp := clean(b.Project)
+	if pp == "" {
+		pp = "-"
+	}
+	hh := clean(b.Handle)
+	if hh == "" {
+		hh = "-"
+	}
+	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+		now(), isots(), b.ShipID, pp, "idle", os.Getpid(), hh, clean(note))
+	_ = os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644)
+
+	return acked, seen, nil
+}
+
 // DoInbox implements `agent-bus inbox`.
 func (b *Bus) DoInbox() error {
 	found := false

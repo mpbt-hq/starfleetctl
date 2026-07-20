@@ -50,17 +50,9 @@ export const plugin = async ({ client, $ }: any) => {
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
 
-  // Seed: ack all current inbox so they don't reappear as "unread".
-  const inbox = bus({ cmd: 'inbox' })
-  for (const msg of (inbox.messages || [])) {
-    bus({ cmd: 'ack', id: msg.id, note: 'init-seen' })
-  }
-  // Seed submitted set with THIS ship's seen messages.
-  const seen = bus({ cmd: 'seen_load' })
-  for (const id of (seen.seen || [])) { submitted.add(id) }
-
-  bus({ cmd: 'prune' })
-  bus({ cmd: 'status', state: 'idle', note: 'opencode ship' })
+  // Init: ack all inbox, load seen, prune stale, set status — one bus call.
+  const init = bus({ cmd: 'init', note: 'opencode ship' })
+  for (const id of (init.seen || [])) { submitted.add(id) }
 
   setTimeout(() => {
     if (!tuiReady) {
