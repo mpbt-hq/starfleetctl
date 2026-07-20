@@ -64,7 +64,7 @@ export const plugin = async ({ client, $ }: any) => {
   const submit = async (text: string) => {
     if (!tuiReady) return false
     try {
-      await client.tui.appendPrompt({ body: { text: `\n📨 ${text.slice(0, 200)}` } })
+      await client.tui.appendPrompt({ body: { text: `\n📨 ${text}` } })
       await client.tui.submitPrompt()
       return true
     } catch { return false }
