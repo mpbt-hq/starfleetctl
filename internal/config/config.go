@@ -14,7 +14,8 @@ import (
 
 // Config holds all starfleetctl configuration.
 type Config struct {
-	Web WebConfig `yaml:"web"`
+	Web      WebConfig      `yaml:"web"`
+	AgentBus AgentBusConfig `yaml:"agent_bus"`
 }
 
 // WebConfig holds web server configuration.
@@ -31,6 +32,12 @@ type WebConfig struct {
 	ShipHandle string `yaml:"ship_handle"`
 }
 
+// AgentBusConfig holds agent-bus / opencode plugin tuning knobs.
+type AgentBusConfig struct {
+	HeartbeatMS int `yaml:"heartbeat_ms"`
+	PollMS      int `yaml:"poll_ms"`
+}
+
 // DefaultConfig returns defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -39,6 +46,10 @@ func DefaultConfig() *Config {
 			AutostartEnabled: false,
 			PIDFile:         ".starfleet-ai/var/web.pid",
 			LogFile:         ".starfleet-ai/logs/web.log",
+		},
+		AgentBus: AgentBusConfig{
+			HeartbeatMS: 300_000,
+			PollMS:      3_000,
 		},
 	}
 }
@@ -57,21 +68,29 @@ func BusDir(root string) string {
 	return filepath.Join(WorkDir(root), "agent-bus")
 }
 
-// Load reads configuration from .starfleet-ai/conf/web.yaml.
+// Load reads configuration from .starfleet-ai/conf/web.yaml and
+// .starfleet-ai/conf/agent-bus.yaml. Missing files are OK (defaults apply).
 func Load(root string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	path := filepath.Join(root, ".starfleet-ai", "conf", "web.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil // no config file, use defaults
+	for _, f := range []struct {
+		file string
+		dst  interface{}
+	}{
+		{"web.yaml", &cfg.Web},
+		{"agent-bus.yaml", &cfg.AgentBus},
+	} {
+		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		if err := yaml.Unmarshal(data, f.dst); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
 	}
 
 	return cfg, nil

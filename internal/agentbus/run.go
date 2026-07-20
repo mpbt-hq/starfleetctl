@@ -200,6 +200,8 @@ func Run(root string, args []string) int {
 		}
 	case "error":
 		cmdErr = b.DoErrorRun(args[1:])
+	case "config":
+		cmdErr = b.DoConfig()
 	case "monitor-loop":
 		cmdErr = b.DoMonitorLoop()
 	case "fleet-watch":
