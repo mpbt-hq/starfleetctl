@@ -94,8 +94,9 @@ export const plugin = async ({ client, $ }: any) => {
     const body = status?.body ?? status
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll raw: sid=${currentSessionID} keys=${body && typeof body === 'object' ? Object.keys(body).join(',') : typeof body} sample=${JSON.stringify(body).slice(0, 200)}` } }).catch(() => {})
     if (!body || typeof body !== 'object') return
-    // status returns { [sessionID]: SessionStatus } for all sessions.
-    const st: any = body[currentSessionID] ?? Object.values(body)[0]
+    // status returns { data: { [sessionID]: SessionStatus }, request, response }
+    const data: any = (body as any).data ?? body
+    const st: any = data[currentSessionID] ?? Object.values(data)[0]
     if (!st || st.type !== 'retry') { lastRetryDetail = ''; return }
     const detail =
       st.action?.message || st.action?.reason || st.message ||
