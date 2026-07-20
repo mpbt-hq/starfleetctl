@@ -51,6 +51,41 @@ export const plugin = async ({ client, $ }: any) => {
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
 
+  // Model-error retry detection: opencode does NOT surface quota/rate-limit
+  // failures as a `session.error` event — it parks the session in a `retry`
+  // status with a human-readable message instead. Poll that status so the
+  // fleet can see and react to transient model-API faults (zen-ratelimit,
+  // nim-overload, etc.).
+  let lastRetryDetail = ''
+  let retryCooldownUntil = 0
+  const RETRY_POLL_MS = 15000
+  const RETRY_COOLDOWN_MS = 5 * 60 * 1000
+
+  const pollRetryStatus = async () => {
+    if (!currentSessionID) return
+    let status: any
+    try {
+      status = await client.session.status({ path: { id: currentSessionID } })
+    } catch { return }
+    const body = status?.body ?? status
+    if (!body || typeof body !== 'object') return
+    // status is keyed by session id -> SessionStatus
+    const st: any = Object.values(body)[0]
+    if (!st || st.type !== 'retry') { lastRetryDetail = ''; return }
+    const detail =
+      st.action?.message || st.action?.reason || st.message ||
+      (st.action?.title ? `${st.action.title}: ${st.action.message || ''}` : '') || 'retry'
+    if (!detail) return
+    const now = Date.now()
+    if (detail === lastRetryDetail && now < retryCooldownUntil) return
+    lastRetryDetail = detail
+    retryCooldownUntil = now + RETRY_COOLDOWN_MS
+    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `session retry status: ${detail}` } }).catch(() => {})
+    bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
+  }
+
+  const retryPollTimer = setInterval(pollRetryStatus, RETRY_POLL_MS)
+
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
   for (const id of (init.seen || [])) { submitted.add(id) }
@@ -88,6 +123,7 @@ export const plugin = async ({ client, $ }: any) => {
   process.on('exit', () => {
     clearInterval(heartbeatTimer)
     clearInterval(pollTimer)
+    clearInterval(retryPollTimer)
     try {
       const { execSync } = require('node:child_process')
       execSync(`.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
