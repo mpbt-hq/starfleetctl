@@ -6,46 +6,28 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-import { readFileSync, appendFileSync } from 'node:fs'
+import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
-const SEEN_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'monitor-seen')
-const SHIPS_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'ships')
 
-// Plugin tuning knobs — fetched from starfleetctl config at startup,
-// falling back to hardcoded defaults if the CLI is unavailable.
-let HEARTBEAT_MS = 300_000
-let POLL_MS = 3_000
+// Plugin tuning knobs — always fetched from starfleetctl config;
+// the Go CLI applies defaults, so these are always valid after loadConfig().
+let HEARTBEAT_MS = 0
+let POLL_MS = 0
 
 function loadConfig(): void {
   try {
     const raw = execSync(`.starfleet-ai/bin/starfleetctl agent-bus config`, { cwd: ROOT, timeout: 3000, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim()
     const cfg = JSON.parse(raw)
-    if (cfg.heartbeat_ms) HEARTBEAT_MS = cfg.heartbeat_ms
-    if (cfg.poll_ms) POLL_MS = cfg.poll_ms
-  } catch { /* use defaults */ }
+    HEARTBEAT_MS = cfg.heartbeat_ms
+    POLL_MS = cfg.poll_ms
+  } catch { /* starfleetctl missing — plugin is useless without it anyway */ }
 }
 
 function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
-}
-
-function seenFile(): string {
-  return join(SEEN_DIR, aid())
-}
-
-function loadSeenShip(): Set<string> {
-  const s = new Set<string>()
-  try {
-    const content = readFileSync(seenFile(), 'utf-8')
-    for (const line of content.split('\n')) {
-      const id = line.trim()
-      if (id) s.add(id)
-    }
-  } catch { /* ignore missing file */ }
-  return s
 }
 
 function logEvent(msg: string): void {
@@ -142,12 +124,16 @@ export const plugin = async ({ client, $ }: any) => {
   for (const msg of inbox) {
     try { await $`.starfleet-ai/bin/starfleetctl agent-bus ack ${msg.id} init-seen`.quiet() } catch { /* ignore */ }
   }
-  // seed submitted set with THIS ship's seen messages only —
+  // seed submitted set with THIS ship's seen messages via CLI —
   // using all ships' IDs caused submitted.size > 100 guard to
   // kill the poll loop permanently on busy repos.
-  for (const id of loadSeenShip()) {
-    submitted.add(id)
-  }
+  try {
+    const seenOut = await $`.starfleet-ai/bin/starfleetctl agent-bus monitor-seen load`.text()
+    for (const id of seenOut.split('\n')) {
+      const trimmed = id.trim()
+      if (trimmed) submitted.add(trimmed)
+    }
+  } catch { /* ignore */ }
 
   try { await $`.starfleet-ai/bin/starfleetctl agent-bus prune`.quiet() } catch { /* ignore */ }
   try { await $`.starfleet-ai/bin/starfleetctl agent-bus status idle opencode ship`.quiet() } catch { /* ignore */ }
