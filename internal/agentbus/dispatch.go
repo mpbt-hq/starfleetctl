@@ -25,6 +25,8 @@ type dispatchRequest struct {
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
 	Delete          bool   `json:"delete,omitempty"`
+	Reset           bool   `json:"reset,omitempty"`
+	Touch           bool   `json:"touch,omitempty"`
 
 	// inbox / ack / tell / seen
 	ID      string `json:"id,omitempty"`
@@ -135,6 +137,12 @@ func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
 	if req.Delete {
 		args = append(args, "--delete")
 	} else {
+		if req.Reset {
+			args = append(args, "--reset")
+		}
+		if req.Touch {
+			args = append(args, "--touch")
+		}
 		if req.State != "" {
 			args = append(args, "--state", req.State)
 		}

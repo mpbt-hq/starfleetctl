@@ -37,13 +37,11 @@ function aid(): string {
 export const plugin = async ({ client, $ }: any) => {
   loadConfig()
 
-  // Initial health: delete stale + fresh write.
-  bus({ cmd: 'health', delete: true })
-  bus({ cmd: 'health', state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
+  // Initial health: reset stale + fresh write.
+  bus({ cmd: 'health', reset: true, state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
 
   const heartbeatTimer = setInterval(() => {
-    bus({ cmd: 'health', plugin_last_run: new Date().toISOString(), ...currentModel })
-    bus({ cmd: 'touch' })
+    bus({ cmd: 'health', touch: true, plugin_last_run: new Date().toISOString(), ...currentModel })
   }, HEARTBEAT_MS)
 
   let tuiReady = false

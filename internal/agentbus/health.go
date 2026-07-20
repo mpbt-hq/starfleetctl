@@ -316,7 +316,8 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	var task, blocker, eta, branch, note, launchType, parent, provider, updated string
 	progress := -1
 	pid := 0
-	delete := false
+	reset := false
+	touch := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -354,8 +355,10 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 			if i+1 < len(args) { provider = args[i+1]; i++ }
 		case "--updated":
 			if i+1 < len(args) { updated = args[i+1]; i++ }
-		case "--delete":
-			delete = true
+		case "--reset":
+			reset = true
+		case "--touch":
+			touch = true
 		case "-h", "--help":
 			fmt.Print(healthUpdateUsage)
 			return nil
@@ -366,9 +369,8 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 
 	fpath := filepath.Join(b.healthDir(), fsafe(b.ShipID)+".json")
 
-	if delete {
+	if reset {
 		os.Remove(fpath)
-		return nil
 	}
 
 	// Read existing file (if any) to merge with.
@@ -405,7 +407,15 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(fpath, append(data, '\n'), 0o644)
+	if err := os.WriteFile(fpath, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+
+	// --touch: refresh heartbeat TSV so the board sees a live ship.
+	if touch {
+		_ = b.DoTouch()
+	}
+	return nil
 }
 
 const healthUpdateUsage = `agent-bus health update [flags]
@@ -437,7 +447,8 @@ Launch metadata (set on ship startup):
   --provider <s>     model provider
   --updated <s>      override timestamp
 
-  --delete           remove the health file (session end)
+  --reset            remove existing file first, then write (atomic delete+write)
+  --touch            after writing, refresh heartbeat TSV (replaces separate touch call)
   -h, --help         this help
 `
 
