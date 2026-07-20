@@ -178,7 +178,28 @@ func Run(root string, args []string) int {
 	case "prune":
 		cmdErr = b.DoPrune()
 	case "health":
-		cmdErr = b.DoHealth(args[1:])
+		if len(args) > 1 && args[1] == "update" {
+			cmdErr = b.DoHealthUpdate(args[2:])
+		} else {
+			cmdErr = b.DoHealth(args[1:])
+		}
+	case "monitor-seen":
+		if len(args) < 2 {
+			cmdErr = usageErr("agent-bus monitor-seen: need <subcommand> (mark|check|load-all)")
+			break
+		}
+		switch args[1] {
+		case "mark":
+			cmdErr = b.DoMonitorSeenMark(arg(args, 2))
+		case "check":
+			cmdErr = b.DoMonitorSeenCheck(arg(args, 2))
+		case "load-all":
+			cmdErr = b.DoMonitorSeenLoadAll()
+		default:
+			cmdErr = usageErr("agent-bus monitor-seen: unknown subcommand: " + args[1])
+		}
+	case "error":
+		cmdErr = b.DoErrorRun(args[1:])
 	case "monitor-loop":
 		cmdErr = b.DoMonitorLoop()
 	case "fleet-watch":

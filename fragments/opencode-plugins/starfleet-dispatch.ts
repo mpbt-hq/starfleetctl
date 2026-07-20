@@ -6,16 +6,14 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-import { readFileSync, readdirSync, mkdirSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs'
+import { readFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
 const SEEN_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'monitor-seen')
 const SHIPS_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'ships')
-const HEALTH_DIR = join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'health')
 const HEARTBEAT_MS = 300_000
 const POLL_MS = 3_000
-const BLOCKED_THRESHOLD_MS = 120_000 // 2 min without plugin run → blocked
 
 function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
@@ -23,22 +21,6 @@ function aid(): string {
 
 function seenFile(): string {
   return join(SEEN_DIR, aid())
-}
-
-function loadSeenAll(): Set<string> {
-  const s = new Set<string>()
-  try {
-    for (const entry of readdirSync(SEEN_DIR)) {
-      try {
-        const content = readFileSync(join(SEEN_DIR, entry), 'utf-8')
-        for (const line of content.split('\n')) {
-          const id = line.trim()
-          if (id) s.add(id)
-        }
-      } catch { /* ignore individual file errors */ }
-    }
-  } catch { /* ignore missing dir */ }
-  return s
 }
 
 function loadSeenShip(): Set<string> {
@@ -53,10 +35,6 @@ function loadSeenShip(): Set<string> {
   return s
 }
 
-function markSeen(id: string): void {
-  try { appendFileSync(seenFile(), id + '\n') } catch { /* ignore */ }
-}
-
 function logEvent(msg: string): void {
   try {
     appendFileSync(join(ROOT, '.starfleet-ai', 'var', 'agent-bus', 'events.log'),
@@ -64,50 +42,22 @@ function logEvent(msg: string): void {
   } catch { /* ignore */ }
 }
 
-// --- Health tracking ---
-// Three timestamps written to _WORK_/agent-bus/health/<SHIP_ID>.json:
-//   plugin_last_run  — when system.transform last fired (every turn)
-//   model_last_action — when the model last produced output (turn end / event)
-//   state            — derived: idle | working | blocked
-//
-// External watchdogs read this file to detect unresponsive ships.
-
-interface HealthData {
-  plugin_last_run: string   // ISO timestamp
-  model_last_action: string // ISO timestamp
-  state: 'idle' | 'working' | 'blocked'
-  pid: number
-  model?: string            // current model ID (e.g. "openai/gpt-4o")
-  server?: string           // model server/provider name
-  error_tag?: string        // model-API failure class: zen-ratelimit | resource-exhausted | nim-overload
+// shell-escape for safe interpolation into $`...` template literals.
+function esc(s: string): string {
+  return s.replace(/'/g, "'\\''")
 }
 
-function healthFile(): string {
-  return join(HEALTH_DIR, `${aid()}.json`)
-}
-
-function writeHealth(patch: Partial<HealthData>): void {
-  try {
-    mkdirSync(HEALTH_DIR, { recursive: true })
-    let prev: Partial<HealthData> = {}
-    try { prev = JSON.parse(readFileSync(healthFile(), 'utf-8')) } catch { /* first write */ }
-    const now = new Date().toISOString()
-    const merged: HealthData = {
-      plugin_last_run: patch.plugin_last_run ?? prev.plugin_last_run ?? now,
-      model_last_action: patch.model_last_action ?? prev.model_last_action ?? now,
-      state: patch.state ?? prev.state ?? 'idle',
-      pid: patch.pid ?? prev.pid ?? process.pid,
-      model: patch.model ?? prev.model,
-      server: patch.server ?? prev.server,
-      error_tag: patch.error_tag ?? prev.error_tag,
-    }
-    writeFileSync(healthFile(), JSON.stringify(merged, null, 2) + '\n')
-  } catch { /* ignore */ }
-}
-
-function detectState(pluginLastRun: string): 'idle' | 'working' | 'blocked' {
-  const age = Date.now() - new Date(pluginLastRun).getTime()
-  return age > BLOCKED_THRESHOLD_MS ? 'blocked' : 'working'
+// Write health data via starfleetctl Go CLI (read-modify-write in Go,
+// so we only pass the fields that changed).
+async function healthUpdate($: any, patch: Record<string, string | undefined>): Promise<void> {
+  const args: string[] = []
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined || v === '') continue
+    const flag = k.replace(/([A-Z])/g, '-$1').toLowerCase()
+    args.push(`--${flag} '${esc(v)}'`)
+  }
+  if (args.length === 0) return
+  try { await $`.starfleet-ai/bin/starfleetctl agent-bus health update ${args.join(' ')}`.quiet() } catch { /* ignore */ }
 }
 
 // agent-bus inbox uses fixed-width columns:
@@ -145,55 +95,16 @@ async function autoPong($: any, id: string, from: string, text: string): Promise
   }
 }
 
-// isUserAbort reports whether a session.error detail is a user-initiated
-// abort (Ctrl-C / SIGINT / context cancelled) rather than a genuine fault.
-// opencode surfaces those with an empty or generic detail — there is no
-// structured code we can trust, so we match the textual fingerprint of
-// the common abort reasons. These are expected, not actionable, and must
-// not be broadcast back to the fleet (see the session.error handler).
-function isUserAbort(detail: string): boolean {
-  const d = detail.toLowerCase()
-  if (d === '' || d === 'unknown error') return true
-  return /(^|\W)(abort|cancel|interrupt|signal|sigint|econnaborted|context (deadline|canceled))/.test(d)
-}
-
-// classifyModelError detects model-API failure modes so the fleet can tell
-// apart transient infra hiccups from provider-side throttling. Returns a short
-// tag the health record and flagship notification carry, or '' if the error
-// does not look model-API related.
-//   zen-ratelimit      — ZEN/account blocks the request (429 / usage limit /
-//                        quota / request limit reached / rate limit)
-//   resource-exhausted — worker or model capacity reached: gRPC
-//                        ResourceExhausted, "request limit reached", token
-//                        quota, or context-length exceeded
-//   nim-overload       — NVIDIA inference microservice overloaded (5xx /
-//                        conn reset / inference unavailable)
-function classifyModelError(detail: string): string {
-  const d = detail.toLowerCase()
-  // ZEN rate-limit / usage cap / request limit (user hit this — had to switch models)
-  if (/(429|rate[ -_]?limit|too many requests|usage limit|usage cap|quota|exceeded|access denied|temporarily blocked|try again later|toomanyrequests|request limit reached|request limit)/.test(d)) {
-    return 'zen-ratelimit'
-  }
-  // ResourceExhausted: worker capacity / token quota / context length
-  // (gRPC code 8 — e.g. "ResourceExhausted: Worker local total request limit reached")
-  if (/(resourceexhausted|resource exhausted|request limit reached|context length|maximum context|context window|token.{0,12}(limit|quota)|too many tokens|input.{0,12}too long)/.test(d)) {
-    return 'resource-exhausted'
-  }
-  // NIM overload: server-side 5xx or connection-level failures
-  if (d.includes('nim') || /5\d\d|overload|bad gateway|connection reset|econnreset|econnrefused|upstream/.test(d)) {
-    return 'nim-overload'
-  }
-  return ''
-}
-
 export const plugin = async ({ client, $ }: any) => {
-  mkdirSync(SEEN_DIR, { recursive: true })
+  // Write initial health marker via Go CLI (delete-then-write =
+  // --delete on stale file, then fresh update). The Go CLI does
+  // read-modify-write internally, so we just supply current fields.
+  try { await $`.starfleet-ai/bin/starfleetctl agent-bus health update --delete`.quiet() } catch { /* ignore */ }
+  await healthUpdate($, { state: 'working', pluginLastRun: new Date().toISOString(), pid: String(process.pid) })
 
   const heartbeatTimer = setInterval(async () => {
     try {
-      // currentModel is tracked in-memory via message.updated events —
-      // no API call needed. Model appears in health after first assistant turn.
-      writeHealth({ plugin_last_run: new Date().toISOString(), ...currentModel })
+      await healthUpdate($, { pluginLastRun: new Date().toISOString(), ...currentModel })
       $`.starfleet-ai/bin/starfleetctl agent-bus touch`.quiet()
     } catch { /* ignore */ }
   }, HEARTBEAT_MS)
@@ -203,13 +114,6 @@ export const plugin = async ({ client, $ }: any) => {
   let submitted = new Set<string>() // in-memory dedup für Polling
   let turnCount = 0 // track turns for model_last_action
   let currentModel: { model?: string; server?: string } = {} // tracked via message.updated events
-
-  // Write initial health marker — model will be populated by message.updated
-  // events on the first assistant turn; no need to poll the API at startup
-  // (which would pick the wrong session in multi-session environments).
-  // Delete stale health from previous run to avoid model leaking across restarts.
-  try { unlinkSync(healthFile()) } catch { /* first run */ }
-  writeHealth({ state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid })
 
   // seed: ack all current inbox messages so they don't keep showing up
   // as "unread" after a restart. IMPORTANT: do NOT markSeen() them here —
@@ -269,14 +173,19 @@ export const plugin = async ({ client, $ }: any) => {
 
   const pollTimer = setInterval(poll, POLL_MS)
 
-  const cleanup = () => {
+  // SIGTERM/SIGINT get async cleanup via beforeExit; 'exit' is a
+  // synchronous last-resort that can't await — write health directly.
+  process.on('exit', () => {
     clearInterval(heartbeatTimer)
     clearInterval(pollTimer)
-    writeHealth({ state: 'idle', pid: process.pid })
-    try { $`.starfleet-ai/bin/starfleetctl agent-bus clear`.quiet() } catch { /* ignore */ }
-  }
-
-  process.on('exit', cleanup)
+    // Best-effort sync write via child_process.execSync (block but don't hang).
+    try {
+      const { execSync } = require('node:child_process')
+      execSync(`.starfleet-ai/bin/starfleetctl agent-bus health update --state idle --pid ${process.pid}`,
+        { cwd: ROOT, timeout: 2000, stdio: 'ignore' })
+    } catch { /* ignore */ }
+    try { execSync(`.starfleet-ai/bin/starfleetctl agent-bus clear`, { cwd: ROOT, timeout: 2000, stdio: 'ignore' }) } catch { /* ignore */ }
+  })
 
   return {
     'experimental.chat.system.transform': async (
@@ -287,11 +196,11 @@ export const plugin = async ({ client, $ }: any) => {
       // Health: every system.transform = plugin ran. If turnCount > 1,
       // the model just finished an action (tool call / response) since
       // the last transform → update model_last_action.
-      writeHealth({
-        plugin_last_run: new Date().toISOString(),
-        model_last_action: turnCount > 1 ? new Date().toISOString() : undefined,
+      await healthUpdate($, {
+        pluginLastRun: new Date().toISOString(),
+        modelLastAction: turnCount > 1 ? new Date().toISOString() : undefined,
         state: 'working',
-        pid: process.pid,
+        pid: String(process.pid),
       })
 
       try { await $`.starfleet-ai/bin/starfleetctl agent-bus status working opencode ship`.quiet() } catch { /* ignore */ }
@@ -323,7 +232,7 @@ export const plugin = async ({ client, $ }: any) => {
         // injected even if another ship coincidentally marked it seen, and a
         // message skipped by the startup seed must still wake an idle ship.
         if (submitted.has(msg.id)) continue
-        markSeen(msg.id)
+        try { await $`.starfleet-ai/bin/starfleetctl agent-bus monitor-seen mark '${esc(msg.id)}'`.quiet() } catch { /* ignore */ }
         submitted.add(msg.id) // sync with polling dedup
         lines.push(`[${msg.id}] from ${msg.from}: ${msg.text}`)
         await autoPong($, msg.id, msg.from, msg.text)
@@ -343,7 +252,7 @@ export const plugin = async ({ client, $ }: any) => {
         tuiReady = true
         sessionNeedsIdentity = true
         turnCount = 0
-        writeHealth({ model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
+        await healthUpdate($, { modelLastAction: new Date().toISOString(), state: 'working', pid: String(process.pid) })
         // Label the TUI session/tab title with the ship name (formerly
         // the standalone session-title.ts plugin).
         const shipName = process.env.STARFLEET_SHIP_ID
@@ -362,7 +271,7 @@ export const plugin = async ({ client, $ }: any) => {
         sessionNeedsIdentity = true
         turnCount = 0
         currentModel = {} // model state is stale after clear/reset
-        writeHealth({ model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
+        await healthUpdate($, { modelLastAction: new Date().toISOString(), state: 'working', pid: String(process.pid) })
       }
       // Track model changes in-memory: every assistant message carries
       // the exact providerID/modelID that processed it. This fires on
@@ -373,7 +282,7 @@ export const plugin = async ({ client, $ }: any) => {
           currentModel = { model: info.modelID, server: info.providerID }
           // Auto-recovery: a successful assistant turn means the model API
           // is responsive again — clear any prior error_tag / blocked state.
-          writeHealth({ state: 'working', error_tag: undefined, plugin_last_run: new Date().toISOString() })
+          await healthUpdate($, { state: 'working', errorTag: undefined, pluginLastRun: new Date().toISOString() })
         }
       }
       if (event.type === 'session.error') {
@@ -387,14 +296,22 @@ export const plugin = async ({ client, $ }: any) => {
         // ALL ships (including the one that errored) makes that ship's own
         // plugin re-pick its own error as a new inbox directive, react, and
         // chatter the bus in a loop. Suppress those: log locally only.
-        if (isUserAbort(detail)) {
-          logEvent(`error (user abort, suppressed): ${detail}`)
-          return
-        }
-        const tag = classifyModelError(detail)
+        try {
+          const abortOut = await $`.starfleet-ai/bin/starfleetctl agent-bus error is-abort '${esc(detail)}'`.text()
+          if (abortOut.trim() === 'true') {
+            logEvent(`error (user abort, suppressed): ${detail}`)
+            return
+          }
+        } catch { /* fall through to classify */ }
+        let tag = ''
+        try {
+          const classifyOut = await $`.starfleet-ai/bin/starfleetctl agent-bus error classify '${esc(detail)}'`.text()
+          tag = classifyOut.trim()
+          if (tag === '(none)') tag = ''
+        } catch { /* ignore */ }
         // Report a model-API failure class in the health record so the fleet
         // console can distinguish a throttled ship from a hard crash.
-        writeHealth({ state: 'blocked', error_tag: tag || undefined, pid: process.pid })
+        await healthUpdate($, { state: 'blocked', errorTag: tag || undefined, pid: String(process.pid) })
         const label = tag ? ` [${tag}]` : ''
         logEvent(`error${label}: ${detail}`)
         // Tell the CONTROL agent (flagship) only, never broadcast to all —

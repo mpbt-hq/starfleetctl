@@ -260,3 +260,126 @@ func modelTs(h healthEntry) string {
 	}
 	return fmt.Sprintf("%ds ago", h.ModelAgeS)
 }
+
+// healthData is the per-ship health JSON written by the plugin (or by
+// DoHealthUpdate). Fields are optional — only supplied fields are merged
+// into the existing file (read-modify-write).
+type healthData struct {
+	PluginLastRun   string `json:"plugin_last_run"`
+	ModelLastAction string `json:"model_last_action"`
+	State           string `json:"state"`
+	PID             int    `json:"pid"`
+	Model           string `json:"model,omitempty"`
+	Server          string `json:"server,omitempty"`
+	ErrorTag        string `json:"error_tag,omitempty"`
+}
+
+// DoHealthUpdate implements `agent-bus health update` — a structured
+// write to health/<ship>.json used by the opencode plugin. Only supplied
+// flags are merged into the existing file (read-modify-write), so the
+// plugin doesn't need to read-then-write itself.
+//
+// Usage:
+//   agent-bus health update [--state <s>] [--plugin-ts <iso>] [--model-ts <iso>]
+//                           [--pid <n>] [--model <m>] [--server <s>] [--error-tag <t>]
+//                           [--delete]
+func (b *Bus) DoHealthUpdate(args []string) error {
+	var state, pluginTS, modelTS, model, server, errorTag string
+	pid := 0
+	delete := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--state":
+			if i+1 < len(args) { state = args[i+1]; i++ }
+		case "--plugin-ts":
+			if i+1 < len(args) { pluginTS = args[i+1]; i++ }
+		case "--model-ts":
+			if i+1 < len(args) { modelTS = args[i+1]; i++ }
+		case "--pid":
+			if i+1 < len(args) { pid, _ = strconv.Atoi(args[i+1]); i++ }
+		case "--model":
+			if i+1 < len(args) { model = args[i+1]; i++ }
+		case "--server":
+			if i+1 < len(args) { server = args[i+1]; i++ }
+		case "--error-tag":
+			if i+1 < len(args) { errorTag = args[i+1]; i++ }
+		case "--delete":
+			delete = true
+		case "-h", "--help":
+			fmt.Print(healthUpdateUsage)
+			return nil
+		default:
+			return usageErr("agent-bus health update: unknown option: " + args[i])
+		}
+	}
+
+	fpath := filepath.Join(b.healthDir(), fsafe(b.ShipID)+".json")
+
+	if delete {
+		os.Remove(fpath)
+		return nil
+	}
+
+	// Read existing file (if any) to merge with.
+	var prev healthData
+	if data, err := os.ReadFile(fpath); err == nil {
+		_ = json.Unmarshal(data, &prev)
+	}
+
+	now := time.Now().Format(time.RFC3339Nano)
+	merged := healthData{
+		PluginLastRun:   coalesce(pluginTS, prev.PluginLastRun, now),
+		ModelLastAction: coalesce(modelTS, prev.ModelLastAction, now),
+		State:           coalesce(state, prev.State, "idle"),
+		PID:             coalesceInt(pid, prev.PID, os.Getpid()),
+		Model:           coalesce(model, prev.Model),
+		Server:          coalesce(server, prev.Server),
+		ErrorTag:        coalesce(errorTag, prev.ErrorTag),
+	}
+
+	if err := os.MkdirAll(b.healthDir(), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(fpath, append(data, '\n'), 0o644)
+}
+
+const healthUpdateUsage = `agent-bus health update [flags]
+
+Write/merge per-ship health data to health/<ship>.json. Used by the opencode
+plugin to report plugin liveness, model activity, and error state. Only
+supplied flags are merged into the existing file (read-modify-write).
+
+Flags:
+  --state <s>        idle|working|blocked
+  --plugin-ts <iso>  ISO timestamp of last plugin run
+  --model-ts <iso>   ISO timestamp of last model action
+  --pid <n>          process ID
+  --model <m>        model identifier (e.g. "openai/gpt-4o")
+  --server <s>       provider/server name
+  --error-tag <t>    error classification tag
+  --delete           remove the health file (session end)
+  -h, --help         this help
+`
+
+func coalesce(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func coalesceInt(vals ...int) int {
+	for _, v := range vals {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
+}
