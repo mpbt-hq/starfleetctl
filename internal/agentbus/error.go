@@ -45,13 +45,15 @@ func (b *Bus) DoErrorIsAbort(detail string) error {
 // does not look model-API related.
 func ClassifyModelError(detail string) string {
 	d := strings.ToLower(detail)
+	// ResourceExhausted: worker capacity / token quota / context length
+	// Check BEFORE ratelimitRe — "ResourceExhausted: request limit reached"
+	// matches both regexes, but should be classified as resource-exhausted.
+	if resourceExhaustedRe.MatchString(d) {
+		return "resource-exhausted"
+	}
 	// ZEN rate-limit / usage cap / request limit
 	if ratelimitRe.MatchString(d) {
 		return "zen-ratelimit"
-	}
-	// ResourceExhausted: worker capacity / token quota / context length
-	if resourceExhaustedRe.MatchString(d) {
-		return "resource-exhausted"
 	}
 	// NIM overload: server-side 5xx or connection-level failures
 	if nimOverloadRe.MatchString(d) {
