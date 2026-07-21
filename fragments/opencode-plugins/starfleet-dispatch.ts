@@ -19,8 +19,12 @@ function bus(cmd: Record<string, unknown>): any {
       `.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
       { input: JSON.stringify(cmd), cwd: ROOT, timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'] }
     ).toString().trim()
-    return JSON.parse(raw)
-  } catch { return { ok: false, error: 'cli failed' } }
+    // starfleetctl may emit "agent-bus: directive ..." lines before the JSON response.
+    // Strip non-JSON lines to avoid parse errors.
+    const jsonStart = raw.indexOf('{')
+    const jsonStr = jsonStart >= 0 ? raw.slice(jsonStart) : raw
+    return JSON.parse(jsonStr)
+  } catch (e) { return { ok: false, error: `cli failed: ${String(e).slice(0, 200)}` } }
 }
 
 // Fetch tuning knobs from starfleetctl config.
@@ -229,6 +233,8 @@ export const plugin = async ({ client, $ }: any) => {
       ship: aid(), pid: process.pid, current_model: currentModel.model || '',
       session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
     })
+    tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
+    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}` } }).catch(() => {})
     if (r.ok && r.action) {
       await executeAction(r.action, r.target_model || '', errDetail, client, currentSessionID, hasSwitchedToFallback)
     }
