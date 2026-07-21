@@ -1020,14 +1020,15 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 /etc/ship-names.txt
 
 # Opencode auto-generated (starfleet plugin only)
-/../.opencode/opencode.json
-/../.opencode/package.json
-/../.opencode/package-lock.json
-/../.opencode/plugins/starfleet-dispatch.ts
+/.opencode/
+
+# Claude auto-generated
+/.claude/
 
 # Starfleetctl source is a separate repo - not tracked here
 # (clone starfleetctl repo separately to build)
 /src/starfleetctl/
+/src/bin/
 `
 
 func verifyStarfleetAIGitignore(b *Bootstrap) (bool, string) {
