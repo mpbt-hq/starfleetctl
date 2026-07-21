@@ -217,9 +217,13 @@ export const plugin = async ({ client, $ }: any) => {
 
   // Log-monitoring: detect stream errors (e.g. ResourceExhausted) that opencode
   // doesn't surface via session.error or retry status. Runs every 30s.
+  // Cooldown prevents retry storms when the rate limit is still saturated.
+  let logMonitorCooldownUntil = 0
   const LOG_POLL_MS = 30000
+  const LOG_COOLDOWN_MS = 2 * 60 * 1000
   const logPollTimer = setInterval(async () => {
     if (!currentSessionID) return
+    if (Date.now() < logMonitorCooldownUntil) return
     const errDetail = checkLogForErrors()
     if (!errDetail) return
     const msg = `LOG ERROR detected: ${errDetail}`
@@ -236,6 +240,10 @@ export const plugin = async ({ client, $ }: any) => {
     tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}` } }).catch(() => {})
     if (r.ok && r.action) {
+      if (r.action === 'retry') {
+        logMonitorCooldownUntil = Date.now() + LOG_COOLDOWN_MS
+        tickLog(`LOG-MONITOR: retry cooldown until ${new Date(logMonitorCooldownUntil).toISOString()}`)
+      }
       await executeAction(r.action, r.target_model || '', errDetail, client, currentSessionID, hasSwitchedToFallback)
     }
   }, LOG_POLL_MS)
@@ -368,19 +376,27 @@ export const plugin = async ({ client, $ }: any) => {
         }
       }
       if (event.type === 'session.error') {
-        const detail =
-          (event.properties?.error as { message?: string; code?: string })?.message ||
-          (event.properties?.error as { code?: string })?.code ||
-          'unknown error'
+        // opencode's session.error often surfaces a generic "unknown error" for
+        // stream/API errors like ResourceExhausted — the real detail is only in
+        // the opencode.log (handled by LOG-MONITOR). Only dispatch if we have
+        // something real.
+        const err = event.properties?.error as any
+        const candidate =
+          err?.message || err?.code || err?.error ||
+          (typeof err === 'string' ? err : '') || ''
+        if (!candidate || candidate === 'unknown error') {
+          tickLog(`session.error: "${candidate}" — skipping, LOG-MONITOR will handle`)
+          return
+        }
 
         // Delegate policy to starfleetctl — plugin just executes.
         const r = bus({
-          cmd: 'error-handle', detail, source: 'session.error',
+          cmd: 'error-handle', detail: candidate, source: 'session.error',
           ship: aid(), pid: process.pid, current_model: currentModel.model || '',
           session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
         })
         if (r.ok && r.action) {
-          await executeAction(r.action, r.target_model || '', detail, client, currentSessionID, hasSwitchedToFallback)
+          await executeAction(r.action, r.target_model || '', candidate, client, currentSessionID, hasSwitchedToFallback)
         }
       }
     },
