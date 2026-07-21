@@ -38,7 +38,7 @@ Control agent:
   msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
-  health [--json] [--loop]  fleet liveness watchdog (reads health/<SHIP>.json;
+  health [--json] [--loop]  fleet liveness watchdog (reads status/<SHIP>.json;
                             Go port of scripts/fleet-health)
   dispatch --stdin          JSON-RPC entry point for the opencode plugin
                             (reads dispatchRequest, returns dispatchResponse)

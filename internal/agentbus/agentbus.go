@@ -14,6 +14,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/metux/starfleetctl/internal/config"
@@ -80,6 +81,33 @@ func New(root string) (*Bus, error) {
 			return nil, err
 		}
 	}
+
+	// Migration + backwards-compat symlink: move health/*.json → status/*.json,
+	// then symlink health/ → status/ so the opencode plugin (which writes to
+	// health/<ship>.json) continues to work transparently.
+	healthDir := filepath.Join(busDir, "health")
+	if info, err := os.Lstat(healthDir); err == nil && info.IsDir() {
+		// Migrate existing health JSON files into status/.
+		if hEntries, err := os.ReadDir(healthDir); err == nil {
+			for _, he := range hEntries {
+				if he.IsDir() || !strings.HasSuffix(he.Name(), ".json") {
+					continue
+				}
+				src := filepath.Join(healthDir, he.Name())
+				dst := filepath.Join(b.StatusDir, he.Name())
+				if _, err := os.Stat(dst); os.IsNotExist(err) {
+					os.Rename(src, dst)
+				} else {
+					os.Remove(src)
+				}
+			}
+		}
+		os.Remove(healthDir) // remove the real directory
+	}
+	if _, err := os.Lstat(healthDir); os.IsNotExist(err) {
+		os.Symlink("status", healthDir)
+	}
+
 	return b, nil
 }
 
@@ -137,7 +165,7 @@ func fsafe(s string) string {
 }
 
 func (b *Bus) sfile(agent string) string {
-	return filepath.Join(b.StatusDir, fsafe(agent)+".tsv")
+	return filepath.Join(b.StatusDir, fsafe(agent)+".json")
 }
 
 func (b *Bus) mfile(id string) (string, error) {

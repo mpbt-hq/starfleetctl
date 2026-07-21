@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -23,10 +22,8 @@ const (
 
 const healthUsage = `agent-bus health [flags]
 
-Fleet liveness watchdog — reads the per-ship health files written by the
-opencode plugin (starfleet-dispatch.ts) at _WORK_/agent-bus/health/<SHIP>.json
-and reports unresponsive ships. This is the Go port of scripts/fleet-health,
-so the two read the same data and classify ships identically.
+Fleet liveness watchdog — reads the per-ship status files at
+_WORK_/agent-bus/status/<SHIP>.json and reports unresponsive ships.
 
 Flags:
   --json              output JSON (array of ship objects) instead of a table
@@ -42,8 +39,7 @@ working). Exit code 1 if any ship is unhealthy (non-loop mode only), 0 if all
 healthy — so it can drive a cron job / CI gate.
 `
 
-// healthEntry mirrors one ship's evaluated health, shaped like the JSON the
-// bash fleet-health printed (field order/names kept compatible).
+// healthEntry mirrors one ship's evaluated health for the watchdog output.
 type healthEntry struct {
 	Ship       string `json:"ship"`
 	State      string `json:"state"`
@@ -54,28 +50,13 @@ type healthEntry struct {
 	ModelAgeS  int64  `json:"model_age_s"`
 }
 
-type rawHealth struct {
-	PluginLastRun   string `json:"plugin_last_run"`
-	ModelLastAction string `json:"model_last_action"`
-	State           string `json:"state"`
-	PID             int    `json:"pid"`
-}
-
-func (b *Bus) healthDir() string {
-	return filepath.Join(b.BusDir, "health")
-}
-
-// readHealth reads health/<agent>.json and returns it, or nil on any error.
-func (b *Bus) readHealth(agent string) *healthData {
-	data, err := os.ReadFile(filepath.Join(b.healthDir(), fsafe(agent)+".json"))
-	if err != nil {
+// readHealth reads status/<agent>.json and returns it, or nil on any error.
+func (b *Bus) readHealth(agent string) *StatusRecord {
+	rec, ok := parseStatusFile(b.sfile(agent))
+	if !ok {
 		return nil
 	}
-	var h healthData
-	if err := json.Unmarshal(data, &h); err != nil {
-		return nil
-	}
-	return &h
+	return &rec
 }
 
 // DoHealth implements `agent-bus health` — the liveness watchdog.
@@ -144,31 +125,30 @@ func (b *Bus) DoHealth(args []string) error {
 }
 
 func (b *Bus) checkHealth(jsonOut bool, stalePlugin, staleModel int) (int, error) {
-	dir := b.healthDir()
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(b.StatusDir)
 	if err != nil {
 		if jsonOut {
 			return 0, printJSON([]healthEntry{})
 		}
-		fmt.Println("No health directory found — no ships reporting.")
+		fmt.Println("No status directory found — no ships reporting.")
 		return 0, nil
 	}
 
 	out := make([]healthEntry, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		ship := strings.TrimSuffix(e.Name(), ".json")
-		data, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+		ship := e.Name()[:len(e.Name())-len(".json")]
+		data, rerr := os.ReadFile(filepath.Join(b.StatusDir, e.Name()))
 		if rerr != nil {
 			continue
 		}
-		var rh rawHealth
-		if jerr := json.Unmarshal(data, &rh); jerr != nil {
+		var rec StatusRecord
+		if jerr := json.Unmarshal(data, &rec); jerr != nil {
 			continue
 		}
-		out = append(out, evalHealth(ship, rh, stalePlugin, staleModel))
+		out = append(out, evalHealth(ship, rec, stalePlugin, staleModel))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ship < out[j].Ship })
 
@@ -196,19 +176,19 @@ func (b *Bus) checkHealth(jsonOut bool, stalePlugin, staleModel int) (int, error
 	return unhealthy, nil
 }
 
-func evalHealth(ship string, rh rawHealth, stalePlugin, staleModel int) healthEntry {
+func evalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) healthEntry {
 	now := time.Now()
 	var pluginAge, modelAge int64
-	if rh.PluginLastRun != "" {
-		if t, err := time.Parse(time.RFC3339Nano, rh.PluginLastRun); err == nil {
+	if rec.PluginLastRun != "" {
+		if t, err := time.Parse(time.RFC3339Nano, rec.PluginLastRun); err == nil {
 			pluginAge = now.Unix() - t.Unix()
 			if pluginAge < 0 {
 				pluginAge = 0
 			}
 		}
 	}
-	if rh.ModelLastAction != "" {
-		if t, err := time.Parse(time.RFC3339Nano, rh.ModelLastAction); err == nil {
+	if rec.ModelLastAction != "" {
+		if t, err := time.Parse(time.RFC3339Nano, rec.ModelLastAction); err == nil {
 			modelAge = now.Unix() - t.Unix()
 			if modelAge < 0 {
 				modelAge = 0
@@ -217,21 +197,21 @@ func evalHealth(ship string, rh rawHealth, stalePlugin, staleModel int) healthEn
 	}
 
 	pidAlive := true
-	if rh.PID > 0 {
-		pidAlive = pidAliveCheck(rh.PID)
+	if rec.PID > 0 {
+		pidAlive = pidAliveCheck(rec.PID)
 	}
 
-	effective := rh.State
+	effective := rec.State
 	switch {
-	case rh.State == "offline":
+	case rec.State == "offline":
 		effective = "OFFLINE" // intentional shutdown, not a problem
-	case rh.State == "blocked":
+	case rec.State == "blocked":
 		effective = "BLOCKED"
-	case rh.PID > 0 && !pidAlive:
+	case rec.PID > 0 && !pidAlive:
 		effective = "DEAD"
 	case pluginAge > int64(stalePlugin):
 		effective = "STALE"
-	case modelAge > int64(staleModel) && rh.State == "working":
+	case modelAge > int64(staleModel) && rec.State == "working":
 		effective = "STUCK"
 	}
 	if effective == "" {
@@ -241,8 +221,8 @@ func evalHealth(ship string, rh rawHealth, stalePlugin, staleModel int) healthEn
 	return healthEntry{
 		Ship:       ship,
 		State:      effective,
-		RawState:   rh.State,
-		PID:        rh.PID,
+		RawState:   rec.State,
+		PID:        rec.PID,
 		PIDAlive:   pidAlive,
 		PluginAgeS: pluginAge,
 		ModelAgeS:  modelAge,
@@ -276,41 +256,44 @@ func modelTs(h healthEntry) string {
 	return fmt.Sprintf("%ds ago", h.ModelAgeS)
 }
 
-// healthData is the per-ship JSON written to health/<ship>.json — the single
-// source of truth for both plugin liveness and ship task status. Fields are
-// optional; only supplied fields are merged (read-modify-write).
-//
-// The plugin writes plugin_last_run, model_last_action, state, pid, model,
-// server, error_tag. The Go CLI writes task/progress/blocker/eta/branch/note
-// and launch_* fields via DoHealthUpdate or DoStatus.
-type healthData struct {
-	PluginLastRun   string `json:"plugin_last_run"`
-	ModelLastAction string `json:"model_last_action"`
-	State           string `json:"state"`
-	PID             int    `json:"pid"`
-	Model           string `json:"model,omitempty"`
-	Server          string `json:"server,omitempty"`
-	ErrorTag        string `json:"error_tag,omitempty"`
-
-	// Task status — set by the Go CLI (status report, health update --task, etc.)
-	Task     string `json:"task,omitempty"`
-	Progress int    `json:"progress,omitempty"` // 0-100, omitted when unknown
-	Blocker  string `json:"blocker,omitempty"`
-	ETA      string `json:"eta,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	Note     string `json:"note,omitempty"`
-
-	// Launch metadata — set by the Go CLI on ship startup.
-	LaunchType string `json:"launch_type,omitempty"`
-	Parent     string `json:"parent,omitempty"`
-	Provider   string `json:"provider,omitempty"`
-	Updated    string `json:"updated,omitempty"`
-}
-
 // DoHealthUpdate implements `agent-bus health update` — a structured
-// write to health/<ship>.json. Only supplied flags are merged into the
-// existing file (read-modify-write). Used by both the opencode plugin
-// (plugin liveness) and the Go CLI (task status, launch metadata).
+// write to status/<ship>.json. Only supplied flags are merged into the
+// existing file (read-modify-write).
+const healthUpdateUsage = `agent-bus health update [flags]
+
+Write/merge per-ship status data to status/<ship>.json — the single source
+of truth. Only supplied flags are merged into the existing file
+(read-modify-write).
+
+Plugin flags (used by opencode plugin):
+  --state <s>        idle|working|blocked
+  --plugin-ts <iso>  ISO timestamp of last plugin run
+  --model-ts <iso>   ISO timestamp of last model action
+  --pid <n>          process ID
+  --model <m>        model identifier (e.g. "openai/gpt-4o")
+  --server <s>       provider/server name
+  --error-tag <t>    error classification tag
+
+Task status flags (used by Go CLI / status report):
+  --task <s>         current task description
+  --progress <n>     0-100 (-1 or omit to leave unchanged)
+  --blocker <s>      what blocks progress
+  --eta <s>          estimated completion (free-form)
+  --branch <s>       PR/branch the ship is on
+  --note <s>         human-readable note
+
+Launch metadata (set on ship startup):
+  --launch-type <s>  terminal|background|auto
+  --parent <s>       parent ship
+  --provider <s>     model provider
+  --updated <s>      override timestamp
+
+  --delete           remove the status file entirely
+  --reset            remove existing file first, then write (atomic delete+write)
+  --touch            after writing, refresh heartbeat timestamp
+  -h, --help         this help
+`
+
 func (b *Bus) DoHealthUpdate(args []string) error {
 	var state, pluginTS, modelTS, model, server, errorTag string
 	var task, blocker, eta, branch, note, launchType, parent, provider, updated string
@@ -318,6 +301,7 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	pid := 0
 	reset := false
 	touch := false
+	deleteFile := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -355,6 +339,8 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 			if i+1 < len(args) { provider = args[i+1]; i++ }
 		case "--updated":
 			if i+1 < len(args) { updated = args[i+1]; i++ }
+		case "--delete":
+			deleteFile = true
 		case "--reset":
 			reset = true
 		case "--touch":
@@ -367,24 +353,35 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		}
 	}
 
-	fpath := filepath.Join(b.healthDir(), fsafe(b.ShipID)+".json")
+	fpath := b.sfile(b.ShipID)
+
+	if deleteFile {
+		os.Remove(fpath)
+		return nil
+	}
 
 	if reset {
 		os.Remove(fpath)
 	}
 
 	// Read existing file (if any) to merge with.
-	var prev healthData
+	var prev StatusRecord
 	if data, err := os.ReadFile(fpath); err == nil {
 		_ = json.Unmarshal(data, &prev)
 	}
 
-	now := time.Now().Format(time.RFC3339Nano)
-	merged := healthData{
-		PluginLastRun:   coalesce(pluginTS, prev.PluginLastRun, now),
-		ModelLastAction: coalesce(modelTS, prev.ModelLastAction, now),
+	nowTs := time.Now().Format(time.RFC3339Nano)
+	rec := StatusRecord{
+		Epoch:           prev.Epoch,
+		ISO:             prev.ISO,
+		Agent:           coalesce(prev.Agent, b.ShipID),
+		Project:         prev.Project,
 		State:           coalesce(state, prev.State, "idle"),
 		PID:             coalesceInt(pid, prev.PID, os.Getpid()),
+		Handle:          prev.Handle,
+		Note:            coalesce(note, prev.Note),
+		PluginLastRun:   coalesce(pluginTS, prev.PluginLastRun, nowTs),
+		ModelLastAction: coalesce(modelTS, prev.ModelLastAction, nowTs),
 		Model:           coalesce(model, prev.Model),
 		Server:          coalesce(server, prev.Server),
 		ErrorTag:        coalesce(errorTag, prev.ErrorTag),
@@ -393,64 +390,37 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		Blocker:         coalesce(blocker, prev.Blocker),
 		ETA:             coalesce(eta, prev.ETA),
 		Branch:          coalesce(branch, prev.Branch),
-		Note:            coalesce(note, prev.Note),
 		LaunchType:      coalesce(launchType, prev.LaunchType),
 		Parent:          coalesce(parent, prev.Parent),
 		Provider:        coalesce(provider, prev.Provider),
-		Updated:         coalesce(updated, prev.Updated, now),
+		Updated:         coalesce(updated, prev.Updated, nowTs),
 	}
 
-	if err := os.MkdirAll(b.healthDir(), 0o755); err != nil {
+	// Ensure timestamps are set for new records.
+	if rec.Epoch == 0 {
+		rec.Epoch = now()
+	}
+	if rec.ISO == "" {
+		rec.ISO = isots()
+	}
+
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(merged, "", "  ")
-	if err != nil {
+	if err := os.MkdirAll(b.StatusDir, 0o755); err != nil {
 		return err
 	}
 	if err := os.WriteFile(fpath, append(data, '\n'), 0o644); err != nil {
 		return err
 	}
 
-	// --touch: refresh heartbeat TSV so the board sees a live ship.
+	// --touch: refresh heartbeat timestamp so the board sees a live ship.
 	if touch {
 		_ = b.DoTouch()
 	}
 	return nil
 }
-
-const healthUpdateUsage = `agent-bus health update [flags]
-
-Write/merge per-ship health data to health/<ship>.json — the single source
-of truth for both plugin liveness and ship task status. Only supplied flags
-are merged into the existing file (read-modify-write).
-
-Plugin flags (used by opencode plugin):
-  --state <s>        idle|working|blocked
-  --plugin-ts <iso>  ISO timestamp of last plugin run
-  --model-ts <iso>   ISO timestamp of last model action
-  --pid <n>          process ID
-  --model <m>        model identifier (e.g. "openai/gpt-4o")
-  --server <s>       provider/server name
-  --error-tag <t>    error classification tag
-
-Task status flags (used by Go CLI / status report):
-  --task <s>         current task description
-  --progress <n>     0-100 (-1 or omit to leave unchanged)
-  --blocker <s>      what blocks progress
-  --eta <s>          estimated completion (free-form)
-  --branch <s>       PR/branch the ship is on
-  --note <s>         human-readable note
-
-Launch metadata (set on ship startup):
-  --launch-type <s>  terminal|background|auto
-  --parent <s>       parent ship
-  --provider <s>     model provider
-  --updated <s>      override timestamp
-
-  --reset            remove existing file first, then write (atomic delete+write)
-  --touch            after writing, refresh heartbeat TSV (replaces separate touch call)
-  -h, --help         this help
-`
 
 func coalesce(vals ...string) string {
 	for _, v := range vals {

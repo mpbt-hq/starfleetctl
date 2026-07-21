@@ -6,6 +6,7 @@ package agentbus
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -129,9 +130,8 @@ func dispText(m msgRecord) string {
 	return t
 }
 
-// DoStatus implements `agent-bus status <state> [note]` and, when a structured
-// detail patch is supplied (via the --task/--progress/--blocker/--eta/--branch/
-// --note flags), also writes health/<ship>.json (the single source of truth).
+// DoStatus implements `agent-bus status <state> [note]` — writes the unified
+// status/<ship>.json (single source of truth for heartbeat + health).
 func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if state == "" {
 		return usageErr("agent-bus: status needs a <state> (e.g. working|building|blocked|idle|done)")
@@ -142,6 +142,7 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 		return err
 	}
 	defer lock.Close()
+
 	pp := clean(b.Project)
 	if pp == "" {
 		pp = "-"
@@ -150,50 +151,75 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if hh == "" {
 		hh = "-"
 	}
-	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-		now(), isots(), b.ShipID, pp, clean(state), os.Getpid(), hh, clean(note))
-	if err := os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644); err != nil {
+
+	// Read existing record to preserve plugin-liveness fields.
+	prev, _ := parseStatusFile(b.sfile(b.ShipID))
+
+	rec := StatusRecord{
+		Epoch:           now(),
+		ISO:             isots(),
+		Agent:           b.ShipID,
+		Project:         pp,
+		State:           clean(state),
+		PID:             os.Getpid(),
+		Handle:          hh,
+		Note:            clean(note),
+		PluginLastRun:   prev.PluginLastRun,
+		ModelLastAction: prev.ModelLastAction,
+		Model:           prev.Model,
+		Server:          prev.Server,
+		ErrorTag:        prev.ErrorTag,
+		Task:            prev.Task,
+		Progress:        prev.Progress,
+		Blocker:         prev.Blocker,
+		ETA:             prev.ETA,
+		Branch:          prev.Branch,
+		LaunchType:      prev.LaunchType,
+		Parent:          prev.Parent,
+		Provider:        prev.Provider,
+		Updated:         prev.Updated,
+	}
+
+	// Merge structured detail fields from patch.
+	if patch.Task != "" {
+		rec.Task = patch.Task
+	}
+	if patch.Progress >= 0 {
+		rec.Progress = patch.Progress
+	}
+	if patch.Blocker != "" {
+		rec.Blocker = patch.Blocker
+	}
+	if patch.ETA != "" {
+		rec.ETA = patch.ETA
+	}
+	if patch.Branch != "" {
+		rec.Branch = patch.Branch
+	}
+	if patch.Note != "" {
+		rec.Note = clean(patch.Note)
+	}
+	if patch.LaunchType != "" {
+		rec.LaunchType = patch.LaunchType
+	}
+	if patch.Parent != "" {
+		rec.Parent = patch.Parent
+	}
+	if patch.Provider != "" {
+		rec.Provider = patch.Provider
+	}
+	if patch.Model != "" {
+		rec.Model = patch.Model
+	}
+
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
 		return err
 	}
-	// Structured detail: merge into health/<ship>.json (single source of truth).
-	if patch.Task != "" || patch.Progress >= 0 || patch.Blocker != "" ||
-		patch.ETA != "" || patch.Branch != "" || patch.Note != "" ||
-		patch.LaunchType != "" || patch.Parent != "" || patch.Provider != "" || patch.Model != "" {
-		args := []string{"--state", state}
-		if patch.Task != "" {
-			args = append(args, "--task", patch.Task)
-		}
-		if patch.Progress >= 0 {
-			args = append(args, "--progress", fmt.Sprintf("%d", patch.Progress))
-		}
-		if patch.Blocker != "" {
-			args = append(args, "--blocker", patch.Blocker)
-		}
-		if patch.ETA != "" {
-			args = append(args, "--eta", patch.ETA)
-		}
-		if patch.Branch != "" {
-			args = append(args, "--branch", patch.Branch)
-		}
-		if patch.Note != "" {
-			args = append(args, "--note", patch.Note)
-		}
-		if patch.LaunchType != "" {
-			args = append(args, "--launch-type", patch.LaunchType)
-		}
-		if patch.Parent != "" {
-			args = append(args, "--parent", patch.Parent)
-		}
-		if patch.Provider != "" {
-			args = append(args, "--provider", patch.Provider)
-		}
-		if patch.Model != "" {
-			args = append(args, "--model", patch.Model)
-		}
-		if err := b.DoHealthUpdate(args); err != nil {
-			return err
-		}
+	if err := os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644); err != nil {
+		return err
 	}
+
 	proj := ""
 	if b.Project != "" {
 		proj = fmt.Sprintf("[%s] ", b.Project)
@@ -240,9 +266,13 @@ func (b *Bus) DoTouch() error {
 	if !ok {
 		return nil
 	}
-	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-		now(), isots(), rec.Agent, rec.Project, rec.State, rec.PID, rec.Handle, rec.Note)
-	return os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644)
+	rec.Epoch = now()
+	rec.ISO = isots()
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644)
 }
 
 // DoClear implements `agent-bus clear`.
@@ -323,7 +353,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
 	live := make(map[string]bool)
 	for _, r := range b.AllStatusRecords() {
 		if b.stale(r.Epoch, r.State) {
-			os.Remove(filepath.Join(b.StatusDir, fsafe(r.Agent)+".tsv"))
+			os.Remove(filepath.Join(b.StatusDir, fsafe(r.Agent)+".json"))
 			statusCnt++
 			continue
 		}
@@ -373,9 +403,18 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
 	if hh == "" {
 		hh = "-"
 	}
-	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-		now(), isots(), b.ShipID, pp, "idle", os.Getpid(), hh, clean(note))
-	_ = os.WriteFile(b.sfile(b.ShipID), []byte(line), 0o644)
+	rec := StatusRecord{
+		Epoch:   now(),
+		ISO:     isots(),
+		Agent:   b.ShipID,
+		Project: pp,
+		State:   "idle",
+		PID:     os.Getpid(),
+		Handle:  hh,
+		Note:    clean(note),
+	}
+	data, _ := json.MarshalIndent(rec, "", "  ")
+	_ = os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644)
 
 	return acked, seen, nil
 }
@@ -705,7 +744,7 @@ func (b *Bus) DoPrune() error {
 	live := make(map[string]bool)
 	for _, r := range b.AllStatusRecords() {
 		if b.stale(r.Epoch, r.State) {
-			os.Remove(filepath.Join(b.StatusDir, fsafe(r.Agent)+".tsv"))
+			os.Remove(filepath.Join(b.StatusDir, fsafe(r.Agent)+".json"))
 			statusCnt++
 			continue
 		}

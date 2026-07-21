@@ -55,42 +55,36 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 			Note:       r.Note,
 			Stale:      b.stale(r.Epoch, r.State),
 		}
-		// Read health/<ship>.json for task status + model info (single source of truth).
-		if d := b.readHealth(r.Agent); d != nil {
-			if d.Task != "" {
-				e.Task = d.Task
-			}
-			if d.Progress > 0 {
-				e.Progress = d.Progress
-			}
-			if d.Blocker != "" {
-				e.Blocker = d.Blocker
-			}
-			if d.ETA != "" {
-				e.ETA = d.ETA
-			}
-			if d.Branch != "" {
-				e.Branch = d.Branch
-			}
-			if d.LaunchType != "" {
-				e.LaunchType = d.LaunchType
-			}
-			if d.Parent != "" {
-				e.Parent = d.Parent
-			}
-			if d.Provider != "" {
-				e.Provider = d.Provider
-			}
-			if d.Model != "" {
-				e.Model = d.Model
-			}
-			if d.Updated != "" {
-				e.Updated = d.Updated
-			}
-			// Use health note as fallback when TSV note is empty.
-			if e.Note == "" && d.Note != "" {
-				e.Note = d.Note
-			}
+		// Enrich with task/model fields from the unified record.
+		if r.Task != "" {
+			e.Task = r.Task
+		}
+		if r.Progress > 0 {
+			e.Progress = r.Progress
+		}
+		if r.Blocker != "" {
+			e.Blocker = r.Blocker
+		}
+		if r.ETA != "" {
+			e.ETA = r.ETA
+		}
+		if r.Branch != "" {
+			e.Branch = r.Branch
+		}
+		if r.LaunchType != "" {
+			e.LaunchType = r.LaunchType
+		}
+		if r.Parent != "" {
+			e.Parent = r.Parent
+		}
+		if r.Provider != "" {
+			e.Provider = r.Provider
+		}
+		if r.Model != "" {
+			e.Model = r.Model
+		}
+		if r.Updated != "" {
+			e.Updated = r.Updated
 		}
 		out = append(out, e)
 	}

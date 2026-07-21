@@ -4,6 +4,7 @@
 package agentbus
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,22 +12,43 @@ import (
 	"strings"
 )
 
-// StatusRecord mirrors one status/<agent>.tsv line:
-// epoch \t isots \t agent \t project \t state \t pid \t handle \t note
+// StatusRecord is the unified per-ship status file (status/<agent>.json).
+// It carries both the legacy heartbeat fields (Epoch, ISO, Agent, Project,
+// State, PID, Handle, Note) and the plugin-liveness / task-status fields
+// that were previously in a separate health/<ship>.json.
 type StatusRecord struct {
-	Epoch   int64
-	ISO     string
-	Agent   string
-	Project string
-	State   string
-	PID     string
-	Handle  string
-	Note    string
+	// Legacy heartbeat fields (always present when written by Go code).
+	Epoch   int64  `json:"epoch"`
+	ISO     string `json:"iso"`
+	Agent   string `json:"agent"`
+	Project string `json:"project"`
+	State   string `json:"state"`
+	PID     int    `json:"pid"`
+	Handle  string `json:"handle"`
+	Note    string `json:"note"`
+
+	// Plugin-liveness fields (written by the opencode plugin).
+	PluginLastRun   string `json:"plugin_last_run,omitempty"`
+	ModelLastAction string `json:"model_last_action,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Server          string `json:"server,omitempty"`
+	ErrorTag        string `json:"error_tag,omitempty"`
+
+	// Task-status fields (written by Go CLI / status report).
+	Task       string `json:"task,omitempty"`
+	Progress   int    `json:"progress,omitempty"`
+	Blocker    string `json:"blocker,omitempty"`
+	ETA        string `json:"eta,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	LaunchType string `json:"launch_type,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Updated    string `json:"updated,omitempty"`
 }
 
 // StatusPatch carries the fields a `status report` invocation wants to
 // set. Progress < 0 means "not specified" so a caller can distinguish "leave
-// unchanged" from "set to 0". Written to health/<ship>.json via DoHealthUpdate.
+// unchanged" from "set to 0".
 type StatusPatch struct {
 	Task       string
 	Progress   int
@@ -64,20 +86,17 @@ func readFirstLine(path string) (string, error) {
 	return line, nil
 }
 
+// parseStatusFile reads a unified status/<agent>.json and returns it.
 func parseStatusFile(path string) (StatusRecord, bool) {
-	line, err := readFirstLine(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return StatusRecord{}, false
 	}
-	f := strings.SplitN(line, "\t", 8)
-	for len(f) < 8 {
-		f = append(f, "")
+	var rec StatusRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return StatusRecord{}, false
 	}
-	epoch, _ := strconv.ParseInt(f[0], 10, 64)
-	return StatusRecord{
-		Epoch: epoch, ISO: f[1], Agent: f[2], Project: f[3],
-		State: f[4], PID: f[5], Handle: f[6], Note: f[7],
-	}, true
+	return rec, true
 }
 
 func parseMsgFile(id, path string) (msgRecord, bool) {
@@ -93,10 +112,9 @@ func parseMsgFile(id, path string) (msgRecord, bool) {
 	return msgRecord{ID: id, Epoch: epoch, ISO: f[1], From: f[2], Target: f[3], Text: f[4], ReplyTo: f[5]}, true
 }
 
-// globSortedTSV lists <dir>/<prefix>*.tsv basenames (without extension),
-// sorted like bash glob expansion (plain lexicographic), matching the order
-// scripts/agent-bus iterates status/msgs directories in.
-func globSortedTSV(dir, prefix string) []string {
+// globSortedFiles lists <dir>/<prefix>*.ext basenames (without extension),
+// sorted lexicographically.
+func globSortedFiles(dir, prefix, ext string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -107,13 +125,13 @@ func globSortedTSV(dir, prefix string) []string {
 			continue
 		}
 		n := e.Name()
-		if !strings.HasSuffix(n, ".tsv") {
+		if !strings.HasSuffix(n, ext) {
 			continue
 		}
 		if prefix != "" && !strings.HasPrefix(n, prefix) {
 			continue
 		}
-		names = append(names, strings.TrimSuffix(n, ".tsv"))
+		names = append(names, strings.TrimSuffix(n, ext))
 	}
 	sort.Strings(names)
 	return names
@@ -121,8 +139,8 @@ func globSortedTSV(dir, prefix string) []string {
 
 func (b *Bus) AllStatusRecords() []StatusRecord {
 	var out []StatusRecord
-	for _, agent := range globSortedTSV(b.StatusDir, "") {
-		if r, ok := parseStatusFile(filepath.Join(b.StatusDir, agent+".tsv")); ok {
+	for _, agent := range globSortedFiles(b.StatusDir, "", ".json") {
+		if r, ok := parseStatusFile(filepath.Join(b.StatusDir, agent+".json")); ok {
 			out = append(out, r)
 		}
 	}
@@ -131,7 +149,7 @@ func (b *Bus) AllStatusRecords() []StatusRecord {
 
 func (b *Bus) allMsgRecords() []msgRecord {
 	var out []msgRecord
-	for _, id := range globSortedTSV(b.MsgDir, "m") {
+	for _, id := range globSortedFiles(b.MsgDir, "m", ".tsv") {
 		if r, ok := parseMsgFile(id, filepath.Join(b.MsgDir, id+".tsv")); ok {
 			out = append(out, r)
 		}
