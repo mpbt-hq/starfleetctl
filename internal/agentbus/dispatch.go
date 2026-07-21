@@ -49,8 +49,9 @@ type dispatchResponse struct {
 	Tag      string   `json:"tag,omitempty"`
 
 	// config response
-	HeartbeatMS int `json:"heartbeat_ms,omitempty"`
-	PollMS      int `json:"poll_ms,omitempty"`
+	HeartbeatMS   int    `json:"heartbeat_ms,omitempty"`
+	PollMS        int    `json:"poll_ms,omitempty"`
+	FallbackModel string `json:"fallback_model,omitempty"`
 }
 
 type inboxMsg struct {
@@ -128,9 +129,10 @@ func (b *Bus) dispatchConfig() dispatchResponse {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
 	return dispatchResponse{
-		OK:          true,
-		HeartbeatMS: cfg.AgentBus.HeartbeatMS,
-		PollMS:      cfg.AgentBus.PollMS,
+		OK:            true,
+		HeartbeatMS:   cfg.AgentBus.HeartbeatMS,
+		PollMS:        cfg.AgentBus.PollMS,
+		FallbackModel: cfg.AgentBus.FallbackModel,
 	}
 }
 

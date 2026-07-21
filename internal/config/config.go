@@ -34,8 +34,9 @@ type WebConfig struct {
 
 // AgentBusConfig holds agent-bus / opencode plugin tuning knobs.
 type AgentBusConfig struct {
-	HeartbeatMS int `yaml:"heartbeat_ms"`
-	PollMS      int `yaml:"poll_ms"`
+	HeartbeatMS  int    `yaml:"heartbeat_ms"`
+	PollMS       int    `yaml:"poll_ms"`
+	FallbackModel string `yaml:"fallback_model"`
 }
 
 // DefaultConfig returns defaults.
@@ -70,15 +71,18 @@ func BusDir(root string) string {
 
 // Load reads configuration from .starfleet-ai/conf/web.yaml and
 // .starfleet-ai/conf/agent-bus.yaml. Missing files are OK (defaults apply).
+// Each YAML file wraps its content under a top-level key (web:, agent_bus:),
+// so we unmarshal into a node map to extract the inner config.
 func Load(root string) (*Config, error) {
 	cfg := DefaultConfig()
 
 	for _, f := range []struct {
 		file string
+		key  string
 		dst  interface{}
 	}{
-		{"web.yaml", &cfg.Web},
-		{"agent-bus.yaml", &cfg.AgentBus},
+		{"web.yaml", "web", &cfg.Web},
+		{"agent-bus.yaml", "agent_bus", &cfg.AgentBus},
 	} {
 		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)
 		data, err := os.ReadFile(path)
@@ -88,8 +92,14 @@ func Load(root string) (*Config, error) {
 			}
 			return nil, err
 		}
-		if err := yaml.Unmarshal(data, f.dst); err != nil {
+		var raw map[string]yaml.Node
+		if err := yaml.Unmarshal(data, &raw); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if node, ok := raw[f.key]; ok {
+			if err := node.Decode(f.dst); err != nil {
+				return nil, fmt.Errorf("parse %s %s: %w", path, f.key, err)
+			}
 		}
 	}
 

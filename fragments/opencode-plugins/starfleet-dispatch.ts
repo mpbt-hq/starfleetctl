@@ -26,9 +26,18 @@ function bus(cmd: Record<string, unknown>): any {
 // Fetch tuning knobs from starfleetctl config.
 let HEARTBEAT_MS = 0
 let POLL_MS = 0
+let FALLBACK_MODEL = ''
 function loadConfig(): void {
   const r = bus({ cmd: 'config' })
-  if (r.ok) { HEARTBEAT_MS = r.heartbeat_ms; POLL_MS = r.poll_ms }
+  if (r.ok) { HEARTBEAT_MS = r.heartbeat_ms; POLL_MS = r.poll_ms; FALLBACK_MODEL = r.fallback_model || '' }
+}
+
+// Classify retry errors that need a model switch (not just a restart).
+// zen-ratelimit: quota exhausted / rate limited
+// nim-overload: provider overloaded
+function isRecoverableError(detail: string): boolean {
+  return /quota|rate.?limit|429|too many|throttl|Free usage exceeded|subscribe|subscription|free usage/i.test(detail) ||
+    /nim.*overload|overload/i.test(detail)
 }
 
 function aid(): string {
@@ -68,6 +77,7 @@ export const plugin = async ({ client, $ }: any) => {
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
+  let hasSwitchedToFallback = false
 
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
   // failures as a `session.error` event — it parks the session in a `retry`
@@ -110,6 +120,32 @@ export const plugin = async ({ client, $ }: any) => {
     tickLog(`MODEL RETRY (quota/zen): ${detail}`)
     toast('warning', 'starfleet-dispatch', `model retry: ${detail}`, 6000)
     bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
+
+    // Auto-recovery: switch to fallback model on zen-ratelimit / nim-overload.
+    if (isRecoverableError(detail) && FALLBACK_MODEL && !hasSwitchedToFallback) {
+      hasSwitchedToFallback = true
+      const msg = `MODEL RECOVERY: switching to ${FALLBACK_MODEL} (was: ${detail})`
+      client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
+      tickLog(msg)
+      toast('warning', 'starfleet-dispatch', msg, 8000)
+      try {
+        await client.session.switchModel({ path: { id: currentSessionID }, body: { model: FALLBACK_MODEL } })
+        client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `switchModel to ${FALLBACK_MODEL} succeeded` } }).catch(() => {})
+        tickLog(`MODEL RECOVERY: switchModel ok → ${FALLBACK_MODEL}`)
+        await client.session.promptAsync({
+          path: { id: currentSessionID },
+          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+        })
+        tickLog(`MODEL RECOVERY: promptAsync sent`)
+      } catch (e) {
+        const emsg = `MODEL RECOVERY failed: ${String(e).slice(0, 120)}`
+        client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
+        tickLog(emsg)
+        hasSwitchedToFallback = false
+      }
+    } else if (isRecoverableError(detail) && hasSwitchedToFallback) {
+      tickLog(`MODEL RECOVERY: fallback ${FALLBACK_MODEL} also failed — both models blocked`)
+    }
   }
 
   const retryPollTimer = setInterval(pollRetryStatus, RETRY_POLL_MS)
@@ -211,6 +247,7 @@ export const plugin = async ({ client, $ }: any) => {
         tuiReady = true
         sessionNeedsIdentity = true
         turnCount = 0
+        hasSwitchedToFallback = false
         const sessionId = (event.properties?.info as { id?: string })?.id
         if (sessionId) currentSessionID = sessionId
         bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
@@ -225,12 +262,17 @@ export const plugin = async ({ client, $ }: any) => {
         sessionNeedsIdentity = true
         turnCount = 0
         currentModel = {}
+        hasSwitchedToFallback = false
         bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
       }
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
         if (info?.role === 'assistant' && info?.modelID) {
           currentModel = { model: info.modelID, server: info.providerID }
+          if (hasSwitchedToFallback) {
+            tickLog(`MODEL RECOVERY: session recovered on ${info.modelID} — fallback worked`)
+            hasSwitchedToFallback = false
+          }
           bus({ cmd: 'health', state: 'working', error_tag: undefined, plugin_last_run: new Date().toISOString() })
         }
       }

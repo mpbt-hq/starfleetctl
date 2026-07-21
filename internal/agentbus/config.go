@@ -18,9 +18,14 @@ func (b *Bus) DoConfig() error {
 	if err != nil {
 		return err
 	}
-	out := map[string]int{
-		"heartbeat_ms": cfg.AgentBus.HeartbeatMS,
-		"poll_ms":      cfg.AgentBus.PollMS,
+	out := struct {
+		HeartbeatMS  int    `json:"heartbeat_ms"`
+		PollMS       int    `json:"poll_ms"`
+		FallbackModel string `json:"fallback_model"`
+	}{
+		HeartbeatMS:  cfg.AgentBus.HeartbeatMS,
+		PollMS:       cfg.AgentBus.PollMS,
+		FallbackModel: cfg.AgentBus.FallbackModel,
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
