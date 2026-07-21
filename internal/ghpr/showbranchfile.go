@@ -14,6 +14,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/projectconfig"
 )
 
 const showBranchFileUsage = `usage: starfleetctl show-branch-file <ref> <path> [symbol]
@@ -30,23 +32,41 @@ env:
 // the file content and the path that actually resolved. Mirrors
 // scripts/show-branch-file's candidate-list + first-success loop.
 func fetchBranchFile(ref, pathIn string) (content, used string, err error) {
-	candidates := []string{pathIn}
-	if strings.HasPrefix(pathIn, "Xext/") {
-		candidates = append(candidates, strings.TrimPrefix(pathIn, "Xext/"))
-	} else {
-		candidates = append(candidates, "Xext/"+pathIn)
-	}
-
-	var lastErr error
-	for _, p := range candidates {
-		out, e := runGHQuiet("api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", repo(), p, ref),
-			"-H", "Accept: application/vnd.github.raw")
-		if e == nil {
-			return string(out), p, nil
+	// Load project config for path remapping
+	projCfg, err := projectconfig.Load("")
+	if err != nil {
+		// If config fails, fall back to default Xext/ remapping
+		candidates := []string{pathIn}
+		if strings.HasPrefix(pathIn, "Xext/") {
+			candidates = append(candidates, strings.TrimPrefix(pathIn, "Xext/"))
+		} else {
+			candidates = append(candidates, "Xext/"+pathIn)
 		}
-		lastErr = e
+
+		var lastErr error
+		for _, p := range candidates {
+			out, e := runGHQuiet("api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", repo(), p, ref),
+				"-H", "Accept: application/vnd.github.raw")
+			if e == nil {
+				return string(out), p, nil
+			}
+			lastErr = e
+		}
+		return "", "", fmt.Errorf("not found on %s: %s (%v)", ref, strings.Join(candidates, ", "), lastErr)
+	} else {
+		candidates := projCfg.GetRemapCandidates(pathIn)
+
+		var lastErr error
+		for _, p := range candidates {
+			out, e := runGHQuiet("api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", repo(), p, ref),
+				"-H", "Accept: application/vnd.github.raw")
+			if e == nil {
+				return string(out), p, nil
+			}
+			lastErr = e
+		}
+		return "", "", fmt.Errorf("not found on %s: %s (%v)", ref, strings.Join(candidates, ", "), lastErr)
 	}
-	return "", "", fmt.Errorf("not found on %s: %s (%v)", ref, strings.Join(candidates, ", "), lastErr)
 }
 
 // RunShowBranchFile implements `starfleetctl show-branch-file <ref> <path> [symbol]`.

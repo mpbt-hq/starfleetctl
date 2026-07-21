@@ -45,15 +45,53 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-if [ -n "$RELEASE" ]; then
-    if [ -f "cf/$RELEASE/config.sh" ]; then
-        cfg="cf/$RELEASE/config.sh"
+# Load project configuration to get solution paths
+STARFLEET_BIN=".starfleet-ai/bin/starfleetctl"
+PROJECT_CONFIG=".starfleet-ai/conf/project.yaml"
+
+# Try to get solution config from project config
+get_solution_config() {
+    local rel="$1"
+    local field="$2"
+    if [ -f "$PROJECT_CONFIG" ] && command -v yq >/dev/null 2>&1; then
+        yq eval ".solutions.\"$rel\".$field" "$PROJECT_CONFIG" 2>/dev/null || echo ""
     else
-        cfg="cf/xserver-${RELEASE#xserver-}/config.sh"
+        echo ""
     fi
-    [ -f "$cfg" ] || { echo "run-claude: no such release/solution '$RELEASE' (missing $cfg)" >&2; exit 1; }
-    . "$cfg"
-    export XLIBRE_RELEASE
+}
+
+get_solution_prefix() {
+    if [ -f "$PROJECT_CONFIG" ] && command -v yq >/dev/null 2>&1; then
+        yq eval '.solutions."master".release_prefix // .solutions."xserver-25.2".release_prefix // "xserver-"' "$PROJECT_CONFIG" 2>/dev/null || echo "xserver-"
+    else
+        echo "xserver-"
+    fi
+}
+
+get_solution_env_var() {
+    if [ -f "$PROJECT_CONFIG" ] && command -v yq >/dev/null 2>&1; then
+        yq eval '.solutions."master".env_var // .solutions."xserver-25.2".env_var // "XLIBRE_RELEASE"' "$PROJECT_CONFIG" 2>/dev/null || echo "XLIBRE_RELEASE"
+    else
+        echo "XLIBRE_RELEASE"
+    fi
+}
+
+if [ -n "$RELEASE" ]; then
+    # Try to get config path from project config
+    CFG=$(get_solution_config "$RELEASE" "config_path")
+    if [ -z "$CFG" ] || [ "$CFG" = "null" ]; then
+        # Fallback: try direct path
+        if [ -f "cf/$RELEASE/config.sh" ]; then
+            CFG="cf/$RELEASE/config.sh"
+        else
+            PREFIX=$(get_solution_prefix)
+            CFG="cf/${PREFIX}${RELEASE#${PREFIX}}/config.sh"
+        fi
+    fi
+    [ -f "$CFG" ] || { echo "run-claude: no such release/solution '$RELEASE' (missing $CFG)" >&2; exit 1; }
+    . "$CFG"
+    ENV_VAR=$(get_solution_env_var)
+    export "$ENV_VAR"
 else
     unset XLIBRE_RELEASE 2>/dev/null || true
 fi
@@ -61,10 +99,11 @@ fi
 if [ -z "$NAME" ]; then
     # Same ship-name registry as agent-bus-auto-id.sh / agent-run, so a plain
     # run-claude session gets a fleet identity too instead of a bare PID tag.
-    NAME="$(.starfleet-ai/bin/starfleetctl ship-names assign 2>/dev/null)" || true
+    NAME="$($STARFLEET_BIN ship-names assign 2>/dev/null)" || true
     if [ -z "$NAME" ]; then
         if [ -n "$RELEASE" ]; then
-            NAME="${XLIBRE_RELEASE#xserver-}-$$"
+            ENV_VAR=$(get_solution_env_var)
+            NAME="${!ENV_VAR#${PREFIX}}-$$"
         else
             NAME="ws-$$"
         fi
@@ -81,7 +120,7 @@ fi
 
 # Register initial heartbeat (belt-and-suspenders with Claude Code's own
 # SessionStart hook, which uses this same env-inherited AGENT_ID).
-.starfleet-ai/bin/starfleetctl agent-bus status idle "claude session starting (run-claude)" >/dev/null 2>&1 || true
+$STARFLEET_BIN agent-bus status idle "claude session starting (run-claude)" >/dev/null 2>&1 || true
 
 # No explicit initial prompt/args given: feed the standard boot prompt so the
 # session's first turn happens immediately at launch instead of waiting for a

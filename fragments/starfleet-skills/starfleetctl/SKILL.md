@@ -42,7 +42,7 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 | `github pr view <pr#>` | PR metadata via gh |
 | `github pr ci <pr#\|URL>` | CI status classified by conclusion |
 | `github pr show-branch-file <ref> <path>` | Print file at any ref via GitHub API |
-| `github backport applies <path> <grep-ERE>` | Check applicability across release lines |
+| `github backport applies <path> <grep-ERE> [release...]` | Check applicability across release lines (defaults from project config) |
 
 ### GitHub interaction (mutating)
 
@@ -59,5 +59,5 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 ## Known limitations
 
 - `agent-bus monitor-loop`/`fleet-watch` known broken under Claude Code's `Monitor` tool (workaround: bash originals)
-- `github backport commit` path-remap uses `strings.ReplaceAll` not regex (simplification, no real impact)
+- `github backport commit` path-remap uses project config (`.starfleet-ai/conf/project.yaml`) for prefix/behavior (default: `Xext/`, enabled for xserver)
 - `github pr make` marker-leak bug fixed 2026-07-07 (both Go and bash)

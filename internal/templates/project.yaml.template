@@ -1,0 +1,26 @@
+# starfleetctl project configuration template
+# Copy this to .starfleet-ai/conf/project.yaml and customize for your project
+
+name: "generic-project"
+
+# Worktree directory layout under _WORK_/
+worktree_layout:
+  # Base directory pattern: {project}-{rel} (e.g., myproject-1.0)
+  base_dir: "{project}-{rel}"
+  # Path to source tree within the worktree
+  sources_subdir: "sources/{project}"
+  # Path to agent clones within the worktree
+  agent_subdir: "agent/{name}/{project}"
+
+# Path remapping between branches (e.g., prefix/<ext>/ <-> <ext>/)
+path_remapping:
+  # Prefix to toggle when a file is not found at the given path
+  prefix: ""
+  # Whether path remapping is enabled
+  enabled: false
+
+# Maintained release lines for backporting
+release_lines: []
+
+# Solution-specific configurations
+solutions: {}

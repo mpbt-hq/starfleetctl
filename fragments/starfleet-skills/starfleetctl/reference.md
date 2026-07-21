@@ -143,7 +143,7 @@ with the `REPO` environment variable.
 | `github pr view <pr#> [json-fields]` | `gh pr view --json <fields>` (default fields: `number,title,state`). |
 | `github pr ci <pr#\|URL> [--json]` | CI status classified **by conclusion, not raw count** — the underlying CI matrix is fail-fast, so one real `FAILURE` cancels every still-running sibling; a big "N failing" number is usually mostly collateral `CANCELLED` jobs. Prints pass/fail/cancelled/pending/skip buckets, the actual failures, a verdict line, and a known-CI-flake hint. `--json` prints the raw `statusCheckRollup`. |
 | `github pr show-branch-file <ref> <path> [symbol]` | Print a repo file (or, with `[symbol]`, just the region after a literal-substring match, `grep -A`-style with multi-hit/merged-context semantics) at any ref via the GitHub contents API — no local clone needed. Auto-retries with a leading path segment toggled, for repos that reorganized their directory layout between branches. |
-| `github backport applies <master-path> <grep-ERE> [release ...]` | Run an extended-regex marker search across several release branches at once (built on `github pr show-branch-file`) — e.g. classify each branch as vulnerable / already-fixed / not-applicable in one call. Defaults to release lines `25.2 25.1 25.0`. |
+| `github backport applies <master-path> <grep-ERE> [release ...]` | Run an extended-regex marker search across several release branches at once (built on `github pr show-branch-file`) — e.g. classify each branch as vulnerable / already-fixed / not-applicable in one call. Defaults to release lines from project config (`.starfleet-ai/conf/project.yaml`). |
 | `github pr show-conflict` | List all open PRs whose `mergeable` status is `CONFLICTING`. |
 
 ### GitHub interaction — mutating
@@ -179,12 +179,7 @@ separate decision gated on review, same as the read-only set was before it got t
   (`agent-bus-monitor-loop`, `agent-bus-fleet-watch`) remain the only
   `Monitor`-tool-safe implementation. `agent-bus watch` (a `setsid`-detached background daemon, a
   different execution model entirely) was not tested against this failure mode.
-- **`github backport commit`'s path-remap fallback uses a literal string replace, not a regex, unlike the
-  bash original.** The bash script's directory-reorg remap runs the old/new path pair through
-  `sed`, so a `.` in a path is technically a basic-regex wildcard there; this port uses
-  `strings.ReplaceAll` instead. Behaviourally identical for every real path in the source tree this
-  targets (plain `word/word/word.c` names, no regex metacharacters) — flagged here as a disclosed,
-  deliberate simplification rather than a silent behavior change.
+- **`github backport commit`'s path-remap fallback uses project configuration.** The path remapping prefix and behavior are configured in `.starfleet-ai/conf/project.yaml` (default: `Xext/` prefix, enabled for xserver projects). The bash original used `sed` with a hardcoded `Xext/` prefix; this port uses `strings.ReplaceAll` with the configured prefix. Behaviourally identical for every real path in the source tree this targets (plain `word/word/word.c` names, no regex metacharacters) — flagged here as a disclosed, deliberate simplification rather than a silent behavior change.
 - **`github pr make`'s marker-leak bug is fixed (2026-07-07), in both this port and the bash original.**
   The old default "rebase" mode's PR-number-marker rewrite touched the *pushed* PR branch itself,
   not just the source/incubator branch — leaked onto merged upstream commits (PR #3162). Both

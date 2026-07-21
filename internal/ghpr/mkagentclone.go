@@ -17,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/projectconfig"
 )
 
 const mkAgentCloneUsage = `usage: starfleetctl mk-agent-clone <release> [name]   (e.g. mk-agent-clone 25.2)
@@ -52,8 +54,14 @@ func RunMkAgentClone(root string, args []string) int {
 // `>&2`-style for pr-checkout), so it's routed through the given stdout
 // writer rather than hardcoded to os.Stdout.
 func EnsureAgentClone(root, rel, name string, stdout io.Writer) (string, error) {
-	ref := filepath.Join(root, "_WORK_", "xserver-"+rel, "sources", "xlibre", "xserver")
-	dest := filepath.Join(root, "_WORK_", "xserver-"+rel, "agent", name, "xserver")
+	// Load project configuration
+	projCfg, err := projectconfig.Load(root)
+	if err != nil {
+		return "", fmt.Errorf("load project config: %w", err)
+	}
+
+	ref := projCfg.RefDir(root, rel)
+	dest := projCfg.AgentDir(root, rel, name)
 	incubator := "rfc/backport-" + rel
 
 	if fi, err := os.Stat(filepath.Join(ref, ".git")); err != nil || !fi.IsDir() {

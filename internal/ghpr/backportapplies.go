@@ -12,12 +12,14 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/projectconfig"
 )
 
 const backportAppliesUsage = `usage: starfleetctl backport-applies <master-path> <grep-ERE> [release ...]
   <master-path>  repo path as on master, e.g. Xext/glx/createcontext.c
   <grep-ERE>     extended regex of markers to look for
-  [release ...]  release lines to check (default: 25.2 25.1 25.0)
+  [release ...]  release lines to check (default: from project config)
 `
 
 // RunBackportApplies implements `starfleetctl backport-applies <path> <ere> [release ...]`.
@@ -32,8 +34,15 @@ func RunBackportApplies(args []string) int {
 	}
 	pathIn, ere := args[0], args[1]
 	rels := args[2:]
+
+	// Load project config to get default release lines
+	projCfg, err := projectconfig.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "backport-applies: load project config: %v\n", err)
+		return 1
+	}
 	if len(rels) == 0 {
-		rels = []string{"25.2", "25.1", "25.0"}
+		rels = projCfg.GetReleaseLines()
 	}
 
 	re, err := regexp.Compile(ere)
@@ -61,7 +70,7 @@ func RunBackportApplies(args []string) int {
 			}
 		}
 		if !matched {
-			fmt.Printf("  (no line matched: %s)\n", ere)
+			fmt.Printf("  (no matches for /%s/)\n", ere)
 		}
 	}
 	return 0

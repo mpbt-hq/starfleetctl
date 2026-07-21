@@ -149,15 +149,6 @@ func runAutoscaleNeed(root string, args []string) int {
 		return 2
 	}
 
-	if release != "" {
-		relFull := "xserver-" + strings.TrimPrefix(release, "xserver-")
-		configPath := filepath.Join(root, "cf", relFull, "config.sh")
-		if _, err := os.Stat(configPath); err != nil {
-			fmt.Fprintf(os.Stderr, "session autoscale need: no such release '%s' (missing cf/%s/config.sh)\n", release, relFull)
-			return 2
-		}
-	}
-
 	total, idle := fleetCounts(root)
 
 	toSpawn := need - idle

@@ -12,9 +12,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/projectconfig"
 )
 
 const prCheckoutUsage = `usage: starfleetctl pr-checkout <pr#> [agent-name]
@@ -41,7 +42,15 @@ func RunPRCheckout(root string, args []string) int {
 	if len(args) >= 2 {
 		name = args[1]
 	}
-	dest := filepath.Join(root, "_WORK_", "xserver-master", "agent", name, "xserver")
+
+	// Load project configuration
+	projCfg, err := projectconfig.Load(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "pr-checkout:", err)
+		return 1
+	}
+
+	dest := projCfg.AgentDir(root, "master", name)
 
 	// Advisory cross-agent check (non-fatal): warn if another agent already
 	// claimed this PR. Re-invokes our own `pr-claim --who` subcommand

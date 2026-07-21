@@ -15,6 +15,7 @@ import (
 	starfleetctl "github.com/metux/starfleetctl"
 	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/projectconfig"
 	"github.com/metux/starfleetctl/internal/templates"
 )
 
@@ -81,6 +82,11 @@ const claudeScriptsSubdir = "claude-scripts"
 // Checks returns the full, ordered set of bootstrap checks.
 func Checks() []Check {
 	return []Check{
+		{
+			Name:   "project configuration (.starfleet-ai/conf/project.yaml)",
+			Verify: verifyProjectConfig,
+			Fix:    fixProjectConfig,
+		},
 		{
 			Name:   "_WORK_ directory tree",
 			Verify: verifyDirs,
@@ -1119,4 +1125,32 @@ func fixWebConf(b *Bootstrap) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(webYamlTemplate), 0o644)
+}
+
+// verifyProjectConfig checks that the project configuration file exists.
+func verifyProjectConfig(b *Bootstrap) (bool, string) {
+	path := filepath.Join(b.Root, ".starfleet-ai", "conf", "project.yaml")
+	if _, err := os.Stat(path); err == nil {
+		// Validate that it can be loaded
+		_, err := projectconfig.Load(b.Root)
+		if err != nil {
+			return false, fmt.Sprintf("present but invalid: %v", err)
+		}
+		return true, "present, valid"
+	}
+	return false, "missing .starfleet-ai/conf/project.yaml"
+}
+
+// fixProjectConfig creates the project configuration file from the embedded template if missing.
+func fixProjectConfig(b *Bootstrap) error {
+	path := filepath.Join(b.Root, ".starfleet-ai", "conf", "project.yaml")
+	// Only create if missing - don't overwrite user config
+	if _, err := os.Stat(path); err == nil {
+		return nil // already exists, leave user config alone
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	// Use the embedded template
+	return os.WriteFile(path, templates.ProjectConfigTemplate, 0o644)
 }

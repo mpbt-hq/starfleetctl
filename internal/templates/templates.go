@@ -14,8 +14,18 @@ import _ "embed"
 // ship-name pool is installed.
 const ShipNamesRel = ".starfleet-ai/etc/ship-names.txt"
 
+// ProjectConfigRel is the in-repo path (relative to a workspace root) where the
+// project configuration is installed.
+const ProjectConfigRel = ".starfleet-ai/conf/project.yaml"
+
 // ShipNames is the canonical ship-name pool, embedded so both `genesis-init`
 // and `bootstrap --fix` can (re)create it without any network access.
 //
 //go:embed ship-names.txt
 var ShipNames []byte
+
+// ProjectConfigTemplate is the project configuration template, embedded so
+// `bootstrap --fix` can create it if missing.
+//
+//go:embed project.yaml.template
+var ProjectConfigTemplate []byte

@@ -24,6 +24,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/projectconfig"
 )
 
 const backportCommitUsage = `usage: starfleetctl backport-commit <release> <commit-ish|PR-number> [agent-name]
@@ -44,6 +46,13 @@ func RunBackportCommit(root string, args []string) int {
 	name := "default"
 	if len(args) >= 3 {
 		name = args[2]
+	}
+
+	// Load project configuration
+	projCfg, err := projectconfig.Load(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "backport-commit: load project config: %v\n", err)
+		return 1
 	}
 
 	// 1. refresh/create the isolated agent clone (lands on rfc/backport-<rel>)
@@ -94,7 +103,7 @@ func RunBackportCommit(root string, args []string) int {
 		_ = gitRunSilent(dest, "cherry-pick", "--abort")
 		fmt.Fprintln(os.Stderr, "backport-commit: cherry-pick failed; trying path-remapped apply (dir reorg)...")
 
-		rc := applyViaPathRemap(dest, sha)
+		rc := applyViaPathRemap(dest, sha, projCfg)
 		if rc != 0 {
 			return rc
 		}
@@ -122,7 +131,7 @@ func RunBackportCommit(root string, args []string) int {
 // cherry-picked-from provenance). Returns 0 on success, or the exit code
 // backport-commit should return (3 for the documented "do it manually"
 // cases, matching the bash original's exit codes).
-func applyViaPathRemap(dest, sha string) int {
+func applyViaPathRemap(dest, sha string, projCfg *projectconfig.ProjectConfig) int {
 	namesOut, err := gitCapture(dest, "show", "--format=", "--name-only", sha)
 	if err != nil {
 		fprintErr("backport-commit", err)
@@ -141,12 +150,24 @@ func applyViaPathRemap(dest, sha string) int {
 		if _, err := gitCaptureQuiet(dest, "ls-files", "--error-unmatch", mp); err == nil {
 			tp = mp // same path exists on this branch
 		} else {
-			base := filepath.Base(mp)
-			candOut, _ := gitCapture(dest, "ls-files", "--", "*/"+base, base)
-			tp = pickBestSuffixMatch(candOut, mp)
+			// Try to find by basename with path remapping
+			candidates := projCfg.GetRemapCandidates(mp)
+			var candOut string
+			for _, cand := range candidates {
+				if _, err := gitCaptureQuiet(dest, "ls-files", "--error-unmatch", cand); err == nil {
+					tp = cand
+					break
+				}
+			}
 			if tp == "" {
-				fmt.Fprintf(os.Stderr, "backport-commit: cannot uniquely locate '%s' on this release (missing or ambiguous) — do it manually in %s\n", base, dest)
-				return 3
+				// Fallback: search by basename
+				base := filepath.Base(mp)
+				candOut, _ = gitCapture(dest, "ls-files", "--", "*/"+base, base)
+				tp = pickBestSuffixMatch(candOut, mp)
+				if tp == "" {
+					fmt.Fprintf(os.Stderr, "backport-commit: cannot uniquely locate '%s' on this release (missing or ambiguous) — do it manually in %s\n", base, dest)
+					return 3
+				}
 			}
 		}
 		if tp != mp {
