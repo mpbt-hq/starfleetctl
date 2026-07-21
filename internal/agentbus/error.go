@@ -71,7 +71,7 @@ func ClassifyModelError(detail string) string {
 // affected ship should be told to simply re-run its last prompt (resume),
 // rather than only notifying the flagship.
 func isAutoRestartTag(tag string) bool {
-	return tag == "streaming-response-failed" || tag == "nim-overload"
+	return tag == "streaming-response-failed" || tag == "nim-overload" || tag == "resource-exhausted"
 }
 
 // IsUserAbort reports whether a session.error detail is a user-initiated
