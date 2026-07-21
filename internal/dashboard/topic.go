@@ -42,6 +42,7 @@ type TopicMeta struct {
 	Since        string // parked only
 	MigratedFrom string
 	Tags         string // comma-separated area tags, e.g. "starfleet, ci"
+	Resolved     string // parked only: resolution note
 }
 
 func (d *Dashboard) TopicsDir() string {
@@ -124,6 +125,8 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 			m.MigratedFrom = val
 		case "tags":
 			m.Tags = val
+		case "resolved":
+			m.Resolved = val
 		}
 	}
 	return m, body, nil
@@ -138,6 +141,9 @@ func writeTopicFile(path string, m TopicMeta, body string) error {
 	if m.Category == "parked" {
 		fmt.Fprintf(&b, "noted_by: %s\n", quoteYAML(m.NotedBy))
 		fmt.Fprintf(&b, "since: %s\n", quoteYAML(m.Since))
+		if m.Resolved != "" {
+			fmt.Fprintf(&b, "resolved: %s\n", quoteYAML(m.Resolved))
+		}
 	} else {
 		if m.Kind != "" {
 			fmt.Fprintf(&b, "kind: %s\n", quoteYAML(m.Kind))
