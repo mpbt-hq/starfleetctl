@@ -25,6 +25,14 @@ cleared:
   index. When you start, pause, or finish a topic (an initiative spanning more than one PR, or a
   decision still pending), update its entry **in the same session**. Use the CLI (`starfleetctl
   dashboard` subcommands) for every read and write — never edit the index file directly.
+
+- **Dashboard files: CLI-only, no exceptions.** NEVER use `Read`/`Edit`/`Write`/`Glob`/`Grep`
+  directly on `.starfleet-ai/dashboard/topics/*.md` or `.starfleet-ai/DASHBOARD.md`. All access
+  goes through `starfleetctl dashboard topic show|write|new|commit` and `starfleetctl dashboard
+  reindex|commit`. This is not optional — agents have been caught hand-editing topic files,
+  which breaks the encapsulation needed for future multi-host operation. The pattern is:
+  `topic show <slug> > /tmp/t.md` → edit `/tmp/t.md` → `topic write <slug> /tmp/t.md` →
+  `topic commit <slug> -m "<msg>"`. For new topics: `topic new --title "…" --kind bug`.
 - **Notice something worth a look while doing unrelated work → park it immediately.** A suspicious
    code path, a possible follow-up cleanup, an untriaged idea — add a dashboard Parked entry
    right away rather than just mentioning it in the response and moving on.
@@ -32,7 +40,7 @@ cleared:
 - **"Take on / pick up / capture a (new) task" always means: write it into the dashboard, NOT just
    say you'll do it.** When the praetor or another ship hands you a task, or you decide to track a
    to-do for the fleet, run the sanctioned capture command — it records a `dashboard/topics/<slug>.md`
-   entry (never edit dashboard files by hand):
+   entry (FORBIDDEN: never create/edit topic files via `Write`/`Edit`/`Read`):
    `starfleetctl task capture --title "<short title>" --desc "<what to do / acceptance criteria>"`
    The command prints `task-captured: slug=…`; forward that summary to the sender. "Aufgabe
    aufnehmen", "neue Aufgabe", "track this" and "capture a task" all mean the same thing. If the task
