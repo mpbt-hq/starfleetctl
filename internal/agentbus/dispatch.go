@@ -38,6 +38,12 @@ type dispatchRequest struct {
 	// error handle
 	Detail string `json:"detail,omitempty"`
 	Ship   string `json:"ship,omitempty"`
+
+	// error-handle (policy decision)
+	Source       string `json:"source,omitempty"`
+	CurrentModel string `json:"current_model,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	HasFallback  bool   `json:"has_fallback,omitempty"`
 }
 
 // dispatchResponse is the JSON returned to the plugin.
@@ -52,6 +58,11 @@ type dispatchResponse struct {
 	HeartbeatMS   int    `json:"heartbeat_ms,omitempty"`
 	PollMS        int    `json:"poll_ms,omitempty"`
 	FallbackModel string `json:"fallback_model,omitempty"`
+
+	// error-handle policy response
+	Action       string `json:"action,omitempty"`
+	TargetModel  string `json:"target_model,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 type inboxMsg struct {
@@ -114,6 +125,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchPrune()
 	case "error":
 		return b.dispatchError(req)
+	case "error-handle":
+		return b.dispatchErrorHandle(req)
 	case "clear":
 		return b.dispatchClear()
 	case "exit":
@@ -301,6 +314,91 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, req.Detail),
 	}, false, "", "")
 	return dispatchResponse{OK: true, Tag: tag}
+}
+
+// dispatchErrorHandle implements `cmd: "error-handle"` — the policy engine.
+// Plugin sends error detail + context, starfleetctl returns the action to take.
+// This moves all policy logic into the Go binary so it can be updated
+// (binary replace or config change) without restarting the opencode client.
+func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
+	if req.Detail == "" {
+		return dispatchResponse{OK: false, Error: "error-handle: need detail"}
+	}
+
+	detail := req.Detail
+	shipID := b.ShipID
+	if req.Ship != "" {
+		shipID = req.Ship
+	}
+
+	// 1. User abort → ignore.
+	if IsUserAbort(detail) {
+		b.logEvent("plugin", fmt.Sprintf("error-handle (user abort, suppressed): %s", detail))
+		return dispatchResponse{OK: true, Action: "ignore", Reason: "user abort"}
+	}
+
+	// 2. Classify.
+	tag := ClassifyModelError(detail)
+
+	// 3. Health update + notification (same as dispatchError).
+	_ = b.DoHealthUpdate([]string{"--state", "blocked", "--error-tag", tag})
+	label := ""
+	if tag != "" {
+		label = " [" + tag + "]"
+	}
+	b.logEvent("plugin", fmt.Sprintf("error-handle%s: %s (source=%s)", label, detail, req.Source))
+	_ = b.DoPost("Enterprise", []string{
+		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
+	}, false, "", "")
+
+	// 4. Policy decision.
+	action, reason := decideAction(tag, req.HasFallback, req.Source)
+	target := ""
+	if action == "switch-model" {
+		cfg, err := config.Load(b.Root)
+		if err == nil && cfg.AgentBus.FallbackModel != "" {
+			target = cfg.AgentBus.FallbackModel
+		} else {
+			// No fallback configured → can't switch, fall back to retry.
+			action = "retry"
+			reason = "no fallback model configured"
+		}
+	}
+
+	return dispatchResponse{
+		OK:          true,
+		Tag:         tag,
+		Action:      action,
+		TargetModel: target,
+		Reason:      reason,
+	}
+}
+
+// decideAction implements the error-handling policy.
+//
+//Transient errors → retry (just re-prompt, model is fine).
+// Hard errors → switch-model (need different provider/model).
+// Unknown → ignore (safe default).
+func decideAction(tag string, hasFallback bool, source string) (action, reason string) {
+	switch tag {
+	case "nim-overload":
+		return "retry", "transient provider overload, retry alone should suffice"
+	case "streaming-response-failed":
+		return "retry", "transient stream disconnect, retry alone should suffice"
+	case "resource-exhausted":
+		return "retry", "transient resource exhaustion, retry alone should suffice"
+	case "zen-ratelimit":
+		if hasFallback {
+			return "switch-model", "quota/rate limit exhausted, switch to fallback model"
+		}
+		return "retry", "quota/rate limit but no fallback configured, retry anyway"
+	default:
+		// Unknown tag from log-monitor or unrecognized error.
+		if source == "log-monitor" {
+			return "retry", "unrecognized log error, retry as precaution"
+		}
+		return "ignore", "unclassified error, no action taken"
+	}
 }
 
 func (b *Bus) dispatchClear() dispatchResponse {

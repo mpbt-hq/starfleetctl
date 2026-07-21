@@ -32,23 +32,6 @@ function loadConfig(): void {
   if (r.ok) { HEARTBEAT_MS = r.heartbeat_ms; POLL_MS = r.poll_ms; FALLBACK_MODEL = r.fallback_model || '' }
 }
 
-// Hard errors: switch to fallback model (quota exhausted, model gone).
-// zen-ratelimit: quota exhausted / rate limited
-// model-gone: model no longer exists / deprecated / not found
-function isRecoverableError(detail: string): boolean {
-  return /quota|rate.?limit|429|too many|throttl|Free usage exceeded|subscribe|subscription|free usage/i.test(detail) ||
-    /model.{0,20}(not found|missing|unavailable|deprecated|does not exist)|unknown model|invalid model|no such model/i.test(detail)
-}
-
-// Transient errors: just re-prompt, model itself is fine.
-// nim-overload: provider temporarily overloaded
-// ResourceExhausted: stream error / worker limit
-// Other transient connection/server errors.
-function isRetryOnlyError(detail: string): boolean {
-  return /nim.*overload|overload/i.test(detail) ||
-    /ResourceExhausted|stream error|worker.*limit|temporary|transient|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|fetch failed/i.test(detail)
-}
-
 // Log-monitoring: detect errors that opencode doesn't surface via session.error
 // or retry status (e.g. ResourceExhausted stream errors). Reads the tail of
 // opencode.log and checks for error patterns.
@@ -98,6 +81,66 @@ function toast(variant: string, title: string, message: string, duration = 2500)
   } catch { /* tui not ready / unavailable */ }
 }
 
+// Execute a policy action returned by starfleetctl error-handle.
+// This is the ONLY place recovery actions are performed — the plugin is a
+// thin detector + executor, all policy logic lives in the Go binary.
+async function executeAction(
+  action: string, targetModel: string, detail: string,
+  client: any, sessionID: string, hasSwitched: { v: boolean },
+): Promise<void> {
+  const src = `[action=${action}]`
+  if (action === 'ignore') {
+    tickLog(`ERROR-HANDLE ${src}: ignoring "${detail}"`)
+    return
+  }
+  if (action === 'retry') {
+    tickLog(`ERROR-HANDLE ${src}: re-prompting (detail: ${detail})`)
+    try {
+      await client.session.promptAsync({
+        path: { id: sessionID },
+        body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+      })
+      tickLog(`ERROR-HANDLE ${src}: promptAsync sent`)
+    } catch (e) {
+      tickLog(`ERROR-HANDLE ${src}: promptAsync failed: ${String(e).slice(0, 120)}`)
+    }
+    return
+  }
+  if (action === 'switch-model') {
+    if (!targetModel || hasSwitched.v) {
+      tickLog(`ERROR-HANDLE ${src}: switch-model requested but ${!targetModel ? 'no target' : 'already switched'} — falling back to retry`)
+      try {
+        await client.session.promptAsync({
+          path: { id: sessionID },
+          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+        })
+      } catch { /* ignore */ }
+      return
+    }
+    hasSwitched.v = true
+    const msg = `ERROR-HANDLE ${src}: switching to ${targetModel} (was: ${detail})`
+    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
+    tickLog(msg)
+    toast('warning', 'starfleet-dispatch', msg, 8000)
+    try {
+      await client.session.switchModel({ path: { id: sessionID }, body: { model: targetModel } })
+      tickLog(`ERROR-HANDLE ${src}: switchModel ok → ${targetModel}`)
+      await client.session.promptAsync({
+        path: { id: sessionID },
+        body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+      })
+      tickLog(`ERROR-HANDLE ${src}: promptAsync sent`)
+    } catch (e) {
+      const emsg = `ERROR-HANDLE ${src}: failed: ${String(e).slice(0, 120)}`
+      client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
+      tickLog(emsg)
+      hasSwitched.v = false
+    }
+    return
+  }
+  tickLog(`ERROR-HANDLE ${src}: unknown action "${action}" — ignoring`)
+}
+
 export const plugin = async ({ client, $ }: any) => {
   loadConfig()
 
@@ -114,13 +157,12 @@ export const plugin = async ({ client, $ }: any) => {
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
-  let hasSwitchedToFallback = false
+  const hasSwitchedToFallback = { v: false }
 
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
   // failures as a `session.error` event — it parks the session in a `retry`
   // status with a human-readable message instead. Poll that status so the
-  // fleet can see and react to transient model-API faults (zen-ratelimit,
-  // nim-overload, etc.).
+  // fleet can see and react to transient model-API faults.
   let lastRetryDetail = ''
   let retryCooldownUntil = 0
   const RETRY_POLL_MS = 15000
@@ -141,7 +183,6 @@ export const plugin = async ({ client, $ }: any) => {
     const body = status?.body ?? status
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll raw: sid=${currentSessionID} keys=${body && typeof body === 'object' ? Object.keys(body).join(',') : typeof body} sample=${JSON.stringify(body).slice(0, 200)}` } }).catch(() => {})
     if (!body || typeof body !== 'object') return
-    // status returns { data: { [sessionID]: SessionStatus }, request, response }
     const data: any = (body as any).data ?? body
     const st: any = data[currentSessionID] ?? Object.values(data)[0]
     if (!st || st.type !== 'retry') { lastRetryDetail = ''; return }
@@ -156,32 +197,15 @@ export const plugin = async ({ client, $ }: any) => {
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `session retry status: ${detail}` } }).catch(() => {})
     tickLog(`MODEL RETRY (quota/zen): ${detail}`)
     toast('warning', 'starfleet-dispatch', `model retry: ${detail}`, 6000)
-    bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
 
-    // Auto-recovery: switch to fallback model on zen-ratelimit / nim-overload.
-    if (isRecoverableError(detail) && FALLBACK_MODEL && !hasSwitchedToFallback) {
-      hasSwitchedToFallback = true
-      const msg = `MODEL RECOVERY: switching to ${FALLBACK_MODEL} (was: ${detail})`
-      client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
-      tickLog(msg)
-      toast('warning', 'starfleet-dispatch', msg, 8000)
-      try {
-        await client.session.switchModel({ path: { id: currentSessionID }, body: { model: FALLBACK_MODEL } })
-        client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `switchModel to ${FALLBACK_MODEL} succeeded` } }).catch(() => {})
-        tickLog(`MODEL RECOVERY: switchModel ok → ${FALLBACK_MODEL}`)
-        await client.session.promptAsync({
-          path: { id: currentSessionID },
-          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-        })
-        tickLog(`MODEL RECOVERY: promptAsync sent`)
-      } catch (e) {
-        const emsg = `MODEL RECOVERY failed: ${String(e).slice(0, 120)}`
-        client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
-        tickLog(emsg)
-        hasSwitchedToFallback = false
-      }
-    } else if (isRecoverableError(detail) && hasSwitchedToFallback) {
-      tickLog(`MODEL RECOVERY: fallback ${FALLBACK_MODEL} also failed — both models blocked`)
+    // Delegate policy to starfleetctl — plugin just executes.
+    const r = bus({
+      cmd: 'error-handle', detail, source: 'retry-status',
+      ship: aid(), pid: process.pid, current_model: currentModel.model || '',
+      session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
+    })
+    if (r.ok && r.action) {
+      await executeAction(r.action, r.target_model || '', detail, client, currentSessionID, hasSwitchedToFallback)
     }
   }
 
@@ -191,44 +215,22 @@ export const plugin = async ({ client, $ }: any) => {
   // doesn't surface via session.error or retry status. Runs every 30s.
   const LOG_POLL_MS = 30000
   const logPollTimer = setInterval(async () => {
-    if (!currentSessionID || hasSwitchedToFallback) return
+    if (!currentSessionID) return
     const errDetail = checkLogForErrors()
     if (!errDetail) return
     const msg = `LOG ERROR detected: ${errDetail}`
     client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
-    tickLog(`MODEL RECOVERY (log-monitor): ${msg}`)
+    tickLog(`LOG-MONITOR: ${msg}`)
     toast('warning', 'starfleet-dispatch', msg, 8000)
-    bus({ cmd: 'error', detail: errDetail, ship: aid(), pid: process.pid })
 
-    if (isRetryOnlyError(errDetail)) {
-      // Transient: just re-prompt, don't switch model.
-      tickLog(`MODEL RETRY (log-monitor): retry-only, re-prompting`)
-      try {
-        await client.session.promptAsync({
-          path: { id: currentSessionID },
-          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-        })
-        tickLog(`MODEL RETRY (log-monitor): promptAsync sent`)
-      } catch (e) {
-        tickLog(`MODEL RETRY (log-monitor): promptAsync failed: ${String(e).slice(0, 120)}`)
-      }
-    } else if (isRecoverableError(errDetail) && FALLBACK_MODEL) {
-      // Hard error: switch to fallback model.
-      hasSwitchedToFallback = true
-      try {
-        await client.session.switchModel({ path: { id: currentSessionID }, body: { model: FALLBACK_MODEL } })
-        tickLog(`MODEL RECOVERY: switchModel ok → ${FALLBACK_MODEL}`)
-        await client.session.promptAsync({
-          path: { id: currentSessionID },
-          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-        })
-        tickLog(`MODEL RECOVERY: promptAsync sent`)
-      } catch (e) {
-        const emsg = `MODEL RECOVERY failed: ${String(e).slice(0, 120)}`
-        client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
-        tickLog(emsg)
-        hasSwitchedToFallback = false
-      }
+    // Delegate policy to starfleetctl.
+    const r = bus({
+      cmd: 'error-handle', detail: errDetail, source: 'log-monitor',
+      ship: aid(), pid: process.pid, current_model: currentModel.model || '',
+      session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
+    })
+    if (r.ok && r.action) {
+      await executeAction(r.action, r.target_model || '', errDetail, client, currentSessionID, hasSwitchedToFallback)
     }
   }, LOG_POLL_MS)
 
@@ -330,7 +332,7 @@ export const plugin = async ({ client, $ }: any) => {
         tuiReady = true
         sessionNeedsIdentity = true
         turnCount = 0
-        hasSwitchedToFallback = false
+        hasSwitchedToFallback.v = false
         const sessionId = (event.properties?.info as { id?: string })?.id
         if (sessionId) currentSessionID = sessionId
         bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
@@ -345,16 +347,16 @@ export const plugin = async ({ client, $ }: any) => {
         sessionNeedsIdentity = true
         turnCount = 0
         currentModel = {}
-        hasSwitchedToFallback = false
+        hasSwitchedToFallback.v = false
         bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
       }
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
         if (info?.role === 'assistant' && info?.modelID) {
           currentModel = { model: info.modelID, server: info.providerID }
-          if (hasSwitchedToFallback) {
+          if (hasSwitchedToFallback.v) {
             tickLog(`MODEL RECOVERY: session recovered on ${info.modelID} — fallback worked`)
-            hasSwitchedToFallback = false
+            hasSwitchedToFallback.v = false
           }
           bus({ cmd: 'health', state: 'working', error_tag: undefined, plugin_last_run: new Date().toISOString() })
         }
@@ -364,42 +366,15 @@ export const plugin = async ({ client, $ }: any) => {
           (event.properties?.error as { message?: string; code?: string })?.message ||
           (event.properties?.error as { code?: string })?.code ||
           'unknown error'
-        bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
 
-        if (isRetryOnlyError(detail) && !hasSwitchedToFallback && currentSessionID) {
-          // Transient: just re-prompt, don't switch model.
-          tickLog(`MODEL RETRY (session.error): retry-only, re-prompting: ${detail}`)
-          try {
-            await client.session.promptAsync({
-              path: { id: currentSessionID },
-              body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-            })
-            tickLog(`MODEL RETRY (session.error): promptAsync sent`)
-          } catch (e) {
-            tickLog(`MODEL RETRY (session.error): promptAsync failed: ${String(e).slice(0, 120)}`)
-          }
-        } else if (isRecoverableError(detail) && FALLBACK_MODEL && !hasSwitchedToFallback && currentSessionID) {
-          // Hard error: switch to fallback model.
-          hasSwitchedToFallback = true
-          const msg = `MODEL RECOVERY (session.error): switching to ${FALLBACK_MODEL} (was: ${detail})`
-          client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
-          tickLog(msg)
-          toast('warning', 'starfleet-dispatch', msg, 8000)
-          try {
-            await client.session.switchModel({ path: { id: currentSessionID }, body: { model: FALLBACK_MODEL } })
-            client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `switchModel to ${FALLBACK_MODEL} succeeded` } }).catch(() => {})
-            tickLog(`MODEL RECOVERY: switchModel ok → ${FALLBACK_MODEL}`)
-            await client.session.promptAsync({
-              path: { id: currentSessionID },
-              body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-            })
-            tickLog(`MODEL RECOVERY: promptAsync sent`)
-          } catch (e) {
-            const emsg = `MODEL RECOVERY failed: ${String(e).slice(0, 120)}`
-            client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
-            tickLog(emsg)
-            hasSwitchedToFallback = false
-          }
+        // Delegate policy to starfleetctl — plugin just executes.
+        const r = bus({
+          cmd: 'error-handle', detail, source: 'session.error',
+          ship: aid(), pid: process.pid, current_model: currentModel.model || '',
+          session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
+        })
+        if (r.ok && r.action) {
+          await executeAction(r.action, r.target_model || '', detail, client, currentSessionID, hasSwitchedToFallback)
         }
       }
     },
