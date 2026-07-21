@@ -56,7 +56,6 @@ This is idempotent — safe to run multiple times.
 `bootstrap --fix` (called by both `genesis-init` and `starfleet-bootstrap`)
 sets up:
 
-- **`_WORK_/` directories** — agent-bus, agent-claims
 - **`.claude/settings.json`** — allowlist entries for `starfleetctl` commands
 - **Agent fragments** — fleet coordination instructions (`.starfleet-ai/agents.d/`)
 - **Skills** — on-demand reference docs (`.claude/skills/`)

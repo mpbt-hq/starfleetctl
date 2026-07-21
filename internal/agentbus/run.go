@@ -38,8 +38,7 @@ Control agent:
   msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
-  health [--json] [--loop]  fleet liveness watchdog (reads status/<SHIP>.json;
-                            Go port of scripts/fleet-health)
+  health [--json] [--loop]  fleet liveness watchdog (Go port of fleet-health)
   dispatch --stdin          JSON-RPC entry point for the opencode plugin
                             (reads dispatchRequest, returns dispatchResponse)
 
@@ -51,22 +50,6 @@ can never be truncated by an agent display. Retrieve the full payload with
 
 --json on board/inbox/msgs/asks prints a JSON array instead of the
 human-formatted table — for scripts/agents, so no grep/awk/cut is needed.
-
-Ecosystem loops (see DASHBOARD.md starfleetctl row and this package's
-monitor.go doc comment for history):
-  monitor-loop              Watch my inbox, print new/unacked directives.
-                            Wired into production Monitor-tool arming as of
-                            2026-07-07 (an earlier live-detection bug under
-                            the Monitor tool specifically was found, then
-                            could no longer be reproduced after re-testing;
-                            see monitor.go doc comment).
-  fleet-watch               Watch the board for ships joining/restarting.
-                            Wired into production Monitor-tool arming
-                            (flagship/control session) as of 2026-07-07,
-                            after its own vorcheck cleared the same
-                            failure-mode class as monitor-loop's old bug.
-  watch [interval|--stop]   desktop-notify daemon for new directives (default
-                            15s poll; --stop kills the running instance)
 `
 
 // hasJSON reports whether --json is present anywhere in the command's

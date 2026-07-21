@@ -10,14 +10,15 @@ starfleetctl agent-bus <command> [args...]
 
 ## How It Works
 
-Each agent session ("ship") writes a heartbeat file and reads messages from a shared `_WORK_/agent-bus/` directory. A file lock (`flock`) ensures atomic operations — multiple agents can read concurrently, but only one writes at a time.
+Each agent session ("ship") writes a heartbeat file and reads messages from a shared
+state directory underneath `.starfleet-ai/var/...`.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
-| `BUS_DIR` | `_WORK_/agent-bus` | Storage directory |
+| `BUS_DIR` | `./.starfleet-ai/var/agent-bus` | Storage directory |
 | `BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
 | `PROJECT` | — | Project label on the board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
@@ -111,20 +112,6 @@ starfleetctl agent-bus events 20
 
 # Garbage-collect stale entries
 starfleetctl agent-bus prune
-```
-
-## File Format
-
-Status files (`_WORK_/agent-bus/status/<agent>.tsv`):
-```
-epoch   timestamp           agent      project  state    pid   handle   note
-173498  2026-07-15T10:00:00 Enterprise -        working  1234  flagship  opencode
-```
-
-Message files (`_WORK_/agent-bus/msgs/<id>.tsv`):
-```
-epoch   timestamp           from       target   text
-173498  2026-07-15T10:00:00 Enterprise Voyager  status update needed
 ```
 
 ## Interoperability

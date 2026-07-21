@@ -5,7 +5,7 @@
 // ship name registry each agent instance uses for its AGENT_ID, so the
 // agent-bus board and tmux session list read like a fleet roster instead of
 // a wall of PIDs. Enterprise is reserved for the control/flagship session.
-// Reservations live in _WORK_/agent-bus/ships/ (one file per active name,
+// Reservations live in .starfleet-ai/var/agent-bus/ships/ (one file per active name,
 // gitignored, SAME format/location as the bash original), so a Go and bash
 // invocation share the registry transparently.
 package shipnames
@@ -29,8 +29,6 @@ type Registry struct {
 	StatusDir string
 }
 
-// New resolves a Registry rooted at the given workspace root. WORK_DIR
-// (env, default <root>/_WORK_) matches the bash original's override.
 func New(root string) *Registry {
 	busDir := config.BusDir(root)
 	return &Registry{

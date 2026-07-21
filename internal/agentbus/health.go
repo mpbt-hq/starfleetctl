@@ -22,8 +22,8 @@ const (
 
 const healthUsage = `agent-bus health [flags]
 
-Fleet liveness watchdog — reads the per-ship status files at
-_WORK_/agent-bus/status/<SHIP>.json and reports unresponsive ships.
+Fleet liveness watchdog — reads per-ship status files and reports
+unresponsive ships.
 
 Flags:
   --json              output JSON (array of ship objects) instead of a table

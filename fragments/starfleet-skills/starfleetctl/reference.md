@@ -25,8 +25,8 @@ starfleetctl is deployed into a workspace via the **genesis → bootstrap** two-
    ```
    starfleetctl genesis-init .
    ```
-   This also runs `bootstrap --fix` to set up .starfleet-ai/agents.d/index.md, DASHBOARD.md, allowlist entries,
-   `_WORK_/` directories, agent fragments, and opencode plugins/scripts.
+   This also runs `bootstrap --fix` to set up .starfleet-ai/agents.d/index.md, DASHBOARD.md,
+   allowlist entries, agent fragments, and opencode plugins/scripts.
 
 2. **Phase B (bootstrap):** The committed `starfleet-bootstrap` script clones or pulls the
    starfleetctl source repo, builds it with `go build`, symlinks the binary to

@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Go ports of the agent-bus "ecosystem" polling loops — scripts/
-// agent-bus-monitor-loop, agent-bus-fleet-watch, and agent-bus-watch. All
-// three are long-running processes reading the same _WORK_/agent-bus/ files
-// as the rest of this package, so they're built directly on the existing
-// Bus helpers rather than shelling out.
-//
 // DoMonitorLoop CLEARED for Monitor-tool use as of 2026-07-07 (Farragut,
 // m0087/m0120): originally found reproducibly BROKEN under the Claude Code
 // Monitor tool 2026-07-06 (Farragut, directive m0047) — reliably detected a
@@ -117,8 +111,7 @@ func (b *Bus) DoMonitorLoop() error {
 	}
 }
 
-// DoFleetWatch implements scripts/agent-bus-fleet-watch: watches
-// _WORK_/agent-bus/status/ for ships joining or restarting (heartbeat
+// watches bus status for ships joining or restarting (heartbeat
 // epoch change), seeded from the board at arm time so only changes AFTER
 // arming are reported.
 func (b *Bus) DoFleetWatch() error {

@@ -3,7 +3,7 @@
 //
 // Package agentbus is the Go port of scripts/agent-bus — the file-based
 // status + directive bus for coordinating many independent agent sessions.
-// It reads/writes the exact same _WORK_/agent-bus/ TSV file format as the
+// It reads/writes the exact same .starfleet-ai/var/agent-bus/ file format as the
 // bash original, so a Go and bash session can interoperate on one bus
 // without either side knowing the other is a different implementation.
 package agentbus

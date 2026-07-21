@@ -14,10 +14,10 @@ import (
 
 const usage = `bridged <command> [args…]
 
-  run [--socket <path>]      listen and serve (foreground — background it
-                              yourself via tmux/agent-run/nohup, same as
-                              every other long-lived process in this
-                              workspace; bridged does not self-daemonize)
+  run [--socket <path>]      listen and serve (foreground — daemonize it
+                              yourself via your preferred method: systemd,
+                              nohup, screen, etc.; bridged does not
+                              self-daemonize)
   status [--socket <path>]   connect and report whether a daemon is up
 
 Default socket: .starfleet-ai/var/agent-bus/bridged.sock

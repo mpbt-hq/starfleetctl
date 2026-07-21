@@ -13,7 +13,7 @@ When several AI agents (Claude Code, opencode, etc.) work on the same repository
 
 ## The Solution
 
-starfleetctl provides a file-based coordination layer. All state lives in `_WORK_/` under your workspace root — plain text files that any process can read, no database or server required.
+starfleetctl provides a file-based coordination layer. All state lives in `.starfleet-ai/var/...` under your workspace root — plain text files that any process can read, no database or server required.
 
 ```
 workspace/
@@ -55,7 +55,7 @@ The agent bus is a publish-subscribe system built on files:
 
 ### File Locking
 
-All mutations go through `flock(2)` on `_WORK_/agent-bus/.lock`. This ensures:
+All mutations go through `flock(2)` on `.starfleet-ai/var/agent-bus/.lock`. This ensures:
 
 - Multiple processes can read concurrently
 - Only one process writes at a time
@@ -97,7 +97,7 @@ Enterprise                          Voyager
 
 ```
 1. ws-commit -m "fix: ..." src/foo.c
-2. Acquires flock on _WORK_/agent-bus/.lock
+2. Acquires flock on .starfleet-ai/var/agent-bus/.lock
 3. git add src/foo.c
 4. git commit -m "fix: ..."
 5. git push
@@ -108,7 +108,7 @@ Enterprise                          Voyager
 
 ```
 1. pr-claim 3162 "fixing build"
-2. Creates _WORK_/agent-claims/pr-3162.tsv
+2. Creates .starfleet-ai/var/agent-claims/pr-3162.tsv
 3. Other agents see claim, avoid branch
 4. pr-claim --release 3162
 5. Claim file removed
@@ -120,7 +120,7 @@ The Go implementation reads and writes the exact same file formats as the origin
 
 - Some agents using the Go binary
 - Others using the bash scripts
-- Both operating on the same `_WORK_/` files
+- Both operating on the same `.starfleet-ai/var/...` files
 
 This allows gradual migration without breaking existing setups.
 

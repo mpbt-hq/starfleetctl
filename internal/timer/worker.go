@@ -10,8 +10,7 @@
 //	SIGTERM — graceful shutdown
 //	SIGINT  — graceful shutdown
 //
-// Singleton: PID-file guarded (_WORK_/agent-bus/timer-worker.pid).
-// Logs to _WORK_/agent-bus/logs/timer-worker.log.
+// Singleton: PID-file guarded
 package timer
 
 import (

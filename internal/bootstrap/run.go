@@ -12,7 +12,7 @@ const usage = `starfleetctl bootstrap [--fix]
 
 Idempotent self-check (and, with --fix, self-repair) of the
 fleet-management-specific one-time setup this tool depends on:
-_WORK_/agent-bus + _WORK_/agent-claims directory tree, and the
+the agent-bus + agent-claims directory tree, and the
 starfleetctl-related .claude/settings.json allowlist entries.
 
 Without --fix: report-only, exits 1 if anything is missing.
@@ -40,9 +40,6 @@ func Run(root string, args []string) int {
 			return 2
 		}
 	}
-
-	// Auto-migrate old _WORK_/ layout to .starfleet-ai/var/ on first run.
-	maybeMigrateWork(root)
 
 	b := New(root)
 	allOK := true
