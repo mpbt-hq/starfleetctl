@@ -163,35 +163,56 @@ func writeTopicFile(path string, m TopicMeta, body string) error {
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimRight(body, "\n"))
 	b.WriteString("\n")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-// loadAllTopics reads every dashboard/topics/*.md file's frontmatter.
+// loadAllTopics reads every dashboard/topics/*.md file's frontmatter,
+// recursing into subdirectories for better organization (e.g. projects/,
+// areas/). The slug is derived from the relative path under topicsDir:
+//
+//	topics/foo.md              → slug = "foo"
+//	topics/project/x86emu.md   → slug = "project/x86emu"
+//
+// An explicit slug: field in frontmatter overrides the derived slug.
 func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
-	entries, err := os.ReadDir(d.TopicsDir())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
+	topicsDir := d.TopicsDir()
+	if _, err := os.Stat(topicsDir); os.IsNotExist(err) {
+		return nil, nil
 	}
 	var metas []TopicMeta
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(d.TopicsDir(), e.Name()))
+	err := filepath.WalkDir(topicsDir, func(path string, e os.DirEntry, err error) error {
 		if err != nil {
-			return nil, err
+			return err
+		}
+		if path == topicsDir {
+			return nil
+		}
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
 		}
 		m, _, err := parseTopicFile(data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Name(), err)
+			return fmt.Errorf("%s: %w", path, err)
 		}
 		if m.Slug == "" {
-			m.Slug = strings.TrimSuffix(e.Name(), ".md")
+			rel, err := filepath.Rel(topicsDir, path)
+			if err != nil {
+				return err
+			}
+			m.Slug = strings.TrimSuffix(rel, ".md")
 		}
 		metas = append(metas, m)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(metas, func(i, j int) bool { return metas[i].Slug < metas[j].Slug })
 	return metas, nil

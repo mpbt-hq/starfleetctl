@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -107,7 +108,7 @@ func (d *Dashboard) DoTopicWrite(slug, src string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(d.TopicsDir(), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(d.topicPath(slug)), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(d.topicPath(slug), data, 0o644)
