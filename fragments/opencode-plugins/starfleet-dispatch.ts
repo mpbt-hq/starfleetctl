@@ -32,14 +32,49 @@ function loadConfig(): void {
   if (r.ok) { HEARTBEAT_MS = r.heartbeat_ms; POLL_MS = r.poll_ms; FALLBACK_MODEL = r.fallback_model || '' }
 }
 
-// Classify retry errors that need a model switch (not just a restart).
+// Hard errors: switch to fallback model (quota exhausted, model gone).
 // zen-ratelimit: quota exhausted / rate limited
-// nim-overload: provider overloaded
 // model-gone: model no longer exists / deprecated / not found
 function isRecoverableError(detail: string): boolean {
   return /quota|rate.?limit|429|too many|throttl|Free usage exceeded|subscribe|subscription|free usage/i.test(detail) ||
-    /nim.*overload|overload/i.test(detail) ||
     /model.{0,20}(not found|missing|unavailable|deprecated|does not exist)|unknown model|invalid model|no such model/i.test(detail)
+}
+
+// Transient errors: just re-prompt, model itself is fine.
+// nim-overload: provider temporarily overloaded
+// ResourceExhausted: stream error / worker limit
+// Other transient connection/server errors.
+function isRetryOnlyError(detail: string): boolean {
+  return /nim.*overload|overload/i.test(detail) ||
+    /ResourceExhausted|stream error|worker.*limit|temporary|transient|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|fetch failed/i.test(detail)
+}
+
+// Log-monitoring: detect errors that opencode doesn't surface via session.error
+// or retry status (e.g. ResourceExhausted stream errors). Reads the tail of
+// opencode.log and checks for error patterns.
+const LOG_PATH = (typeof process !== 'undefined' && process.env.HOME || '/root') +
+  '/.local/share/opencode/log/opencode.log'
+let lastLogErrorSeen = ''
+
+function checkLogForErrors(): string | null {
+  try {
+    const out = execSync(
+      `tail -80 "${LOG_PATH}" 2>/dev/null`,
+      { cwd: ROOT, timeout: 3000, stdio: ['pipe', 'pipe', 'ignore'] }
+    ).toString()
+    // Match "stream error" lines with error details
+    const streamErrRe = /level=ERROR.*stream error.*error\.error="([^"]+)"/g
+    let match: RegExpExecArray | null
+    let latest = ''
+    while ((match = streamErrRe.exec(out)) !== null) {
+      latest = match[1]
+    }
+    if (latest && latest !== lastLogErrorSeen) {
+      lastLogErrorSeen = latest
+      return latest
+    }
+  } catch { /* ignore */ }
+  return null
 }
 
 function aid(): string {
@@ -152,6 +187,51 @@ export const plugin = async ({ client, $ }: any) => {
 
   const retryPollTimer = setInterval(pollRetryStatus, RETRY_POLL_MS)
 
+  // Log-monitoring: detect stream errors (e.g. ResourceExhausted) that opencode
+  // doesn't surface via session.error or retry status. Runs every 30s.
+  const LOG_POLL_MS = 30000
+  const logPollTimer = setInterval(async () => {
+    if (!currentSessionID || hasSwitchedToFallback) return
+    const errDetail = checkLogForErrors()
+    if (!errDetail) return
+    const msg = `LOG ERROR detected: ${errDetail}`
+    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
+    tickLog(`MODEL RECOVERY (log-monitor): ${msg}`)
+    toast('warning', 'starfleet-dispatch', msg, 8000)
+    bus({ cmd: 'error', detail: errDetail, ship: aid(), pid: process.pid })
+
+    if (isRetryOnlyError(errDetail)) {
+      // Transient: just re-prompt, don't switch model.
+      tickLog(`MODEL RETRY (log-monitor): retry-only, re-prompting`)
+      try {
+        await client.session.promptAsync({
+          path: { id: currentSessionID },
+          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+        })
+        tickLog(`MODEL RETRY (log-monitor): promptAsync sent`)
+      } catch (e) {
+        tickLog(`MODEL RETRY (log-monitor): promptAsync failed: ${String(e).slice(0, 120)}`)
+      }
+    } else if (isRecoverableError(errDetail) && FALLBACK_MODEL) {
+      // Hard error: switch to fallback model.
+      hasSwitchedToFallback = true
+      try {
+        await client.session.switchModel({ path: { id: currentSessionID }, body: { model: FALLBACK_MODEL } })
+        tickLog(`MODEL RECOVERY: switchModel ok → ${FALLBACK_MODEL}`)
+        await client.session.promptAsync({
+          path: { id: currentSessionID },
+          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+        })
+        tickLog(`MODEL RECOVERY: promptAsync sent`)
+      } catch (e) {
+        const emsg = `MODEL RECOVERY failed: ${String(e).slice(0, 120)}`
+        client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
+        tickLog(emsg)
+        hasSwitchedToFallback = false
+      }
+    }
+  }, LOG_POLL_MS)
+
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
   for (const id of (init.seen || [])) { submitted.add(id) }
@@ -190,6 +270,7 @@ export const plugin = async ({ client, $ }: any) => {
     clearInterval(heartbeatTimer)
     clearInterval(pollTimer)
     clearInterval(retryPollTimer)
+    clearInterval(logPollTimer)
     try {
       const { execSync } = require('node:child_process')
       execSync(`.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
@@ -285,10 +366,20 @@ export const plugin = async ({ client, $ }: any) => {
           'unknown error'
         bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
 
-        // Recovery: switch to fallback model on model errors (not just retry status).
-        // Handles cases where the model doesn't exist at all (deprecated, removed)
-        // or returns a hard error instead of parking in retry status.
-        if (isRecoverableError(detail) && FALLBACK_MODEL && !hasSwitchedToFallback && currentSessionID) {
+        if (isRetryOnlyError(detail) && !hasSwitchedToFallback && currentSessionID) {
+          // Transient: just re-prompt, don't switch model.
+          tickLog(`MODEL RETRY (session.error): retry-only, re-prompting: ${detail}`)
+          try {
+            await client.session.promptAsync({
+              path: { id: currentSessionID },
+              body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+            })
+            tickLog(`MODEL RETRY (session.error): promptAsync sent`)
+          } catch (e) {
+            tickLog(`MODEL RETRY (session.error): promptAsync failed: ${String(e).slice(0, 120)}`)
+          }
+        } else if (isRecoverableError(detail) && FALLBACK_MODEL && !hasSwitchedToFallback && currentSessionID) {
+          // Hard error: switch to fallback model.
           hasSwitchedToFallback = true
           const msg = `MODEL RECOVERY (session.error): switching to ${FALLBACK_MODEL} (was: ${detail})`
           client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
