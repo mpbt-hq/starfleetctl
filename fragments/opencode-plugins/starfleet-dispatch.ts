@@ -35,9 +35,11 @@ function loadConfig(): void {
 // Classify retry errors that need a model switch (not just a restart).
 // zen-ratelimit: quota exhausted / rate limited
 // nim-overload: provider overloaded
+// model-gone: model no longer exists / deprecated / not found
 function isRecoverableError(detail: string): boolean {
   return /quota|rate.?limit|429|too many|throttl|Free usage exceeded|subscribe|subscription|free usage/i.test(detail) ||
-    /nim.*overload|overload/i.test(detail)
+    /nim.*overload|overload/i.test(detail) ||
+    /model.{0,20}(not found|missing|unavailable|deprecated|does not exist)|unknown model|invalid model|no such model/i.test(detail)
 }
 
 function aid(): string {
@@ -282,6 +284,32 @@ export const plugin = async ({ client, $ }: any) => {
           (event.properties?.error as { code?: string })?.code ||
           'unknown error'
         bus({ cmd: 'error', detail, ship: aid(), pid: process.pid })
+
+        // Recovery: switch to fallback model on model errors (not just retry status).
+        // Handles cases where the model doesn't exist at all (deprecated, removed)
+        // or returns a hard error instead of parking in retry status.
+        if (isRecoverableError(detail) && FALLBACK_MODEL && !hasSwitchedToFallback && currentSessionID) {
+          hasSwitchedToFallback = true
+          const msg = `MODEL RECOVERY (session.error): switching to ${FALLBACK_MODEL} (was: ${detail})`
+          client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
+          tickLog(msg)
+          toast('warning', 'starfleet-dispatch', msg, 8000)
+          try {
+            await client.session.switchModel({ path: { id: currentSessionID }, body: { model: FALLBACK_MODEL } })
+            client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `switchModel to ${FALLBACK_MODEL} succeeded` } }).catch(() => {})
+            tickLog(`MODEL RECOVERY: switchModel ok → ${FALLBACK_MODEL}`)
+            await client.session.promptAsync({
+              path: { id: currentSessionID },
+              body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+            })
+            tickLog(`MODEL RECOVERY: promptAsync sent`)
+          } catch (e) {
+            const emsg = `MODEL RECOVERY failed: ${String(e).slice(0, 120)}`
+            client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
+            tickLog(emsg)
+            hasSwitchedToFallback = false
+          }
+        }
       }
     },
   }
