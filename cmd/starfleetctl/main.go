@@ -25,6 +25,7 @@ import (
 	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/jsonutil"
 	"github.com/metux/starfleetctl/internal/logs"
+	"github.com/metux/starfleetctl/internal/models"
 	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
@@ -237,6 +238,11 @@ func main() {
 		os.Exit(web.Run(root, os.Args[2:]))
 	case "logs":
 		os.Exit(logs.Run(root, os.Args[2:]))
+	case "models":
+		if err := models.New(root).Run(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "models:", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)
