@@ -41,6 +41,7 @@ type TopicMeta struct {
 	NotedBy      string // parked only
 	Since        string // parked only
 	MigratedFrom string
+	Tags         string // comma-separated area tags, e.g. "starfleet, ci"
 }
 
 func (d *Dashboard) TopicsDir() string {
@@ -121,6 +122,8 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 			m.Since = val
 		case "migrated_from":
 			m.MigratedFrom = val
+		case "tags":
+			m.Tags = val
 		}
 	}
 	return m, body, nil
@@ -147,6 +150,9 @@ func writeTopicFile(path string, m TopicMeta, body string) error {
 	}
 	if m.MigratedFrom != "" {
 		fmt.Fprintf(&b, "migrated_from: %s\n", m.MigratedFrom)
+	}
+	if m.Tags != "" {
+		fmt.Fprintf(&b, "tags: %s\n", quoteYAML(m.Tags))
 	}
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimRight(body, "\n"))
@@ -188,16 +194,17 @@ func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
 // TopicJSON is the JSON-facing view of a topic's frontmatter — the shape the
 // web UI consumes (see internal/web). Field names mirror TopicMeta.
 type TopicJSON struct {
-	Slug       string `json:"slug"`
-	Title      string `json:"title"`
-	Category   string `json:"category"`
-	Kind       string `json:"kind"`
-	Status     string `json:"status"`
-	AssignedTo string `json:"assigned_to"`
-	CreatedBy  string `json:"created_by"`
-	Created    string `json:"created"`
-	NotedBy    string `json:"noted_by"`
-	Since      string `json:"since"`
+	Slug       string   `json:"slug"`
+	Title      string   `json:"title"`
+	Category   string   `json:"category"`
+	Kind       string   `json:"kind"`
+	Status     string   `json:"status"`
+	AssignedTo string   `json:"assigned_to"`
+	CreatedBy  string   `json:"created_by"`
+	Created    string   `json:"created"`
+	NotedBy    string   `json:"noted_by"`
+	Since      string   `json:"since"`
+	Tags       []string `json:"tags,omitempty"`
 }
 
 // LoadAllTopicsJSON returns every dashboard/topics/*.md file's frontmatter as a
@@ -209,10 +216,19 @@ func (d *Dashboard) LoadAllTopicsJSON() ([]TopicJSON, error) {
 	}
 	out := make([]TopicJSON, 0, len(metas))
 	for _, m := range metas {
+		var tags []string
+		if m.Tags != "" {
+			for _, t := range strings.Split(m.Tags, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					tags = append(tags, t)
+				}
+			}
+		}
 		out = append(out, TopicJSON{
 			Slug: m.Slug, Title: m.Title, Category: m.Category, Kind: m.Kind,
 			Status: m.Status, AssignedTo: m.AssignedTo, CreatedBy: m.CreatedBy,
-			Created: m.Created, NotedBy: m.NotedBy, Since: m.Since,
+			Created: m.Created, NotedBy: m.NotedBy, Since: m.Since, Tags: tags,
 		})
 	}
 	return out, nil

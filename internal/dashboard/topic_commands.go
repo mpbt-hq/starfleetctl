@@ -17,6 +17,7 @@ type TopicListOpts struct {
 	JSON     bool   // output JSON instead of plain text
 	Category string // filter: "active", "parked", or "" (all)
 	Status   string // filter: substring match on status/notedBy field
+	Tags     string // filter: substring match on tags field
 }
 
 // DoTopicList prints every topic's slug/title/status (or, with JSON output,
@@ -28,10 +29,11 @@ func (d *Dashboard) DoTopicList(opts TopicListOpts) error {
 		return err
 	}
 	type row struct {
-		Slug     string `json:"slug"`
-		Title    string `json:"title"`
-		Category string `json:"category"`
-		Status   string `json:"status"`
+		Slug     string   `json:"slug"`
+		Title    string   `json:"title"`
+		Category string   `json:"category"`
+		Status   string   `json:"status"`
+		Tags     []string `json:"tags,omitempty"`
 	}
 	out := make([]row, 0, len(metas))
 	for _, m := range metas {
@@ -45,7 +47,19 @@ func (d *Dashboard) DoTopicList(opts TopicListOpts) error {
 		if opts.Status != "" && !strings.Contains(strings.ToLower(st), strings.ToLower(opts.Status)) {
 			continue
 		}
-		out = append(out, row{m.Slug, m.Title, m.Category, st})
+		if opts.Tags != "" && !strings.Contains(strings.ToLower(m.Tags), strings.ToLower(opts.Tags)) {
+			continue
+		}
+		var tags []string
+		if m.Tags != "" {
+			for _, t := range strings.Split(m.Tags, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					tags = append(tags, t)
+				}
+			}
+		}
+		out = append(out, row{m.Slug, m.Title, m.Category, st, tags})
 	}
 	if opts.JSON {
 		enc, err := json.Marshal(out)

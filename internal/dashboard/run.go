@@ -16,7 +16,7 @@ const usage = `dashboard <command> [args…]
   commit -m "<msg>" [--no-push] stage + commit (+ pull --rebase + push)
   reindex                       regenerate the thin index from dashboard/topics/*.md
 
-  topic list [--json] [--category active|parked] [--status <substr>]
+  topic list [--json] [--category active|parked] [--status <substr>] [--tags <substr>]
                                               every topic's slug/title/status (with filters)
   topic show <slug>                          print one topic file (implies pull)
   topic write <slug> <file|->                replace one topic file (no commit)
@@ -26,13 +26,13 @@ const usage = `dashboard <command> [args…]
 `
 
 const topicUsage = `dashboard topic <command> [args…]
-  list [--json] [--category active|parked] [--status <substr>]
+  list [--json] [--category active|parked] [--status <substr>] [--tags <substr>]
   show <slug>
   write <slug> <file|->
   new <slug> --title "<t>" [--status "<s>"] [--parked]
   update <slug> [--status "<s>"] [--title "<t>"] [--category <c>]
                 [--kind <k>] [--assigned-to <a>] [--doc-ref <d>]
-                [--noted-by <n>] [--since <s>]
+                [--noted-by <n>] [--since <s>] [--tags "<t,t,...>"]
   commit <slug> -m "<msg>" [--no-push]
 `
 
@@ -177,9 +177,11 @@ func runTopic(d *Dashboard, args []string) int {
 				if i+1 < len(args) { m.DocRef = args[i+1]; changed = true; i++ }
 			case "--noted-by":
 				if i+1 < len(args) { m.NotedBy = args[i+1]; changed = true; i++ }
-			case "--since":
-				if i+1 < len(args) { m.Since = args[i+1]; changed = true; i++ }
-			default:
+		case "--since":
+			if i+1 < len(args) { m.Since = args[i+1]; changed = true; i++ }
+		case "--tags":
+			if i+1 < len(args) { m.Tags = args[i+1]; changed = true; i++ }
+		default:
 				fmt.Fprintf(os.Stderr, "dashboard topic update: unknown option: %s\n", args[i])
 				return 2
 			}
@@ -243,6 +245,11 @@ func parseTopicListArgs(args []string) TopicListOpts {
 			if i+1 < len(args) {
 				i++
 				opts.Status = args[i]
+			}
+		case "--tags", "-t":
+			if i+1 < len(args) {
+				i++
+				opts.Tags = args[i]
 			}
 		}
 	}
