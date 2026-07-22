@@ -85,6 +85,38 @@ function toast(variant: string, title: string, message: string, duration = 2500)
   } catch { /* tui not ready / unavailable */ }
 }
 
+// Parse and handle special fleet directives from agent-bus.
+// Returns true if the directive was handled (should NOT be injected as system prompt).
+function handleDirective(
+  msg: { id: string; from: string; text: string },
+  client: any, sessionID: string,
+): boolean {
+  const text = msg.text.trim()
+
+  // setModel <model> — switch the session's model (from another ship or web frontend)
+  const setModelMatch = text.match(/^setModel\s+(\S+)/i)
+  if (setModelMatch) {
+    const targetModel = setModelMatch[1]
+    const src = `[directive setModel from=${msg.from}]`
+    tickLog(`${src}: switching to ${targetModel}`)
+    toast('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${targetModel}`, 5000)
+    client.session.switchModel({ path: { id: sessionID }, body: { model: targetModel } })
+      .then(() => {
+        tickLog(`${src}: ok → ${targetModel}`)
+        toast('success', 'starfleet-dispatch', `Model switched to ${targetModel}`, 5000)
+        bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+      })
+      .catch((e: any) => {
+        const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+        tickLog(emsg)
+        toast('error', 'starfleet-dispatch', emsg, 8000)
+      })
+    return true
+  }
+
+  return false
+}
+
 // Execute a policy action returned by starfleetctl error-handle.
 // This is the ONLY place recovery actions are performed — the plugin is a
 // thin detector + executor, all policy logic lives in the Go binary.
@@ -268,6 +300,8 @@ export const plugin = async ({ client, $ }: any) => {
       submitted.add(msg.id)
       client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
       client.tui.showToast({ body: { title: `[fleet] ${msg.id} von ${msg.from}`, message: msg.text, variant: 'info', duration: 10000 } }).catch(() => {})
+      // Handle special directives (setModel, etc.) — skip system prompt injection.
+      if (handleDirective(msg, client, currentSessionID)) continue
     }
     try {
       await client.session.promptAsync({
@@ -329,6 +363,8 @@ export const plugin = async ({ client, $ }: any) => {
         if (submitted.has(msg.id)) continue
         bus({ cmd: 'seen_mark', id: msg.id })
         submitted.add(msg.id)
+        // Handle special directives (setModel, etc.) — skip system prompt injection.
+        if (currentSessionID && handleDirective(msg, client, currentSessionID)) continue
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
       }
       if (lines.length > 0) {
