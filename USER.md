@@ -355,7 +355,7 @@ starfleetctl agent-bus prune
 ```sh
 starfleetctl ship-names list        # see assigned names
 starfleetctl ship-names release <name>  # force-release
-starfleetctl ship-names gc          # auto-clean stale (> STARFLEET_BUS_TTL)
+starfleetctl ship-names gc          # auto-clean stale (> STARFLEET_STARFLEET_BUS_TTL)
 ```
 
 ### 7.4 PR Claim Conflicts
@@ -402,7 +402,7 @@ starfleetctl web autostart stop     # kill daemon
 | `STARFLEET_ROLE` | — | `flagship` or `ship` |
 | `STARFLEET_TARGET` | — | Flagship ship ID (for ships) |
 | `STARFLEET_BUS_DIR` | `.starfleet-ai/var/agent-bus` | Agent bus state directory |
-| `STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat TTL in seconds |
+| `STARFLEET_STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat TTL in seconds |
 | `PROJECT` | — | Project label on board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
 | `MPBT_WORKSPACE_ROOT` | auto-detect | Workspace root override |

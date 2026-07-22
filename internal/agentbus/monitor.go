@@ -54,7 +54,7 @@ const pollInterval = 2 * time.Second
 // stop it) — same shape as the bash `while true; do …; sleep 2; done`.
 func (b *Bus) DoMonitorLoop() error {
 	if !b.ShipIDSet {
-		return fmt.Errorf("agent-bus-monitor-loop: $AGENT_ID is not set")
+		return fmt.Errorf("agent-bus-monitor-loop: $STARFLEET_SHIP_ID is not set")
 	}
 	seenDir := filepath.Join(b.BusDir, "monitor-seen")
 	if err := os.MkdirAll(seenDir, 0o755); err != nil {

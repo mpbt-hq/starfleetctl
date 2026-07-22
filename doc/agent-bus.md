@@ -19,7 +19,7 @@ state directory underneath `.starfleet-ai/var/...`.
 |---|---|---|
 | `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
 | `STARFLEET_BUS_DIR` | `./.starfleet-ai/var/agent-bus` | Storage directory |
-| `STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
+| `STARFLEET_STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
 | `PROJECT` | — | Project label on the board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
 
@@ -50,7 +50,7 @@ starfleetctl agent-bus board
 starfleetctl agent-bus board --json
 ```
 
-Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. Stale entries (older than `STARFLEET_BUS_TTL`) are marked `[STALE]`.
+Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. Stale entries (older than `STARFLEET_STARFLEET_BUS_TTL`) are marked `[STALE]`.
 
 ### Directives (Messaging)
 
