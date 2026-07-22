@@ -93,11 +93,11 @@ function handleDirective(
 ): boolean {
   const text = msg.text.trim()
 
-  // setModel <model> — switch the session's model (from another ship or web frontend)
-  const setModelMatch = text.match(/^setModel\s+(\S+)/i)
+  // model <model> — switch the session's model (from another ship or web frontend)
+  const setModelMatch = text.match(/^model\s+(\S+)/i)
   if (setModelMatch) {
     const targetModel = setModelMatch[1]
-    const src = `[directive setModel from=${msg.from}]`
+    const src = `[directive model from=${msg.from}]`
     tickLog(`${src}: switching to ${targetModel}`)
     toast('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${targetModel}`, 5000)
     client.session.switchModel({ path: { id: sessionID }, body: { model: targetModel } })
@@ -114,9 +114,9 @@ function handleDirective(
     return true
   }
 
-  // /quit or cmd:/quit — gracefully shut down the session
-  if (/^\/quit$/i.test(text) || /^cmd:\/quit$/i.test(text)) {
-    const src = `[directive /quit from=${msg.from}]`
+  // quit — gracefully shut down the session
+  if (/^quit$/i.test(text)) {
+    const src = `[directive quit from=${msg.from}]`
     tickLog(`${src}: shutting down`)
     toast('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
     bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
@@ -125,9 +125,9 @@ function handleDirective(
     return true
   }
 
-  // /reset or cmd:/reset — clear the session conversation
-  if (/^\/reset$/i.test(text) || /^cmd:\/reset$/i.test(text)) {
-    const src = `[directive /reset from=${msg.from}]`
+  // reset — clear the session conversation
+  if (/^reset$/i.test(text)) {
+    const src = `[directive reset from=${msg.from}]`
     tickLog(`${src}: clearing session`)
     toast('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
     client.session.clear({ path: { id: sessionID } })
@@ -144,9 +144,9 @@ function handleDirective(
     return true
   }
 
-  // /status or cmd:/status — report status back as a tell
-  if (/^\/status$/i.test(text) || /^cmd:\/status$/i.test(text)) {
-    const src = `[directive /status from=${msg.from}]`
+  // status — report status back as a tell
+  if (/^status$/i.test(text)) {
+    const src = `[directive status from=${msg.from}]`
     tickLog(`${src}: reporting status`)
     bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
     toast('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
