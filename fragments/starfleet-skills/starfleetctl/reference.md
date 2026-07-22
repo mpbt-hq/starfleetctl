@@ -108,7 +108,7 @@ this README summarizes them, the `--help` output is authoritative.
 
 These share the on-disk file formats / lock files with the legacy bash implementations they
 replaced, so the agent-bus on-disk state layout is stable and forward-compatible with any
-tooling that reads `_WORK_/agent-bus/` directly.
+tooling that reads `.starfleet-ai/var/agent-bus/` directly.
 
 | Subcommand | Purpose |
 |---|---|

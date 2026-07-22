@@ -53,8 +53,7 @@ The plugin tracks the **currently active model** in-memory via opencode's
 assistant message. It does **not** poll the API, and it is multi-session
 safe (it never guesses across parallel sessions in the same project). The
 active model is written to the ship's health record
-(`_WORK_/agent-bus/health/<SHIP>.json`, now under
-`.starfleet-ai/var/agent-bus/health/`) as `model` + `server` after the
+(`.starfleet-ai/var/agent-bus/health/<SHIP>.json`) as `model` + `server` after the
 first assistant turn.
 
 The plugin also watches `session.error` events and classifies model-API
@@ -108,5 +107,5 @@ model after the next assistant turn.
   `setModel` directives bypass this guard).
 - The model name must match an entry in the configured model list.
 - The directive is fire-and-forget — no RPC response to the sender.
-  Check the tick log (`_WORK_/agent-bus/poll/<SHIP>.tick`) or health
+  Check the tick log (`.starfleet-ai/var/agent-bus/poll/<SHIP>.tick`) or health
   record to verify the switch succeeded.
