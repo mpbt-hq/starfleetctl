@@ -25,7 +25,7 @@ import (
 // Bus holds one invocation's resolved identity + storage locations, mirroring
 // the environment-derived globals at the top of scripts/agent-bus.
 type Bus struct {
-	Root       string // workspace root (parent of the script's own dir, in bash; here just $BUS_DIR's parent's parent)
+	Root       string // workspace root (parent of the script's own dir, in bash; here just $STARFLEET_BUS_DIR's parent's parent)
 	BusDir     string
 	BusTTL     int64
 	ShipID     string
@@ -45,9 +45,6 @@ type Bus struct {
 // PROJECT, STARFLEET_AGENT_HANDLE), given the workspace root.
 func New(root string) (*Bus, error) {
 	busDir := os.Getenv("STARFLEET_BUS_DIR")
-	if busDir == "" {
-		busDir = os.Getenv("BUS_DIR") // backwards compat
-	}
 	if busDir == "" {
 		busDir = config.BusDir(root)
 	}
