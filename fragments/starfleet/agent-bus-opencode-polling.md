@@ -52,9 +52,8 @@ The plugin tracks the **currently active model** in-memory via opencode's
 `message.updated` events — it reads `modelID`/`providerID` from each
 assistant message. It does **not** poll the API, and it is multi-session
 safe (it never guesses across parallel sessions in the same project). The
-active model is written to the ship's health record
-(`.starfleet-ai/var/agent-bus/health/<SHIP>.json`) as `model` + `server` after the
-first assistant turn.
+active model is written to the ship's status record after the first
+assistant turn.
 
 The plugin also watches `session.error` events and classifies model-API
 failures via `classifyModelError()`:
@@ -68,7 +67,7 @@ failures via `classifyModelError()`:
   `ResourceExhausted` ("Worker local total request limit reached"),
   token quota, or context-length / maximum-context exceeded.
 
-The detected class is written into the health record as `error_tag` and
+The detected class is written into the status record as `error_tag` and
 reported to the flagship (Enterprise) as part of the error message. A
 subsequent successful assistant turn auto-clears `error_tag` and the
 `blocked` state (auto-recovery).
@@ -98,7 +97,7 @@ starfleetctl agent-bus tell Yamato "setModel anthropic/claude-sonnet-4"
 The dispatch plugin parses the `setModel` directive from the inbox,
 executes `client.session.switchModel()` on the opencode runtime, and
 logs the result to the tick log. A toast notification confirms the
-switch (success or failure). The health record is updated with the new
+switch (success or failure). The status record is updated with the new
 model after the next assistant turn.
 
 **Limitations:**
@@ -107,5 +106,5 @@ model after the next assistant turn.
   `setModel` directives bypass this guard).
 - The model name must match an entry in the configured model list.
 - The directive is fire-and-forget — no RPC response to the sender.
-  Check the tick log (`.starfleet-ai/var/agent-bus/poll/<SHIP>.tick`) or health
+  Check the tick log (`.starfleet-ai/var/agent-bus/poll/<SHIP>.tick`) or status
   record to verify the switch succeeded.
