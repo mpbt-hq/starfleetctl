@@ -52,7 +52,8 @@ const attachPrefix = "[[attach:"
 // is non-empty it is stored as an attachment under AttachDir and the inline
 // text gains a fetch pointer, so the full body is retrievable via DoGet.
 // Caller must not hold the bus lock — post takes it itself, mirroring _post().
-func (b *Bus) post(target, summary, payload, basename, replyTo string) (string, error) {
+// msgType specifies the message type: "ship", "user", "control" (defaults to "ship").
+func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) (string, error) {
 	lock, err := b.lockBus()
 	if err != nil {
 		return "", err
@@ -64,6 +65,7 @@ func (b *Bus) post(target, summary, payload, basename, replyTo string) (string, 
 	}
 
 	text := clean(summary)
+	var attachName string
 	if payload != "" {
 		sha := sha256.Sum256([]byte(payload))
 		shx := hex.EncodeToString(sha[:])
@@ -71,6 +73,7 @@ func (b *Bus) post(target, summary, payload, basename, replyTo string) (string, 
 		if err := os.WriteFile(filepath.Join(b.AttachDir, aname), []byte(payload), 0o644); err != nil {
 			return "", err
 		}
+		attachName = aname
 		if text == "" {
 			text = fmt.Sprintf("payload attached (%d bytes)", len(payload))
 		}
@@ -78,12 +81,30 @@ func (b *Bus) post(target, summary, payload, basename, replyTo string) (string, 
 			id, attachPrefix, fsafe(basename), len(payload), shx)
 	}
 
-	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\t%s\n", now(), isots(), b.ShipID, target, text, replyTo)
+	if msgType == "" {
+		msgType = "ship"
+	}
+
+	msg := msgRecord{
+		ID:      id,
+		Epoch:   now(),
+		ISO:     isots(),
+		From:    b.ShipID,
+		Target:  target,
+		Text:    text,
+		ReplyTo: replyTo,
+		Type:    msgType,
+		Attach:  attachName,
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return "", err
+	}
 	mpath, err := b.mfile(id)
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(mpath, []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(mpath, data, 0o644); err != nil {
 		return "", err
 	}
 	b.logEvent("directive", fmt.Sprintf("%s → %s: %s", id, target, text))
@@ -516,10 +537,10 @@ func (b *Bus) DoBoard() error {
 // takes the bus lock itself and auto-spills oversized bodies into an
 // attachment, exactly like DoPost.
 func (b *Bus) Tell(target, text, replyTo string) (string, error) {
-	return b.post(target, text, "", "tell", replyTo)
+	return b.post(target, text, "", "tell", replyTo, "ship")
 }
 
-func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, replyTo string) error {
+func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, replyTo, msgType string) error {
 	var summary, payload, basename string
 
 	if attachPath != "" {
@@ -564,7 +585,10 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 		return usageErr("agent-bus: directive needs text (via args or stdin)")
 	}
 	b.warnID()
-	id, err := b.post(target, summary, payload, basename, replyTo)
+	if msgType == "" {
+		msgType = "ship"
+	}
+	id, err := b.post(target, summary, payload, basename, replyTo, msgType)
 	if err != nil {
 		return err
 	}
@@ -645,7 +669,7 @@ func (b *Bus) DoReply(qid string, words []string) error {
 		return usageErr(fmt.Sprintf("agent-bus: no such question '%s'", qid))
 	}
 	b.warnID()
-	rid, err := b.post(qm.From, fmt.Sprintf("[re %s] %s", qid, ans), "", "", qid)
+	rid, err := b.post(qm.From, fmt.Sprintf("[re %s] %s", qid, ans), "", "", qid, "ship")
 	if err != nil {
 		return err
 	}
@@ -785,6 +809,61 @@ func (b *Bus) DoPrune() error {
 	return nil
 }
 
+// DoMigrate converts all legacy .tsv message files to .json format.
+// This is a one-time migration that can be run safely multiple times.
+func (b *Bus) DoMigrate() error {
+	lock, err := b.lockBus()
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	migrated := 0
+	for _, id := range globSortedFiles(b.MsgDir, "m", ".tsv") {
+		tsvPath := filepath.Join(b.MsgDir, id+".tsv")
+		jsonPath := filepath.Join(b.MsgDir, id+".json")
+
+		// Skip if JSON already exists
+		if _, err := os.Stat(jsonPath); err == nil {
+			continue
+		}
+
+		// Parse TSV
+		msg, ok := parseMsgFileTSV(id, tsvPath)
+		if !ok {
+			fmt.Printf("agent-bus: warning: failed to parse %s, skipping\n", tsvPath)
+			continue
+		}
+
+		// Ensure type is set
+		if msg.Type == "" {
+			msg.Type = "ship"
+		}
+
+		// Write JSON
+		data, err := json.Marshal(msg)
+		if err != nil {
+			fmt.Printf("agent-bus: warning: failed to marshal %s: %v\n", id, err)
+			continue
+		}
+
+		if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
+			fmt.Printf("agent-bus: warning: failed to write %s: %v\n", id, err)
+			continue
+		}
+
+		migrated++
+	}
+
+	if migrated > 0 {
+		b.logEvent("migrate", fmt.Sprintf("migrated %d TSV message(s) to JSON", migrated))
+		fmt.Printf("agent-bus: migrated %d TSV message(s) to JSON format\n", migrated)
+	} else {
+		fmt.Println("agent-bus: no TSV messages to migrate")
+	}
+	return nil
+}
+
 // AskAndWait posts a question (tagged "[ask]") to the specified controller,
 // polls for the reply (tagged "[re <qid>]") addressed to us, acks it, and
 // returns the raw answer text.  This is the same logic as DoAsk but returns
@@ -792,7 +871,7 @@ func (b *Bus) DoPrune() error {
 // use from hook subcommands that must not blow away the whole process.
 func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error) {
 	b.warnID()
-	qid, err := b.post(ctrl, "[ask] "+question, "", "", "")
+	qid, err := b.post(ctrl, "[ask] "+question, "", "", "", "ship")
 	if err != nil {
 		return "", fmt.Errorf("post: %w", err)
 	}

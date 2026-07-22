@@ -34,6 +34,7 @@ type dispatchRequest struct {
 	Target  string `json:"target,omitempty"`
 	Text    string `json:"text,omitempty"`
 	ReplyTo string `json:"reply_to,omitempty"`
+	Type    string `json:"type,omitempty"` // "ship", "user", "control"
 
 	// error handle
 	Detail string `json:"detail,omitempty"`
@@ -234,7 +235,11 @@ func (b *Bus) dispatchTell(req dispatchRequest) dispatchResponse {
 	if req.Target == "" || req.Text == "" {
 		return dispatchResponse{OK: false, Error: "tell: need target and text"}
 	}
-	if err := b.DoPost(req.Target, []string{req.Text}, false, "", req.ReplyTo); err != nil {
+	msgType := req.Type
+	if msgType == "" {
+		msgType = "ship"
+	}
+	if err := b.DoPost(req.Target, []string{req.Text}, false, "", req.ReplyTo, msgType); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
 	return dispatchResponse{OK: true}
@@ -312,7 +317,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 	}
 	_ = b.DoPost("Enterprise", []string{
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, req.Detail),
-	}, false, "", "")
+	}, false, "", "", "control")
 	return dispatchResponse{OK: true, Tag: tag}
 }
 
@@ -349,7 +354,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	b.logEvent("plugin", fmt.Sprintf("error-handle%s: %s (source=%s)", label, detail, req.Source))
 	_ = b.DoPost("Enterprise", []string{
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
-	}, false, "", "")
+	}, false, "", "", "control")
 
 	// 4. Policy decision.
 	action, reason := decideAction(tag, req.HasFallback, req.Source)

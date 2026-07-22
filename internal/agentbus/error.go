@@ -182,7 +182,7 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	// would land in the errored ship's own inbox and restart the self-loop.
 	_ = b.DoPost("Enterprise", []string{
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
-	}, false, "", "")
+	}, false, "", "", "control")
 
 	return nil
 }

@@ -173,7 +173,7 @@ func (b *Bus) mfile(id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
 	}
-	return filepath.Join(b.MsgDir, safe+".tsv"), nil
+	return filepath.Join(b.MsgDir, safe+".json"), nil
 }
 
 func (b *Bus) ackmark(id, agent string) (string, error) {

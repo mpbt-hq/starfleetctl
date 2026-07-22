@@ -18,7 +18,7 @@ func TestMfileRejectsTraversal(t *testing.T) {
 		t.Fatal("mfile accepted a traversal id")
 	}
 
-	// valid id stays inside MsgDir and ends in .tsv
+	// valid id stays inside MsgDir and ends in .json
 	p, err := b.mfile("m0042")
 	if err != nil {
 		t.Fatalf("mfile rejected a valid id: %v", err)
@@ -26,8 +26,8 @@ func TestMfileRejectsTraversal(t *testing.T) {
 	if !strings.HasPrefix(p, b.MsgDir+string(filepath.Separator)) {
 		t.Errorf("mfile path %q not under MsgDir %q", p, b.MsgDir)
 	}
-	if !strings.HasSuffix(p, ".tsv") {
-		t.Errorf("mfile path %q does not end in .tsv", p)
+	if !strings.HasSuffix(p, ".json") {
+		t.Errorf("mfile path %q does not end in .json", p)
 	}
 }
 

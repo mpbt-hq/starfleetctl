@@ -62,16 +62,18 @@ type StatusPatch struct {
 	Model      string
 }
 
-// msgRecord mirrors one msgs/<id>.tsv line:
-// epoch \t isots \t from \t target \t text
+// msgRecord mirrors one msgs/<id>.json line (new format) or legacy .tsv line.
+// Message type: "ship" (fleet ship), "user" (web frontend/user), "control" (automation/CLI).
 type msgRecord struct {
-	ID      string
-	Epoch   int64
-	ISO     string
-	From    string
-	Target  string
-	Text    string
-	ReplyTo string // id of the message this one replies to (In-Reply-To), empty if none
+	ID      string `json:"id"`
+	Epoch   int64  `json:"epoch"`
+	ISO     string `json:"iso"`
+	From    string `json:"from"`
+	Target  string `json:"target"`
+	Text    string `json:"text"`
+	ReplyTo string `json:"reply_to,omitempty"`
+	Type    string `json:"type,omitempty"` // "ship", "user", "control"
+	Attach  string `json:"attach,omitempty"` // attachment filename if present
 }
 
 func readFirstLine(path string) (string, error) {
@@ -100,6 +102,24 @@ func parseStatusFile(path string) (StatusRecord, bool) {
 }
 
 func parseMsgFile(id, path string) (msgRecord, bool) {
+	// Try JSON first (new format)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// Fallback to TSV (legacy format)
+		return parseMsgFileTSV(id, path)
+	}
+
+	var msg msgRecord
+	if err := json.Unmarshal(data, &msg); err == nil && msg.ID != "" {
+		return msg, true
+	}
+
+	// If JSON parsing failed, try TSV fallback
+	return parseMsgFileTSV(id, path)
+}
+
+// parseMsgFileTSV parses the legacy TSV format
+func parseMsgFileTSV(id, path string) (msgRecord, bool) {
 	line, err := readFirstLine(path)
 	if err != nil {
 		return msgRecord{}, false
@@ -109,7 +129,8 @@ func parseMsgFile(id, path string) (msgRecord, bool) {
 		f = append(f, "")
 	}
 	epoch, _ := strconv.ParseInt(f[0], 10, 64)
-	return msgRecord{ID: id, Epoch: epoch, ISO: f[1], From: f[2], Target: f[3], Text: f[4], ReplyTo: f[5]}, true
+	// TSV format doesn't have Type field, default to "ship"
+	return msgRecord{ID: id, Epoch: epoch, ISO: f[1], From: f[2], Target: f[3], Text: f[4], ReplyTo: f[5], Type: "ship"}, true
 }
 
 // globSortedFiles lists <dir>/<prefix>*.ext basenames (without extension),
@@ -149,7 +170,18 @@ func (b *Bus) AllStatusRecords() []StatusRecord {
 
 func (b *Bus) allMsgRecords() []msgRecord {
 	var out []msgRecord
+	for _, id := range globSortedFiles(b.MsgDir, "m", ".json") {
+		if r, ok := parseMsgFile(id, filepath.Join(b.MsgDir, id+".json")); ok {
+			out = append(out, r)
+		}
+	}
+	// Also check for legacy .tsv files for migration
 	for _, id := range globSortedFiles(b.MsgDir, "m", ".tsv") {
+		// Skip if we already have the .json version
+		jsonPath := filepath.Join(b.MsgDir, id+".json")
+		if _, err := os.Stat(jsonPath); err == nil {
+			continue
+		}
 		if r, ok := parseMsgFile(id, filepath.Join(b.MsgDir, id+".tsv")); ok {
 			out = append(out, r)
 		}
@@ -161,7 +193,39 @@ func (b *Bus) allMsgRecords() []msgRecord {
 	return out
 }
 
-// inboxCount counts unacked directives targeted at agent (explicit or "all").
+// MigrateTSVMessages converts all existing .tsv message files to .json format.
+// Returns the number of messages migrated and any error encountered.
+func (b *Bus) MigrateTSVMessages() (int, error) {
+	count := 0
+	for _, id := range globSortedFiles(b.MsgDir, "m", ".tsv") {
+		tsvPath := filepath.Join(b.MsgDir, id+".tsv")
+		jsonPath := filepath.Join(b.MsgDir, id+".json")
+		// Skip if JSON already exists
+		if _, err := os.Stat(jsonPath); err == nil {
+			continue
+		}
+		msg, ok := parseMsgFile(id, tsvPath)
+		if !ok {
+			continue
+		}
+		// Ensure Type is set for legacy messages
+		if msg.Type == "" {
+			msg.Type = "ship"
+		}
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return count, err
+		}
+		if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
+			return count, err
+		}
+		// Optionally remove the old TSV file after successful migration
+		// os.Remove(tsvPath) // Keep TSV as backup for now
+		count++
+	}
+	return count, nil
+}
+
 func (b *Bus) inboxCount(agent string) int {
 	cnt := 0
 	for _, m := range b.allMsgRecords() {

@@ -165,7 +165,7 @@ func processTimers(stores []*Store, bus *agentbus.Bus, logFile *os.File, persist
 				continue
 			}
 			for _, target := range targets {
-				err := bus.DoPost(target, strings.Fields(t.Message), false, "", "")
+				err := bus.DoPost(target, strings.Fields(t.Message), false, "", "", "ship")
 				if err != nil {
 					logf(logFile, "%s: tell %s failed: %v", t.ID, target, err)
 				} else {
