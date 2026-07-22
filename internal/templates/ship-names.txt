@@ -1,7 +1,7 @@
 # Star Trek fleet — ship names for agent identity.
 # One name per line. Enterprise is reserved as the flagship (control agent).
 # Lines starting with # are ignored. Names must be alphanumeric + hyphen only
-# (used as AGENT_ID and as filenames in _WORK_/agent-bus/ships/).
+# (used as STARFLEET_SHIP_ID and as filenames in .starfleet-ai/var/agent-bus/ships/).
 #
 # Faction order: Federation, Klingon, Romulan, Cardassian, Bajoran, Maquis.
 

@@ -32,7 +32,7 @@ const maxFrameSize = 64 * 1024 * 1024
 // handled specially as a liveness check, not forwarded to either), args are
 // the same argv a CLI invocation of that family would receive.
 //
-// Env carries per-request identity overrides (AGENT_ID and friends — see
+// Env carries per-request identity overrides (STARFLEET_SHIP_ID and friends — see
 // allowedEnvOverrides) so one daemon instance can serve many different
 // agents' identities instead of reporting everything under whatever
 // environment the daemon process itself happened to start with. Omitting
