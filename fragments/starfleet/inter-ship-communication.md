@@ -42,14 +42,15 @@ All commands prefixed with `starfleetctl agent-bus`. Use `--json` on `board`/`in
 
 | Command | Purpose |
 |---------|---------|
+| `cmd <agent> <verb> [args]` | Send a command (type=command) — executed by plugin, not injected as text |
 | `status <state> ["note"]` | Set own heartbeat (idle/working/blocked + optional note) |
 | `status <state> --task T --progress N --branch B --eta D --blocker X` | Set heartbeat plus structured detail (written to `status/<ship>.json`) |
 | `board` | Show all ships and their status |
 | `inbox` | List own unread directives (poller auto-injects these; manual call redundant in opencode) |
 | `ack <id>` | Mark a message as handled |
-| `tell <agent> <text…>` | Send a directive to one ship |
+| `tell <agent> <text…>` | Send a directive to one ship (type=ship) |
 | `tell <agent> --reply <id> <text…>` | Reply to a specific message (sets In-Reply-To marker) |
-| `broadcast <text…>` | Send a directive to all ships |
+| `broadcast <text…>` | Send a directive to all ships (type=ship) |
 | `broadcast --reply <id> <text…>` | Broadcast a reply to a specific message |
 | `ask "<question>"` | Ask the control agent a question (blocks until answered) |
 | `reply <qid> <answer>` | Answer a pending question (control side) |
@@ -58,6 +59,67 @@ All commands prefixed with `starfleetctl agent-bus`. Use `--json` on `board`/`in
 | `events [N]` | Show recent bus events |
 | `clear` | Remove own heartbeat on exit |
 | `prune` | Garbage-collect stale entries |
+
+### Message format
+
+Messages are JSON files stored in `msgs/<target>/unseen/`. Each file contains a single JSON object:
+
+```json
+{
+  "id": "msg-abc123",
+  "epoch": 1753190400,
+  "iso": "2026-07-21T12:00:00Z",
+  "from": "Enterprise",
+  "target": "Voyager",
+  "text": "model gpt-4o",
+  "type": "command"
+}
+```
+
+**Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Unique message ID (`msg-<random>`) |
+| `epoch` | yes | Unix timestamp |
+| `iso` | yes | ISO 8601 timestamp |
+| `from` | yes | Sender ship ID |
+| `target` | yes | Recipient ship ID or `all` for broadcast |
+| `text` | yes | Message body |
+| `type` | yes | Message type (see below) |
+| `reply_to` | no | ID of message being replied to |
+| `attach` | no | Attachment filename if present |
+
+**Message types (`type` field):**
+
+| Type | Plugin behavior | CLI command |
+|------|-----------------|-------------|
+| `ship` | Injected as system prompt (directive) | `tell`, `broadcast` |
+| `user` | Injected as system prompt (directive) | `tell`, `broadcast` |
+| `control` | Injected as system prompt (directive) | `tell`, `broadcast` |
+| `command` | Executed locally by plugin, NOT injected | `cmd` |
+
+**Commands** (`type=command`) are executed by the opencode plugin's `handleMessage()` function. The `text` field contains the verb and optional arguments:
+
+| Verb | Args | Effect |
+|------|------|--------|
+| `model` | `<model-name>` | Switch session model (e.g. `model gpt-4o`) |
+| `quit` | — | Gracefully shut down the session |
+| `reset` | — | Clear session conversation |
+| `status` | — | Report status back to sender |
+
+**Examples:**
+
+```sh
+# Send a command (executed by plugin, not injected as text)
+starfleetctl agent-bus cmd Voyager model gpt-4o
+starfleetctl agent-bus cmd Voyager quit
+starfleetctl agent-bus cmd Voyager reset
+
+# Send a directive (injected as system prompt)
+starfleetctl agent-bus tell Voyager "please refactor the auth module"
+starfleetctl agent-bus broadcast "roll call — all ships report status"
+```
 
 ### Large payloads — use `--stdin`, not argv
 
