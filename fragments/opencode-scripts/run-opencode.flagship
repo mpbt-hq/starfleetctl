@@ -8,7 +8,7 @@
 # Do NOT hand-edit this file — edit the canonical copy in the starfleetctl repo.
 #
 # Start an opencode control-agent session in the mpbt workspace root.
-# Sets AGENT_ID=Enterprise (the flagship) so this session appears on the
+# Sets STARFLEET_SHIP_ID=Enterprise (the flagship) so this session appears on the
 # agent-bus board as "Enterprise".
 #
 

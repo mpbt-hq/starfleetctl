@@ -4,9 +4,9 @@
 # Copyright © 2026 Enrico Weigelt, metux IT consult
 #
 # Start a plain Claude Code session registered on the agent-bus board under
-# its own AGENT_ID — the explicit-launcher counterpart to run-control (which
-# fixes AGENT_ID=control) and the run-opencode.<release> wrappers (which fix
-# AGENT_ID=<release>-$$), for the generic "just work in the workspace, not
+# its own STARFLEET_SHIP_ID — the explicit-launcher counterpart to run-control (which
+# fixes STARFLEET_SHIP_ID=control) and the run-opencode.<release> wrappers (which fix
+# STARFLEET_SHIP_ID=<release>-$$), for the generic "just work in the workspace, not
 # tied to control or one release line" case.
 #
 # Complements, does not replace, scripts/agent-bus-auto-id.sh: that fixes a
@@ -23,7 +23,7 @@
 #                      the same short/full forms as run-opencode.* (e.g.
 #                      "master", "25.2", "xserver-25.2") as well as the
 #                      non-xserver solutions ("flyingtux", "go-x11proto").
-#   --name <id>       override AGENT_ID (default: next free ship name from
+#   --name <id>       override STARFLEET_SHIP_ID (default: next free ship name from
 #                      scripts/ship-names, falling back to "<rel>-$$"/"ws-$$"
 #                      if the registry has none free)
 #
@@ -119,7 +119,7 @@ if [ -f "$INSTRUCTIONS_FILE" ]; then
 fi
 
 # Register initial heartbeat (belt-and-suspenders with Claude Code's own
-# SessionStart hook, which uses this same env-inherited AGENT_ID).
+# SessionStart hook, which uses this same env-inherited STARFLEET_SHIP_ID).
 $STARFLEET_BIN agent-bus status idle "claude session starting (run-claude)" >/dev/null 2>&1 || true
 
 # No explicit initial prompt/args given: feed the standard boot prompt so the

@@ -13,7 +13,6 @@ func newTestBus(t *testing.T, agentID string) *Bus {
 	t.Helper()
 	root := t.TempDir()
 	os.Setenv("STARFLEET_SHIP_ID", agentID)
-	os.Unsetenv("AGENT_ID")
 	os.Unsetenv("STARFLEET_BUS_DIR")
 	os.Unsetenv("STARFLEET_BUS_TTL")
 	os.Unsetenv("PROJECT")

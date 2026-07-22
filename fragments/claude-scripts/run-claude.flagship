@@ -4,7 +4,7 @@
 # Copyright © 2026 Enrico Weigelt, metux IT consult
 #
 # Start a Claude Code control-agent session in the mpbt workspace root.
-# Sets AGENT_ID=Enterprise (the flagship) so this session appears on the
+# Sets STARFLEET_SHIP_ID=Enterprise (the flagship) so this session appears on the
 # agent-bus board as "Enterprise" — no XLIBRE_RELEASE (control is cross-project).
 #
 # Usage:
@@ -52,7 +52,7 @@ if [ "$DETACH" -eq 1 ]; then
 fi
 
 # Interactive: register initial heartbeat (Claude Code's SessionStart hook fires
-# too, but that uses the env-inherited AGENT_ID=Enterprise — belt-and-suspenders).
+# too, but that uses the env-inherited STARFLEET_SHIP_ID=Enterprise — belt-and-suspenders).
 .starfleet-ai/bin/starfleetctl agent-bus status idle "flagship session starting" >/dev/null 2>&1 || true
 
 exec claude --append-system-prompt "$SYSTEM_PROMPT" "${EXTRA[@]+"${EXTRA[@]}"}"

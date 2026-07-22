@@ -19,7 +19,7 @@ PR-branch ownership does.
 **Protocol — before you start mutating a PR (repair, amend, backport-to-a-PR):**
 
 ```bash
-export AGENT_ID=<short-unique-name>      # e.g. repair-3132
+export STARFLEET_SHIP_ID=<short-unique-name>      # e.g. repair-3132
 starfleetctl github pr claim <pr#> "what you're doing"
 # ... work ...
 starfleetctl github pr claim --release <pr#>    # when done
@@ -39,7 +39,7 @@ so a flagship agent — or a future dashboard / voice UI / MCP bus — can see w
 session is doing and steer it. All parties read/write the same gitignored files, serialized via
 `flock`, so it works across **totally independent** sessions, not just spawned subagents.
 
-- **Worker session** (one per task): set a unique `$AGENT_ID`, then
+- **Worker session** (one per task): set a unique `$STARFLEET_SHIP_ID`, then
   `starfleetctl agent-bus status <state> ["note"]` (or `… --task T --progress N --branch B --eta D --blocker X` for rich detail) to report a heartbeat.
   Check `starfleetctl agent-bus inbox` for directives, and `starfleetctl agent-bus ack <id>` when
   handled. `starfleetctl agent-bus clear` on exit.
