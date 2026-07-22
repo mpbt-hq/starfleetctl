@@ -138,14 +138,8 @@ type msgEntryJSON struct {
 func (b *Bus) DoMsgsJSON() error {
 	msgs := b.allMsgRecords()
 	out := make([]msgEntryJSON, 0, len(msgs))
-	entries, _ := os.ReadDir(b.AckDir)
 	for _, m := range msgs {
-		nacks := 0
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), m.ID+"__") {
-				nacks++
-			}
-		}
+		nacks := b.ackedCount(m.ID)
 		out = append(out, msgEntryJSON{
 			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
 			Target: m.Target, Acks: nacks, Text: m.Text, ReplyTo: m.ReplyTo,
@@ -160,20 +154,13 @@ func (b *Bus) DoMsgsJSON() error {
 func (b *Bus) Conversation(ship string) []msgEntryJSON {
 	msgs := b.allMsgRecords()
 	out := make([]msgEntryJSON, 0, len(msgs))
-	entries, _ := os.ReadDir(b.AckDir)
 	for _, m := range msgs {
 		if m.From != ship && m.Target != ship && m.Target != "all" {
 			continue
 		}
-		nacks := 0
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), m.ID+"__") {
-				nacks++
-			}
-		}
 		out = append(out, msgEntryJSON{
 			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: nacks, Text: m.Text, ReplyTo: m.ReplyTo,
+			Target: m.Target, Acks: b.ackedCount(m.ID), Text: m.Text, ReplyTo: m.ReplyTo,
 		})
 	}
 	return out
@@ -189,22 +176,15 @@ func (b *Bus) Conversation(ship string) []msgEntryJSON {
 func (b *Bus) ConversationWithViewer(ship, viewer string) []msgEntryJSON {
 	msgs := b.allMsgRecords()
 	out := make([]msgEntryJSON, 0, len(msgs))
-	entries, _ := os.ReadDir(b.AckDir)
 	for _, m := range msgs {
 		involved := m.From == ship || m.Target == ship || m.Target == "all" ||
 			(viewer != "" && (m.From == viewer || m.Target == viewer))
 		if !involved {
 			continue
 		}
-		nacks := 0
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), m.ID+"__") {
-				nacks++
-			}
-		}
 		out = append(out, msgEntryJSON{
 			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: nacks, Text: m.Text, ReplyTo: m.ReplyTo,
+			Target: m.Target, Acks: b.ackedCount(m.ID), Text: m.Text, ReplyTo: m.ReplyTo,
 		})
 	}
 	return out
@@ -238,17 +218,10 @@ func (b *Bus) DoAsksJSON() error {
 func (b *Bus) AllMsgRecordsJSON() []msgEntryJSON {
 	msgs := b.allMsgRecords()
 	out := make([]msgEntryJSON, 0, len(msgs))
-	entries, _ := os.ReadDir(b.AckDir)
 	for _, m := range msgs {
-		nacks := 0
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), m.ID+"__") {
-				nacks++
-			}
-		}
 		out = append(out, msgEntryJSON{
 			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: nacks, Text: m.Text,
+			Target: m.Target, Acks: b.ackedCount(m.ID), Text: m.Text,
 		})
 	}
 	return out

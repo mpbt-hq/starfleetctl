@@ -349,15 +349,15 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
 		if b.acked(m.ID, b.ShipID) {
 			continue
 		}
-		apath, err := b.ackmark(m.ID, b.ShipID)
-		if err != nil {
-			continue
+		// Mark as seen by moving to seen/ (no ack file needed)
+		seenPath := filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json")
+		if err := os.MkdirAll(filepath.Dir(seenPath), 0o755); err == nil {
+			if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json")); err == nil {
+				os.Rename(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json"), seenPath)
+			} else if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(m.ID)+".json")); err == nil {
+				os.Rename(filepath.Join(b.MsgDir, fsafe(m.ID)+".json"), filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json"))
+			}
 		}
-		f, err := os.Create(apath)
-		if err != nil {
-			continue
-		}
-		f.Close()
 		acked = append(acked, inboxMsg{ID: m.ID, From: m.From, Text: m.Text})
 		b.logEvent("ack", m.ID+" init-seen")
 	}
@@ -398,12 +398,6 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
 		if !keep {
 			if mpath, err := b.mfile(m.ID, m.Target); err == nil {
 				os.Remove(mpath)
-			}
-			entries, _ := os.ReadDir(b.AckDir)
-			for _, e := range entries {
-				if strings.HasPrefix(e.Name(), m.ID+"__") {
-					os.Remove(filepath.Join(b.AckDir, e.Name()))
-				}
 			}
 			msgCnt++
 		}
@@ -515,15 +509,6 @@ func (b *Bus) DoAck(id, note string) error {
 		return err
 	}
 
-	apath, err := b.ackmark(id, b.ShipID)
-	if err != nil {
-		return err
-	}
-	f, err := os.Create(apath)
-	if err != nil {
-		return err
-	}
-	f.Close()
 	b.logEvent("ack", fmt.Sprintf("%s %s", id, note))
 	noteSuffix := ""
 	if note != "" {
@@ -712,12 +697,10 @@ func (b *Bus) DoReply(qid string, words []string) error {
 	if err != nil {
 		return err
 	}
-	apath, aerr := b.ackmark(qid, b.ShipID)
-	if aerr == nil {
-		f, ferr := os.Create(apath)
-		if ferr == nil {
-			f.Close()
-		}
+	// Mark as seen by moving to seen/ (no ackmark needed)
+	seenPath, err := b.mfileSeen(b.ShipID, qid)
+	if err == nil {
+		_ = os.Rename(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(qid)+".json"), seenPath)
 	}
 	lock.Close()
 	fmt.Printf("agent-bus: replied to %s (asker '%s') via %s\n", qid, qm.From, rid)
@@ -758,13 +741,7 @@ func (b *Bus) DoMsgs() error {
 	}
 	fmt.Printf("%-6s  %-7s  %-16s  %-12s  %-6s  %s\n", "ID", "AGE", "FROM", "TARGET", "ACKS", "WHAT")
 	for _, m := range msgs {
-		entries, _ := os.ReadDir(b.AckDir)
-		nacks := 0
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), m.ID+"__") {
-				nacks++
-			}
-		}
+		nacks := b.ackedCount(m.ID)
 		fmt.Printf("%-6s  %-7s  %-16s  %-12s  %-6d  %s\n", m.ID, age(m.Epoch), m.From, m.Target, nacks, dispText(m))
 	}
 	return nil
@@ -828,12 +805,6 @@ func (b *Bus) DoPrune() error {
 		if !keep {
 			if mpath, err := b.mfile(m.ID, m.Target); err == nil {
 				os.Remove(mpath)
-			}
-			entries, _ := os.ReadDir(b.AckDir)
-			for _, e := range entries {
-				if strings.HasPrefix(e.Name(), m.ID+"__") {
-					os.Remove(filepath.Join(b.AckDir, e.Name()))
-				}
 			}
 			msgCnt++
 		}
@@ -923,11 +894,13 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error
 			if err != nil {
 				return "", err
 			}
-			apath, aerr := b.ackmark(m.ID, b.ShipID)
-			if aerr == nil {
-				f, ferr := os.Create(apath)
-				if ferr == nil {
-					f.Close()
+			// Mark reply as seen (move to seen/)
+			seenPath := filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json")
+			if err := os.MkdirAll(filepath.Dir(seenPath), 0o755); err == nil {
+				if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json")); err == nil {
+					os.Rename(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json"), seenPath)
+				} else if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(m.ID)+".json")); err == nil {
+					os.Rename(filepath.Join(b.MsgDir, fsafe(m.ID)+".json"), filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json"))
 				}
 			}
 			lock.Close()

@@ -31,16 +31,27 @@ func TestMfileRejectsTraversal(t *testing.T) {
 	}
 }
 
-func TestAckmarkRejectsBadAgent(t *testing.T) {
+func TestMfileSeenRejectsTraversal(t *testing.T) {
 	b := newTestBus(t, "TestShip")
 
-	if _, err := b.ackmark("m0001", "../../x"); err == nil {
-		t.Fatal("ackmark accepted a traversal agent id")
+	// fsafe sanitizes target traversal characters but fsutil.Safe rejects traversal IDs
+	if _, err := b.mfileSeen("test", "../../etc/passwd"); err == nil {
+		t.Fatal("mfileSeen accepted a traversal id")
 	}
-	if _, err := b.ackmark("../../x", "ship"); err == nil {
-		t.Fatal("ackmark accepted a traversal message id")
+
+	p2, err := b.mfileSeen("../../x", "m0001")
+	if err != nil {
+		t.Fatalf("mfileSeen returned error: %v", err)
 	}
-	if _, err := b.ackmark("m0001", "ship1"); err != nil {
-		t.Fatalf("ackmark rejected a valid pair: %v", err)
+	if !strings.HasPrefix(p2, b.MsgDir+string(filepath.Separator)) {
+		t.Errorf("mfileSeen path %q escapes MsgDir %q", p2, b.MsgDir)
+	}
+
+	p3, err := b.mfileSeen("test", "m0001")
+	if err != nil {
+		t.Fatalf("mfileSeen rejected a valid pair: %v", err)
+	}
+	if !strings.Contains(p3, filepath.Join("test", "seen")) {
+		t.Errorf("mfileSeen path %q missing target/seen", p3)
 	}
 }

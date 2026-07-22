@@ -35,7 +35,6 @@ type Bus struct {
 
 	StatusDir string
 	MsgDir    string
-	AckDir    string
 	AttachDir string
 	Events    string
 }
@@ -72,11 +71,10 @@ func New(root string) (*Bus, error) {
 		Handle:     handle,
 		StatusDir:  filepath.Join(busDir, "status"),
 		MsgDir:     filepath.Join(busDir, "msgs"),
-		AckDir:     filepath.Join(busDir, "acks"),
 		AttachDir:  filepath.Join(busDir, "attachments"),
 		Events:     filepath.Join(busDir, "events.log"),
 	}
-	for _, d := range []string{b.StatusDir, b.MsgDir, b.AckDir, b.AttachDir} {
+	for _, d := range []string{b.StatusDir, b.MsgDir, b.AttachDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
@@ -200,24 +198,10 @@ func (b *Bus) mfileSeen(target, id string) (string, error) {
 	return filepath.Join(seenDir, safe+".json"), nil
 }
 
-func (b *Bus) ackmark(id, agent string) (string, error) {
-	idSafe, ok := fsutil.Safe(id)
-	if !ok {
-		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
-	}
-	agentSafe, ok := fsutil.Safe(agent)
-	if !ok {
-		return "", fmt.Errorf("agent-bus: invalid agent id %q", agent)
-	}
-	return filepath.Join(b.AckDir, idSafe+"__"+agentSafe), nil
-}
-
 func (b *Bus) acked(id, agent string) bool {
-	path, err := b.ackmark(id, agent)
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(path)
+	// A message is acked if it exists in the seen/ directory for that agent
+	seenPath := filepath.Join(b.MsgDir, fsafe(agent), "seen", fsafe(id)+".json")
+	_, err := os.Stat(seenPath)
 	return err == nil
 }
 
@@ -292,9 +276,29 @@ func (b *Bus) logEvent(kind, note string) {
 	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", isots(), kind, b.ShipID, clean(note))
 }
 
+// ackedCount returns the number of agents who have acked (seen) a message
+func (b *Bus) ackedCount(id string) int {
+	count := 0
+	entries, err := os.ReadDir(b.MsgDir)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		seenPath := filepath.Join(b.MsgDir, e.Name(), "seen", fsafe(id)+".json")
+		if _, err := os.Stat(seenPath); err == nil {
+			count++
+		}
+	}
+	return count
+}
+
+// warnID warns if STARFLEET_SHIP_ID is not set (uses fallback "anon-<pid>").
 func (b *Bus) warnID() {
 	if !b.ShipIDSet {
-		fmt.Fprintf(os.Stderr, "agent-bus: note: STARFLEET_SHIP_ID (or AGENT_ID) not set; using '%s' — set a unique ship ID per session.\n", b.ShipID)
+		fmt.Fprintf(os.Stderr, "agent-bus: note: STARFLEET_SHIP_ID not set; using '%s' — set a unique STARFLEET_SHIP_ID per agent.\n", b.ShipID)
 	}
 }
 

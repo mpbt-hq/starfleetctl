@@ -267,6 +267,7 @@ func (b *Bus) inboxCount(agent string) int {
 		if m.Target != "all" && m.Target != agent {
 			continue
 		}
+		// Count only unseen messages (not in seen/)
 		if b.acked(m.ID, agent) {
 			continue
 		}
