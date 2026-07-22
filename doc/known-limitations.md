@@ -29,5 +29,5 @@ The old "rebase" mode leaked PR-number markers onto pushed upstream commits (PR 
 
 Go and bash implementations read/write the same file formats, but:
 - Both must use the same `flock` domain (`_WORK_/agent-bus/.lock`)
-- Don't mix `BUS_DIR` overrides between implementations
+- Don't mix `STARFLEET_BUS_DIR` overrides between implementations
 - Test interoperability before relying on it in production

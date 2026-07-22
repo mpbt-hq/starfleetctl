@@ -41,10 +41,13 @@ type Bus struct {
 }
 
 // New resolves a Bus from the environment exactly like the bash script's
-// top-of-file variable setup (BUS_DIR, BUS_TTL, STARFLEET_SHIP_ID/AGENT_ID,
+// top-of-file variable setup (STARFLEET_BUS_DIR, BUS_TTL, STARFLEET_SHIP_ID/AGENT_ID,
 // PROJECT, STARFLEET_AGENT_HANDLE), given the workspace root.
 func New(root string) (*Bus, error) {
-	busDir := os.Getenv("BUS_DIR")
+	busDir := os.Getenv("STARFLEET_BUS_DIR")
+	if busDir == "" {
+		busDir = os.Getenv("BUS_DIR") // backwards compat
+	}
 	if busDir == "" {
 		busDir = config.BusDir(root)
 	}

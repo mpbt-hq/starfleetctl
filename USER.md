@@ -68,7 +68,7 @@ Each AI agent session = one **ship** with a unique name:
 - `STARFLEET_SHIP_ID` — your ship name
 - `STARFLEET_ROLE` — `flagship` or `ship`
 - `STARFLEET_TARGET` — flagship to report to (unset for flagship)
-- `BUS_DIR` — state directory (default: `.starfleet-ai/var/agent-bus`)
+- `STARFLEET_BUS_DIR` — state directory (default: `.starfleet-ai/var/agent-bus`)
 
 ### Agent Bus — Cross-Session Communication
 
@@ -343,8 +343,8 @@ ls -la .starfleet-ai/     # should exist
 # Check heartbeat directory
 ls -la .starfleet-ai/var/agent-bus/status/
 
-# Verify BUS_DIR is consistent across sessions
-echo $BUS_DIR
+# Verify STARFLEET_BUS_DIR is consistent across sessions
+echo $STARFLEET_BUS_DIR
 
 # Prune stale entries
 starfleetctl agent-bus prune
@@ -376,11 +376,11 @@ starfleetctl web autostart stop     # kill daemon
 
 - Ensure `.opencode/plugin/starfleet-dispatch.ts` exists (installed by bootstrap)
 - Check opencode plugin logs in opencode UI
-- Verify `BUS_DIR` matches between CLI and plugin
+- Verify `STARFLEET_BUS_DIR` matches between CLI and plugin
 
 ### 7.7 Go vs Bash Interoperability Issues
 
-- Both **must** use same `BUS_DIR` (default `.starfleet-ai/var/agent-bus`)
+- Both **must** use same `STARFLEET_BUS_DIR` (default `.starfleet-ai/var/agent-bus`)
 - Both use same `flock` on `.lock` — don't mix custom lock paths
 - Run `starfleetctl agent-bus prune` periodically
 
@@ -401,7 +401,7 @@ starfleetctl web autostart stop     # kill daemon
 | `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
 | `STARFLEET_ROLE` | — | `flagship` or `ship` |
 | `STARFLEET_TARGET` | — | Flagship ship ID (for ships) |
-| `BUS_DIR` | `.starfleet-ai/var/agent-bus` | Agent bus state directory |
+| `STARFLEET_BUS_DIR` | `.starfleet-ai/var/agent-bus` | Agent bus state directory |
 | `BUS_TTL` | `900` (15 min) | Heartbeat TTL in seconds |
 | `PROJECT` | — | Project label on board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |

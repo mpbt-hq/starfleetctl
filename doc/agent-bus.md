@@ -18,7 +18,7 @@ state directory underneath `.starfleet-ai/var/...`.
 | Variable | Default | Description |
 |---|---|---|
 | `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
-| `BUS_DIR` | `./.starfleet-ai/var/agent-bus` | Storage directory |
+| `STARFLEET_BUS_DIR` | `./.starfleet-ai/var/agent-bus` | Storage directory |
 | `BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
 | `PROJECT` | — | Project label on the board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
