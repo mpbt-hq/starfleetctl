@@ -121,10 +121,6 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchTell(req)
 	case "command":
 		return b.dispatchCommand(req)
-	case "seen_mark":
-		return b.dispatchSeenMark(req)
-	case "seen_load":
-		return b.dispatchSeenLoad()
 	case "touch":
 		return b.dispatchTouch()
 	case "status":
@@ -168,11 +164,11 @@ func (b *Bus) dispatchInit(req dispatchRequest) dispatchResponse {
 	if note == "" {
 		note = "opencode ship"
 	}
-	messages, seen, err := b.DoInit(note)
+	messages, err := b.DoInit(note)
 	if err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
-	return dispatchResponse{OK: true, Messages: orEmptyInbox(messages), Seen: orEmpty(seen)}
+	return dispatchResponse{OK: true, Messages: orEmptyInbox(messages)}
 }
 
 func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
@@ -266,28 +262,6 @@ func (b *Bus) dispatchCommand(req dispatchRequest) dispatchResponse {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
 	return dispatchResponse{OK: true}
-}
-
-func (b *Bus) dispatchSeenMark(req dispatchRequest) dispatchResponse {
-	if req.ID == "" {
-		return dispatchResponse{OK: false, Error: "seen_mark: need id"}
-	}
-	if err := b.DoMonitorSeenMark(req.ID); err != nil {
-		return dispatchResponse{OK: false, Error: err.Error()}
-	}
-	return dispatchResponse{OK: true}
-}
-
-func (b *Bus) dispatchSeenLoad() dispatchResponse {
-	seenMap, err := b.loadSeen(b.ShipID)
-	if err != nil {
-		return dispatchResponse{OK: false, Error: err.Error()}
-	}
-	seen := make([]string, 0, len(seenMap))
-	for id := range seenMap {
-		seen = append(seen, id)
-	}
-	return dispatchResponse{OK: true, Seen: seen}
 }
 
 func (b *Bus) dispatchTouch() dispatchResponse {

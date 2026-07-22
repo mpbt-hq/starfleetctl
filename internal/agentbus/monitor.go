@@ -56,25 +56,6 @@ func (b *Bus) DoMonitorLoop() error {
 	if !b.ShipIDSet {
 		return fmt.Errorf("agent-bus-monitor-loop: $STARFLEET_SHIP_ID is not set")
 	}
-	seenDir := filepath.Join(b.BusDir, "monitor-seen")
-	if err := os.MkdirAll(seenDir, 0o755); err != nil {
-		return err
-	}
-	seenFile := filepath.Join(seenDir, b.ShipID)
-
-	seen := map[string]bool{}
-	if data, err := os.ReadFile(seenFile); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if line != "" {
-				seen[line] = true
-			}
-		}
-	}
-	f, err := os.OpenFile(seenFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 
 	heartbeatInterval := int64(300) // HEARTBEAT_INTERVAL, same default as the bash original
 	if v := os.Getenv("HEARTBEAT_INTERVAL"); v != "" {
@@ -91,18 +72,12 @@ func (b *Bus) DoMonitorLoop() error {
 			if m.Target != "all" && m.Target != b.ShipID {
 				continue
 			}
-			if b.acked(m.ID, b.ShipID) || seen[m.ID] {
+			if b.acked(m.ID, b.ShipID) {
 				continue
 			}
 			fmt.Printf("[%s] from %s: %s\n", m.ID, m.From, m.Text)
-			seen[m.ID] = true
-			fmt.Fprintln(f, m.ID)
 		}
-		// Periodic heartbeat refresh: a ship deep in a long task that never
-		// calls `agent-bus status` itself would otherwise fall out of
-		// $STARFLEET_BUS_TTL (15m default) and read as dead/pruned on the board despite
-		// the session being alive. `|| true`: a transient touch failure (e.g.
-		// lock contention) must not kill this persistent Monitor-tool loop.
+		// Periodic heartbeat refresh
 		if now()-lastHeartbeat >= heartbeatInterval {
 			_ = b.DoTouch()
 			lastHeartbeat = now()
@@ -156,7 +131,6 @@ func (b *Bus) DoWatch(intervalArg string, stop bool) error {
 	}
 	agentSafe := fsafe(b.ShipID)
 	pidFile := filepath.Join(notifyDir, ".watch-"+agentSafe+".pid")
-	seenFile := filepath.Join(notifyDir, ".seen-"+agentSafe)
 	logFile := filepath.Join(notifyDir, agentSafe+".log")
 
 	if stop {
@@ -178,31 +152,15 @@ func (b *Bus) DoWatch(intervalArg string, stop bool) error {
 	}
 	defer os.Remove(pidFile)
 
-	seen := map[string]bool{}
-	if data, err := os.ReadFile(seenFile); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if line != "" {
-				seen[line] = true
-			}
-		}
-	}
-	seenF, err := os.OpenFile(seenFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer seenF.Close()
-
 	for {
 		for _, m := range b.allMsgRecords() {
 			if m.Target != "all" && m.Target != b.ShipID {
 				continue
 			}
-			if b.acked(m.ID, b.ShipID) || seen[m.ID] {
+			if b.acked(m.ID, b.ShipID) {
 				continue
 			}
 			notify(logFile, popupOnceDir, b.ShipID, m)
-			seen[m.ID] = true
-			fmt.Fprintln(seenF, m.ID)
 		}
 		reapPopupOnce(popupOnceDir, b.MsgDir)
 		time.Sleep(interval)

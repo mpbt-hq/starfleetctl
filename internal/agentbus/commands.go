@@ -331,12 +331,12 @@ func (b *Bus) DoExit(reason string) error {
 }
 
 // DoInit consolidates the plugin's startup sequence into a single bus call:
-// ack all unacked inbox, load seen set, prune stale data, set status to idle.
-// Returns the acked messages and seen set so the plugin can populate its state.
-func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
+// ack all unacked inbox, prune stale data, set status to idle.
+// Returns the acked messages so the plugin can populate its state.
+func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 	lock, err := b.lockBus()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer lock.Close()
 
@@ -362,14 +362,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
 		b.logEvent("ack", m.ID+" init-seen")
 	}
 
-	// 2. Load seen set.
-	seenMap, _ := b.loadSeen(b.ShipID)
-	seen := make([]string, 0, len(seenMap))
-	for id := range seenMap {
-		seen = append(seen, id)
-	}
-
-	// 3. Prune stale heartbeats + old directives.
+	// 2. Prune stale heartbeats + old directives.
 	statusCnt := 0
 	live := make(map[string]bool)
 	for _, r := range b.AllStatusRecords() {
@@ -431,7 +424,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
 	data, _ := json.MarshalIndent(rec, "", "  ")
 	_ = os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644)
 
-	return acked, seen, nil
+	return acked, nil
 }
 
 // DoInbox implements `agent-bus inbox`.

@@ -39,7 +39,6 @@ var requiredDirs = []string{
 	filepath.Join(".starfleet-ai", "var", "agent-bus", "msgs"),
 	filepath.Join(".starfleet-ai", "var", "agent-bus", "acks"),
 	filepath.Join(".starfleet-ai", "var", "agent-bus", "ships"),
-	filepath.Join(".starfleet-ai", "var", "agent-bus", "monitor-seen"),
 	filepath.Join(".starfleet-ai", "var", "agent-bus", "notify", ".popup-once"),
 	filepath.Join(".starfleet-ai", "var", "prclaims"),
 	filepath.Join(".starfleet-ai", "conf"),
