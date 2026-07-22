@@ -31,7 +31,7 @@ Shows every agent that has posted a heartbeat. Each card displays:
 - **Project** and **age** (time since last heartbeat)
 - **Inbox count** (unacked directives)
 - **Task**, **Branch**, **Blocker**, **ETA**, **Progress bar** (if reported)
-- **STALE** pill if the heartbeat is older than `BUS_TTL` (default 15 min)
+- **STALE** pill if the heartbeat is older than `STARFLEET_BUS_TTL` (default 15 min)
 - **Model** pill: shows the model ID or provider when reported
 
 Click a ship card to open the **ship detail panel** (slide-in from the right):

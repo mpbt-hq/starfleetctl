@@ -100,7 +100,7 @@ func (b *Bus) DoMonitorLoop() error {
 		}
 		// Periodic heartbeat refresh: a ship deep in a long task that never
 		// calls `agent-bus status` itself would otherwise fall out of
-		// $BUS_TTL (15m default) and read as dead/pruned on the board despite
+		// $STARFLEET_BUS_TTL (15m default) and read as dead/pruned on the board despite
 		// the session being alive. `|| true`: a transient touch failure (e.g.
 		// lock contention) must not kill this persistent Monitor-tool loop.
 		if now()-lastHeartbeat >= heartbeatInterval {

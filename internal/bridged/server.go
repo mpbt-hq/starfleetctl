@@ -99,7 +99,7 @@ func dispatch(root string, req Request) Response {
 // variables a request may override — exactly what agentbus.New reads to
 // resolve an agent's identity (STARFLEET_SHIP_ID, PROJECT,
 // STARFLEET_AGENT_HANDLE), per Enterprise's directive (m0082). Deliberately NOT
-// including infra-level vars like STARFLEET_BUS_DIR/BUS_TTL: overriding those per
+// including infra-level vars like STARFLEET_BUS_DIR/STARFLEET_BUS_TTL: overriding those per
 // request would let one caller silently point another's request at a
 // different bus directory entirely, a materially different (and unasked
 // for) feature from "each request carries its own identity". A request
