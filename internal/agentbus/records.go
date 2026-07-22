@@ -175,14 +175,14 @@ func (b *Bus) AllStatusRecords() []StatusRecord {
 
 func (b *Bus) allMsgRecords() []msgRecord {
 	var out []msgRecord
+
+	// Scan legacy flat structure (for migration compat)
 	for _, id := range globSortedFiles(b.MsgDir, "m", ".json") {
 		if r, ok := parseMsgFile(id, filepath.Join(b.MsgDir, id+".json")); ok {
 			out = append(out, r)
 		}
 	}
-	// Also check for legacy .tsv files for migration
 	for _, id := range globSortedFiles(b.MsgDir, "m", ".tsv") {
-		// Skip if we already have the .json version
 		jsonPath := filepath.Join(b.MsgDir, id+".json")
 		if _, err := os.Stat(jsonPath); err == nil {
 			continue
@@ -191,6 +191,36 @@ func (b *Bus) allMsgRecords() []msgRecord {
 			out = append(out, r)
 		}
 	}
+
+	// Scan new per-target directory structure: <target>/unseen/ and <target>/seen/
+	entries, err := os.ReadDir(b.MsgDir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			target := e.Name()
+			// Skip hidden dirs
+			if strings.HasPrefix(target, ".") {
+				continue
+			}
+			// Scan unseen
+			unseenDir := filepath.Join(b.MsgDir, target, "unseen")
+			for _, id := range globSortedFiles(unseenDir, "m", ".json") {
+				if r, ok := parseMsgFile(id, filepath.Join(unseenDir, id+".json")); ok {
+					out = append(out, r)
+				}
+			}
+			// Scan seen
+			seenDir := filepath.Join(b.MsgDir, target, "seen")
+			for _, id := range globSortedFiles(seenDir, "m", ".json") {
+				if r, ok := parseMsgFile(id, filepath.Join(seenDir, id+".json")); ok {
+					out = append(out, r)
+				}
+			}
+		}
+	}
+
 	// Reverse so newest messages appear first (lexicographic sort is oldest-first).
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]

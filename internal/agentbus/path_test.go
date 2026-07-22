@@ -13,13 +13,13 @@ func TestMfileRejectsTraversal(t *testing.T) {
 	b := newTestBus(t, "TestShip")
 
 	// malicious id must not produce a path outside MsgDir
-	_, err := b.mfile("../../../../etc/passwd")
+	_, err := b.mfile("../../../../etc/passwd", "test")
 	if err == nil {
 		t.Fatal("mfile accepted a traversal id")
 	}
 
 	// valid id stays inside MsgDir and ends in .json
-	p, err := b.mfile("m0042")
+	p, err := b.mfile("m0042", "test")
 	if err != nil {
 		t.Fatalf("mfile rejected a valid id: %v", err)
 	}

@@ -100,7 +100,7 @@ func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) 
 	if err != nil {
 		return "", err
 	}
-	mpath, err := b.mfile(id)
+	mpath, err := b.mfile(id, target)
 	if err != nil {
 		return "", err
 	}
@@ -396,7 +396,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, []string, error) {
 			}
 		}
 		if !keep {
-			if mpath, err := b.mfile(m.ID); err == nil {
+			if mpath, err := b.mfile(m.ID, m.Target); err == nil {
 				os.Remove(mpath)
 			}
 			entries, _ := os.ReadDir(b.AckDir)
@@ -468,18 +468,53 @@ func (b *Bus) DoAck(id, note string) error {
 	if id == "" {
 		return usageErr("agent-bus: ack needs <id> (see 'agent-bus inbox')")
 	}
-	mpath, err := b.mfile(id)
-	if err != nil {
-		return usageErr(fmt.Sprintf("agent-bus: %v", err))
+
+	// First, find the message to get its target
+	found := false
+	for _, m := range b.allMsgRecords() {
+		if m.ID == id {
+			found = true
+			break
+		}
 	}
-	if _, err := os.Stat(mpath); err != nil {
+	if !found {
 		return usageErr(fmt.Sprintf("agent-bus: no such directive '%s'", id))
 	}
+
 	lock, err := b.lockBus()
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
+
+	// Move from unseen to seen for this ship
+	seenPath, err := b.mfileSeen(b.ShipID, id)
+	if err != nil {
+		return err
+	}
+	// Also try old location for migration compat
+	oldPath := filepath.Join(b.MsgDir, fsafe(id)+".json")
+	newPath := filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(id)+".json")
+
+	// Move message from unseen to seen
+	var srcPath string
+	if _, err := os.Stat(newPath); err == nil {
+		srcPath = newPath
+	} else if _, err := os.Stat(oldPath); err == nil {
+		srcPath = oldPath
+	} else {
+		return usageErr(fmt.Sprintf("agent-bus: no such directive '%s'", id))
+	}
+
+	// Ensure seen dir exists
+	seenPath, err = b.mfileSeen(b.ShipID, id)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(srcPath, seenPath); err != nil {
+		return err
+	}
+
 	apath, err := b.ackmark(id, b.ShipID)
 	if err != nil {
 		return err
@@ -660,7 +695,7 @@ func (b *Bus) DoReply(qid string, words []string) error {
 	if qid == "" || ans == "" {
 		return usageErr("agent-bus: reply needs <qid> <answer…>")
 	}
-	qpath, err := b.mfile(qid)
+	qpath, err := b.mfile(qid, "all")
 	if err != nil {
 		return usageErr(fmt.Sprintf("agent-bus: %v", err))
 	}
@@ -791,7 +826,7 @@ func (b *Bus) DoPrune() error {
 			}
 		}
 		if !keep {
-			if mpath, err := b.mfile(m.ID); err == nil {
+			if mpath, err := b.mfile(m.ID, m.Target); err == nil {
 				os.Remove(mpath)
 			}
 			entries, _ := os.ReadDir(b.AckDir)

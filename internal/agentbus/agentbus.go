@@ -168,12 +168,36 @@ func (b *Bus) sfile(agent string) string {
 	return filepath.Join(b.StatusDir, fsafe(agent)+".json")
 }
 
-func (b *Bus) mfile(id string) (string, error) {
+func (b *Bus) mfile(id string, target string) (string, error) {
 	safe, ok := fsutil.Safe(id)
 	if !ok {
 		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
 	}
-	return filepath.Join(b.MsgDir, safe+".json"), nil
+	if target == "" {
+		// For backwards compat during migration: try to find the message in any target subdir
+		return filepath.Join(b.MsgDir, safe+".json"), nil
+	}
+	// New structure: target/unseen/
+	targetSafe := fsafe(target)
+	targetDir := filepath.Join(b.MsgDir, targetSafe, "unseen")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(targetDir, safe+".json"), nil
+}
+
+// mfileSeen returns the path for a message in a specific target's seen dir
+func (b *Bus) mfileSeen(target, id string) (string, error) {
+	safe, ok := fsutil.Safe(id)
+	if !ok {
+		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
+	}
+	targetSafe := fsafe(target)
+	seenDir := filepath.Join(b.MsgDir, targetSafe, "seen")
+	if err := os.MkdirAll(seenDir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(seenDir, safe+".json"), nil
 }
 
 func (b *Bus) ackmark(id, agent string) (string, error) {
@@ -227,7 +251,20 @@ func age(epoch int64) string {
 // the message has acknowledged it. Used to auto-delete messages when
 // all live targets have acked (so old messages don't resurface on restart).
 func (b *Bus) allTargetsAcked(id string, live map[string]bool) bool {
-	path, err := b.mfile(id)
+	// We need to find the message to get its target
+	var msg msgRecord
+	found := false
+	for _, m := range b.allMsgRecords() {
+		if m.ID == id {
+			msg = m
+			found = true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	path, err := b.mfile(id, msg.Target)
 	if err != nil {
 		return false
 	}
@@ -259,4 +296,46 @@ func (b *Bus) warnID() {
 	if !b.ShipIDSet {
 		fmt.Fprintf(os.Stderr, "agent-bus: note: STARFLEET_SHIP_ID (or AGENT_ID) not set; using '%s' — set a unique ship ID per session.\n", b.ShipID)
 	}
+}
+
+// findMsgFile searches for a message file by ID across all target directories.
+// Returns the path and the target if found.
+func (b *Bus) findMsgFile(id string) (string, string, bool) {
+	safe, ok := fsutil.Safe(id)
+	if !ok {
+		return "", "", false
+	}
+	
+	// First check old flat location (migration compat)
+	oldPath := filepath.Join(b.MsgDir, safe+".json")
+	if _, err := os.Stat(oldPath); err == nil {
+		// Try to read to get target
+		if m, ok := parseMsgFile(id, oldPath); ok {
+			return oldPath, m.Target, true
+		}
+		return oldPath, "", true
+	}
+	
+	// Search in target subdirectories
+	entries, err := os.ReadDir(b.MsgDir)
+	if err != nil {
+		return "", "", false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		target := e.Name()
+		// Check unseen
+		path := filepath.Join(b.MsgDir, target, "unseen", safe+".json")
+		if _, err := os.Stat(path); err == nil {
+			return path, target, true
+		}
+		// Check seen
+		path = filepath.Join(b.MsgDir, target, "seen", safe+".json")
+		if _, err := os.Stat(path); err == nil {
+			return path, target, true
+		}
+	}
+	return "", "", false
 }
