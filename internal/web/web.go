@@ -298,7 +298,7 @@ func (s *Server) apiTimers(w http.ResponseWriter, r *http.Request) {
 	showAll := r.URL.Query().Get("all") == "1"
 	var all []*timer.TimerRecord
 	for _, td := range timer.TimerDirs(s.Root) {
-		store, err := timer.NewStore(td.Dir, td.Prefix)
+		store, err := timer.NewStore(td.Dir)
 		if err != nil {
 			continue
 		}
@@ -358,12 +358,15 @@ func (s *Server) apiTimerDispatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 	var p struct {
+		ID           string `json:"id"`            // unique key (auto-generated if empty)
+		Description  string `json:"description"`   // human-readable description
 		ScheduleType string `json:"schedule_type"` // "once"|"interval"|"cron"
 		At           string `json:"at"`
 		Every        string `json:"every"`
 		Cron         string `json:"cron"`
-		Message      string `json:"message"`
-		TargetType   string `json:"target_type"` // "ship"|"fleet"|"fleet-all"
+		Type         string `json:"type"`          // "ship" (directive) or "command"
+		Text         string `json:"text"`          // message body or command verb+args
+		TargetType   string `json:"target_type"`   // "ship"|"fleet"|"fleet-all"
 		TargetValue  string `json:"target_value"`
 		Persistent   *bool  `json:"persistent"`
 	}
@@ -371,13 +374,21 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad json: "+err.Error())
 		return
 	}
-	if p.Message == "" {
-		writeErr(w, 400, "message required")
+	if p.Text == "" {
+		writeErr(w, 400, "text required")
 		return
 	}
 	if p.ScheduleType == "" {
 		writeErr(w, 400, "schedule_type required")
 		return
+	}
+	if p.Type == "" {
+		p.Type = "ship"
+	}
+
+	// Auto-generate ID if not given.
+	if p.ID == "" {
+		p.ID = timer.GenerateName()
 	}
 
 	// Parse target type.
@@ -433,14 +444,17 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec := &timer.TimerRecord{
-		Owner:      s.bus.ShipID,
-		Target:     timer.TargetSpec{Type: tt, Value: tgtVal},
-		Message:    p.Message,
-		Schedule:   sched,
-		Persistent: persistent,
-		Enabled:    true,
-		CreatedAt:  time.Now().Unix(),
-		NextFire:   nextFire,
+		ID:          p.ID,
+		Description: p.Description,
+		Owner:       s.bus.ShipID,
+		Target:      timer.TargetSpec{Type: tt, Value: tgtVal},
+		Type:        p.Type,
+		Text:        p.Text,
+		Schedule:    sched,
+		Persistent:  persistent,
+		Enabled:     true,
+		CreatedAt:   time.Now().Unix(),
+		NextFire:    nextFire,
 	}
 
 	store, err := timer.PickStore(s.Root, persistent)
@@ -460,7 +474,7 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) timerDelete(w http.ResponseWriter, r *http.Request, id string) {
 	for _, td := range timer.TimerDirs(s.Root) {
-		store, err := timer.NewStore(td.Dir, td.Prefix)
+		store, err := timer.NewStore(td.Dir)
 		if err != nil {
 			continue
 		}
@@ -486,7 +500,7 @@ func (s *Server) timerToggle(w http.ResponseWriter, r *http.Request, path string
 	id := strings.TrimSuffix(strings.TrimSuffix(path, "/pause"), "/resume")
 
 	for _, td := range timer.TimerDirs(s.Root) {
-		store, err := timer.NewStore(td.Dir, td.Prefix)
+		store, err := timer.NewStore(td.Dir)
 		if err != nil {
 			continue
 		}

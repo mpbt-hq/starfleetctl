@@ -12,27 +12,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // Store provides file-based timer CRUD for a single timer directory.
 type Store struct {
-	dir    string
-	prefix string // "e" for ephemeral, "p" for persistent
+	dir string
 }
 
 // NewStore returns a store rooted at dir, creating it if needed.
-// prefix is used for auto-assigned IDs (e.g. "e" for ephemeral, "p" for persistent).
-func NewStore(dir string, prefix string) (*Store, error) {
+func NewStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("timer store: mkdir %s: %w", dir, err)
 	}
-	if prefix == "" {
-		prefix = "t"
-	}
-	return &Store{dir: dir, prefix: prefix}, nil
+	return &Store{dir: dir}, nil
 }
 
 // Path returns the timer file path for a given ID.
@@ -40,32 +34,15 @@ func (s *Store) Path(id string) string {
 	return filepath.Join(s.dir, id+".json")
 }
 
-// nextID reads the .counter file and returns the next timer ID, incrementing
-// the counter atomically.
-func (s *Store) nextID() (string, error) {
-	counterPath := filepath.Join(s.dir, ".counter")
-	var next int64 = 1
-	if data, err := os.ReadFile(counterPath); err == nil {
-		if n, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil {
-			next = n
-		}
-	}
-	id := fmt.Sprintf("%s%03d", s.prefix, next)
-	if err := os.WriteFile(counterPath, []byte(strconv.FormatInt(next+1, 10)+"\n"), 0o644); err != nil {
-		return "", fmt.Errorf("timer store: write counter: %w", err)
-	}
-	return id, nil
-}
-
-// Create persists a new timer record. If rec.ID is empty, a new ID is
-// auto-assigned. Returns the assigned ID.
+// Create persists a new timer record. rec.ID must be set (use GenerateName()
+// if no explicit name was given). Returns an error if the ID already exists.
 func (s *Store) Create(rec *TimerRecord) (string, error) {
 	if rec.ID == "" {
-		id, err := s.nextID()
-		if err != nil {
-			return "", err
-		}
-		rec.ID = id
+		return "", fmt.Errorf("timer store: ID is required")
+	}
+	// Check for duplicate ID.
+	if _, err := s.Get(rec.ID); err == nil {
+		return "", fmt.Errorf("timer store: %s already exists", rec.ID)
 	}
 	if rec.CreatedAt == 0 {
 		rec.CreatedAt = time.Now().Unix()

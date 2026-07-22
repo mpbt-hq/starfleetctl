@@ -23,28 +23,30 @@ import (
 const usage = `starfleetctl timer — fleet scheduling (one-time, interval, cron)
 
 Usage:
-  timer set --at "17:30" --msg "text" [flags]        one-time at HH:MM (today)
-  timer set --at "2026-07-18 17:30" --msg "text"     one-time at date+time
-  timer set --at "tomorrow 17:30" --msg "text"       one-time tomorrow at HH:MM
-  timer set --every 10m --msg "text" [flags]         recurring interval
-  timer set --cron "0 4 * * *" --msg "text" [flags]  cron schedule
+  timer set --at "17:30" --type ship --text "status?" [flags]     one-time directive
+  timer set --every 10m --type ship --text "check status" [flags] recurring directive
+  timer set --cron "0 4 * * *" --type ship --text "morning"       cron directive
+  timer set --every 5m --type command --text "model gpt-4o"       command timer
 
 Flags for set:
+  --name <key>                      unique timer key (auto-generated if omitted)
+  --desc <text>                     human-readable description
+  --type <ship|command>             message type (default: ship)
+  --text <text>                     message body or command verb+args
   --target <ship|fleet|fleet-all>   where to send (default: ship = self)
   --tz <timezone>                   display timezone (default: UTC)
   --persistent                      store in .starfleet-ai/ (survive reset)
   --ephemeral                       store in .starfleet-ai/var/ (default for --every/--at)
-  --id <id>                         explicit timer ID (auto-assigned if omitted)
 
   timer list [--all] [--json]      list timers
-  timer cancel <id>                cancel a timer
+  timer cancel <id>                cancel a timer by key
   timer clear                      cancel all my timers
   timer pause <id>                 disable a timer
   timer resume <id>                re-enable a timer
-  timer worker                    run in foreground (blocking)
-  timer worker --start            fork daemon in background
-  timer worker --stop             stop the daemon
-  timer worker --restart          restart the daemon
+  timer worker                     run in foreground (blocking)
+  timer worker --start             fork daemon in background
+  timer worker --stop              stop the daemon
+  timer worker --restart           restart the daemon
   timer status                     show worker status
 `
 
@@ -83,12 +85,14 @@ func runSet(root string, args []string) int {
 		atStr        string
 		everyStr     string
 		cronExpr     string
-		msg          string
+		timerName    string
+		description  string
+		msgType      = "ship"
+		msgText      string
 		targetType   = TargetShip
 		targetValue  string
 		tz           string
 		persistent   *bool // nil = auto
-		timerID      string
 	)
 
 	for i := 0; i < len(args); i++ {
@@ -111,9 +115,24 @@ func runSet(root string, args []string) int {
 				scheduleType = ScheduleCron
 				i++
 			}
-		case "--msg":
+		case "--type":
 			if i+1 < len(args) {
-				msg = args[i+1]
+				msgType = args[i+1]
+				i++
+			}
+		case "--text":
+			if i+1 < len(args) {
+				msgText = args[i+1]
+				i++
+			}
+		case "--name":
+			if i+1 < len(args) {
+				timerName = args[i+1]
+				i++
+			}
+		case "--desc":
+			if i+1 < len(args) {
+				description = args[i+1]
 				i++
 			}
 		case "--target":
@@ -141,14 +160,10 @@ func runSet(root string, args []string) int {
 		case "--ephemeral":
 			v := false
 			persistent = &v
-		case "--id":
-			if i+1 < len(args) {
-				timerID = args[i+1]
-				i++
-			}
 		default:
-			if msg == "" {
-				msg = args[i]
+			// Bare argument = text (for backwards compat)
+			if msgText == "" {
+				msgText = args[i]
 			}
 		}
 	}
@@ -157,9 +172,14 @@ func runSet(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "timer: need --at, --every, or --cron")
 		return 2
 	}
-	if msg == "" {
-		fmt.Fprintln(os.Stderr, "timer: need --msg")
+	if msgText == "" {
+		fmt.Fprintln(os.Stderr, "timer: need --text")
 		return 2
+	}
+
+	// Auto-generate name if not given.
+	if timerName == "" {
+		timerName = GenerateName()
 	}
 
 	// Auto-detect persistence: --cron defaults to persistent.
@@ -177,16 +197,18 @@ func runSet(root string, args []string) int {
 
 	// Build timer record.
 	rec := &TimerRecord{
-		ID:         timerID,
-		Owner:      "", // will be set from bus identity
-		Target:     TargetSpec{Type: targetType, Value: targetValue},
-		Message:    msg,
-		Schedule:   scheduleFromFlags(scheduleType, cronExpr, everyStr, atStr),
-		Timezone:   tz,
-		Persistent: *persistent,
-		Enabled:    true,
-		CreatedAt:  time.Now().Unix(),
-		NextFire:   nextFire,
+		ID:          timerName,
+		Description: description,
+		Owner:       "", // will be set from bus identity
+		Target:      TargetSpec{Type: targetType, Value: targetValue},
+		Type:        msgType,
+		Text:        msgText,
+		Schedule:    scheduleFromFlags(scheduleType, cronExpr, everyStr, atStr),
+		Timezone:    tz,
+		Persistent:  *persistent,
+		Enabled:     true,
+		CreatedAt:   time.Now().Unix(),
+		NextFire:    nextFire,
 	}
 
 	// Resolve owner from bus identity.
@@ -226,8 +248,8 @@ func runSet(root string, args []string) int {
 	if rec.Persistent {
 		loc = "persistent"
 	}
-	fmt.Printf("timer %s created: %s (next fire: %s, %s, %s)\n",
-		id, kind, time.Unix(nextFire, 0).UTC().Format("2006-01-02 15:04:05 UTC"), loc, targetDesc(targetType, targetValue, bus.ShipID))
+	fmt.Printf("timer %s created: %s [%s] (next fire: %s, %s, %s)\n",
+		id, kind, msgType, time.Unix(nextFire, 0).UTC().Format("2006-01-02 15:04:05 UTC"), loc, targetDesc(targetType, targetValue, bus.ShipID))
 	return 0
 }
 
@@ -252,7 +274,7 @@ func runList(root string, args []string) int {
 
 	var all []*TimerRecord
 	for _, td := range TimerDirs(root) {
-		store, err := NewStore(td.Dir, td.Prefix)
+		store, err := NewStore(td.Dir)
 		if err != nil {
 			continue
 		}
@@ -291,7 +313,7 @@ func runList(root string, args []string) int {
 	}
 
 	// Human-readable table.
-	fmt.Printf("%-6s %-8s %-22s %-12s %-8s %s\n", "ID", "TYPE", "NEXT FIRE", "TARGET", "STATUS", "MESSAGE")
+	fmt.Printf("%-20s %-8s %-8s %-22s %-12s %-8s %s\n", "ID", "TYPE", "KIND", "NEXT FIRE", "TARGET", "STATUS", "TEXT")
 	for _, t := range all {
 		nf := time.Unix(t.NextFire, 0).UTC().Format("2006-01-02 15:04 UTC")
 		if t.NextFire == 0 {
@@ -303,8 +325,8 @@ func runList(root string, args []string) int {
 		}
 		kind := string(t.Schedule.Type)
 		tgt := targetDesc(t.Target.Type, t.Target.Value, bus.ShipID)
-		msg := truncate(t.Message, 40)
-		fmt.Printf("%-6s %-8s %-22s %-12s %-8s %s\n", t.ID, kind, nf, tgt, st, msg)
+		txt := truncate(t.Text, 30)
+		fmt.Printf("%-20s %-8s %-8s %-22s %-12s %-8s %s\n", t.ID, t.Type, kind, nf, tgt, st, txt)
 	}
 	return 0
 }
@@ -316,7 +338,7 @@ func runCancel(root string, args []string) int {
 	}
 	id := args[0]
 	for _, td := range TimerDirs(root) {
-		store, err := NewStore(td.Dir, td.Prefix)
+		store, err := NewStore(td.Dir)
 		if err != nil {
 			continue
 		}
@@ -343,7 +365,7 @@ func runClear(root string, args []string) int {
 	owner := bus.ShipID
 	count := 0
 	for _, td := range TimerDirs(root) {
-		store, err := NewStore(td.Dir, td.Prefix)
+		store, err := NewStore(td.Dir)
 		if err != nil {
 			continue
 		}
@@ -374,7 +396,7 @@ func runPause(root string, args []string, disable bool) int {
 	}
 	id := args[0]
 	for _, td := range TimerDirs(root) {
-		store, err := NewStore(td.Dir, td.Prefix)
+		store, err := NewStore(td.Dir)
 		if err != nil {
 			continue
 		}
@@ -657,24 +679,23 @@ func targetDesc(tt TargetType, value, self string) string {
 
 // TimerDir describes a timer store location and its ID prefix.
 type TimerDir struct {
-	Dir    string
-	Prefix string
+	Dir string
 }
 
 // TimerDirs returns all timer directories for the given workspace root.
 func TimerDirs(root string) []TimerDir {
 	return []TimerDir{
-		{filepath.Join(root, ".starfleet-ai", "var", "timers"), "e"},
-		{filepath.Join(root, ".starfleet-ai", "conf", "timers"), "p"},
+		{filepath.Join(root, ".starfleet-ai", "var", "timers")},
+		{filepath.Join(root, ".starfleet-ai", "conf", "timers")},
 	}
 }
 
 // PickStore returns the appropriate store for the given persistence mode.
 func PickStore(root string, persistent bool) (*Store, error) {
 	if persistent {
-		return NewStore(filepath.Join(root, ".starfleet-ai", "conf", "timers"), "p")
+		return NewStore(filepath.Join(root, ".starfleet-ai", "conf", "timers"))
 	}
-	return NewStore(filepath.Join(root, ".starfleet-ai", "var", "timers"), "e")
+	return NewStore(filepath.Join(root, ".starfleet-ai", "var", "timers"))
 }
 
 // NotifyWorker sends SIGHUP to the running timer worker (if any) for immediate pickup.

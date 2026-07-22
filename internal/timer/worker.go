@@ -67,10 +67,10 @@ func RunWorker(root string) error {
 	_ = os.MkdirAll(persistentVarDir, 0o755)
 
 	stores := []*Store{}
-	if s, err := NewStore(ephemeralDir, "e"); err == nil {
+	if s, err := NewStore(ephemeralDir); err == nil {
 		stores = append(stores, s)
 	}
-	if s, err := NewStore(persistentConfDir, "p"); err == nil {
+	if s, err := NewStore(persistentConfDir); err == nil {
 		stores = append(stores, s)
 	}
 
@@ -165,11 +165,24 @@ func processTimers(stores []*Store, bus *agentbus.Bus, logFile *os.File, persist
 				continue
 			}
 			for _, target := range targets {
-				err := bus.DoPost(target, strings.Fields(t.Message), false, "", "", "ship")
+				var err error
+				if t.Type == "command" {
+					// Command: split text into verb + args.
+					parts := strings.SplitN(t.Text, " ", 2)
+					verb := parts[0]
+					args := ""
+					if len(parts) > 1 {
+						args = parts[1]
+					}
+					_, err = bus.Command(target, verb, args)
+				} else {
+					// Directive (ship/user/control): post as message.
+					err = bus.DoPost(target, strings.Fields(t.Text), false, "", "", t.Type)
+				}
 				if err != nil {
 					logf(logFile, "%s: tell %s failed: %v", t.ID, target, err)
 				} else {
-					logf(logFile, "%s: told %s: %s", t.ID, target, truncate(t.Message, 60))
+					logf(logFile, "%s: told %s [%s]: %s", t.ID, target, t.Type, truncate(t.Text, 60))
 				}
 			}
 			advanceOrDelete(store, t, persistentVarDir)
