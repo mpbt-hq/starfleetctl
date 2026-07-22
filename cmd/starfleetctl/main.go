@@ -48,6 +48,7 @@ Fleet management:
   bridged           manage bridged agent sessions (exec/status/log)
   dashboard         render the workspace dashboard
   hook              handle agent lifecycle hooks (pre/post)
+  run               start an AI agent session (replaces run-opencode/run-claude scripts)
   session           manage agent sessions (list/ship)
   ship-names        assign/release/list ship names
   with-clone-lock   serialize git operations via flock
@@ -228,6 +229,8 @@ func main() {
 		os.Exit(hook.Run(root, os.Args[2:]))
 	case "session":
 		os.Exit(session.Run(root, os.Args[2:]))
+	case "run":
+		os.Exit(session.RunCmd(root, os.Args[2:]))
   case "worktree":
 		os.Exit(worktree.Run(root, os.Args[2:]))
 	case "task":

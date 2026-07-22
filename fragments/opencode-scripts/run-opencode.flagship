@@ -3,30 +3,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright © 2026 Enrico Weigelt, metux IT consult
 #
-# Auto-installed by `starfleetctl bootstrap --fix` from
-# github.com/mpbt-hq/starfleetctl (fragments/opencode-scripts/).
+# Thin wrapper — all logic lives in `starfleetctl run`.
+# Canonical source: mpbt-hq/starfleetctl (fragments/opencode-scripts/).
 # Do NOT hand-edit this file — edit the canonical copy in the starfleetctl repo.
-#
-# Start an opencode control-agent session in the mpbt workspace root.
-# Sets STARFLEET_SHIP_ID=Enterprise (the flagship) so this session appears on the
-# agent-bus board as "Enterprise".
-#
 
-export STARFLEET_SHIP_ID="Enterprise"
-export STARFLEET_ROLE="flagship"
-# No target — flagship is top of hierarchy within this workspace.
-# Downstream ships set STARFLEET_TARGET="Enterprise" to report here.
-unset STARFLEET_TARGET
-
-# Register initial heartbeat (agent‑bus TTL / prune reaps on exit)
-.starfleet-ai/bin/starfleetctl agent-bus status idle "flagship opencode session" >/dev/null 2>&1 || true
-
-# (no background processes — plugins handle inbox/board monitoring)
-
-# Override model via $STARFLEET_MODEL (e.g. nvidia/nvidia/nemotron-3-nano-30b-a3b)
-MODEL=""
-[ -n "${STARFLEET_MODEL:-}" ] && MODEL="--model ${STARFLEET_MODEL}"
-
-export OPENCODE_CONFIG_CONTENT="{\"username\":\"${STARFLEET_SHIP_ID}\",\"instructions\":[\".starfleet-ai/agents.d/index.md\"]}"
-#shellcheck disable=SC2086
-exec opencode ${MODEL} --prompt "You are the flagship ${STARFLEET_SHIP_ID:-unknown}. Fleet identity loaded via OPENCODE_CONFIG_CONTENT." "$@"
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec "$SCRIPT_DIR/starfleetctl" run --client opencode --flagship "$@"
