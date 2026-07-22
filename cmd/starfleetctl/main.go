@@ -272,13 +272,21 @@ func workspaceRoot() (string, error) {
 		if isDir(filepath.Join(dir, ".starfleet-ai")) && isDir(filepath.Join(dir, "scripts")) {
 			return dir, nil
 		}
-		// Don't walk past a git repo/worktree boundary. A directory with its
-		// own .git (a directory for a normal repo, a file for a linked
-		// worktree) that lacks .starfleet-ai/ + scripts/ is NOT this workspace —
-		// continuing upward risks silently escaping into an unrelated outer
-		// checkout.
+		// Don't walk past a git repo/worktree boundary — UNLESS we're inside
+		// a .starfleet-ai/ subdirectory, which means this is the starfleetctl
+		// source checkout nested inside the workspace. In that case the real
+		// workspace root is further up and we must keep walking.
 		if exists(filepath.Join(dir, ".git")) {
-			return "", fmt.Errorf("in a git working tree (%s) with no .starfleet-ai/ + scripts/ — refusing to search further up past this repo/worktree boundary; set MPBT_WORKSPACE_ROOT if this is intentional", dir)
+			inStarfleetAI := false
+			for p := dir; p != filepath.Dir(p); p = filepath.Dir(p) {
+				if filepath.Base(p) == ".starfleet-ai" {
+					inStarfleetAI = true
+					break
+				}
+			}
+			if !inStarfleetAI {
+				return "", fmt.Errorf("in a git working tree (%s) with no .starfleet-ai/ + scripts/ — refusing to search further up past this repo/worktree boundary; set MPBT_WORKSPACE_ROOT if this is intentional", dir)
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
