@@ -9,9 +9,9 @@ owner: "starfleetctl"
 
 ## Inter-ship communication (agent-bus)
 
-Ships communicate autonomously via `starfleetctl agent-bus` (or a workspace-
-specific `.starfleet-ai/bin/starfleetctl agent-bus` wrapper). No central orchestrator is required —
-every ship reads its inbox, acts on directives, and responds.
+Ships communicate autonomously via `starfleetctl agent-bus`. No central
+orchestrator is required — every ship reads its inbox, acts on directives,
+and responds.
 
 ### Standing rules
 
@@ -29,121 +29,50 @@ every ship reads its inbox, acts on directives, and responds.
    the state of play.
 
 4. **Keep the board current.** Run `starfleetctl agent-bus status <state> [note]` after
-   starting or finishing work so the fleet sees who is idle/working/blocked. When you
-   start a substantive task, also report structured detail so the web console and
-   `board --json` show progress at a glance:
-   `starfleetctl agent-bus status working --task "<what>" --progress <0-100> --branch <b> --eta <dur> --blocker "<why, if any>"`.
-   The detail is written to `status/<ship>.json` alongside the legacy heartbeat; omit
-   flags you have no value for. Update `--progress`/`--blocker` as the task evolves.
+   starting or finishing work so the fleet sees who is idle/working/blocked.
 
-### Command reference
+### Commands you will use
 
-All commands prefixed with `starfleetctl agent-bus`. Use `--json` on `board`/`inbox`/`msgs`/`asks` for machine-readable output.
+All commands prefixed with `starfleetctl agent-bus`.
 
 | Command | Purpose |
 |---------|---------|
-| `cmd <agent> <verb> [args]` | Send a command (type=command) — executed by plugin, not injected as text |
 | `status <state> ["note"]` | Set own heartbeat (idle/working/blocked + optional note) |
-| `status <state> --task T --progress N --branch B --eta D --blocker X` | Set heartbeat plus structured detail (written to `status/<ship>.json`) |
 | `board` | Show all ships and their status |
-| `inbox` | List own unread directives (poller auto-injects these; manual call redundant in opencode) |
+| `inbox` | List own unread directives |
 | `ack <id>` | Mark a message as handled |
-| `tell <agent> <text…>` | Send a directive to one ship (type=ship) |
-| `tell <agent> --reply <id> <text…>` | Reply to a specific message (sets In-Reply-To marker) |
-| `broadcast <text…>` | Send a directive to all ships (type=ship) |
+| `tell <agent> <text…>` | Send a directive to one ship |
+| `tell <agent> --reply <id> <text…>` | Reply to a specific message |
+| `broadcast <text…>` | Send a directive to all ships |
 | `broadcast --reply <id> <text…>` | Broadcast a reply to a specific message |
 | `ask "<question>"` | Ask the control agent a question (blocks until answered) |
 | `reply <qid> <answer>` | Answer a pending question (control side) |
 | `asks` | List pending questions (control side) |
-| `msgs` | List all messages (control side) |
 | `events [N]` | Show recent bus events |
-| `clear` | Remove own heartbeat on exit |
-| `prune` | Garbage-collect stale entries |
 
-### Large payloads — use `--stdin`, not argv
+### Large payloads
 
-`agent-bus tell` / `broadcast` deliver the message body either as command-line
-arguments (`tell <agent> <text…>`) or, to bypass the OS `ARG_MAX` limit
-(~128 KB–2 MB, varies per distro) that constrains argv-based delivery, read it
-from **stdin**:
+For multi-line or large messages, pipe via stdin:
 
 ```sh
-# short one-liner — argv is fine
-starfleetctl agent-bus tell Voyager "status report: build green"
-
-# reply to a specific message (id from `msgs`/`inbox --json` or the stdout of tell)
-starfleetctl agent-bus tell Voyager --reply m0137 "danke, merged"
-# the web console shows threaded views; each message links its referenced id (↩).
-
-# multi-line or payloads with special characters — pipe via stdin
 cat <<'EOF' | starfleetctl agent-bus tell Yamato --stdin
-Einsatzbefehl: PR-Review-Batch. Führe bot-review für diese PRs durch:
-
-1. #3323 (xfree86: remove xf86validateConfig license from Files.c)
-2. #3322 (xfree86: remove obsolete keywords and license from Files.c)
-
-Nutze den /bot-review Skill. Poste Review-Kommentare + Labels.
-Melde Status nach Abschluss.
+multi-line message here
 EOF
 ```
 
-The storage layer itself has **no** size limit (verified at 20 MB+); only the
-argv path is bounded by the kernel. **Prefer `--stdin` for anything beyond a
-single short one-liner** — argv truncation can silently cut multi-line messages
-even well below the theoretical `ARG_MAX` due to shell quoting overhead and
-encoding expansion.
+### Control agent model
 
-### Control agent ("1st officer") model
+When a **human** needs to centrally steer workers, use the **control agent** model:
 
-The default peer-to-peer model works for autonomous ship-to-ship communication.
-When a **human** needs to centrally steer workers and approve their tool calls,
-use the **control agent** model:
-
-- **Control agent** — a human-attended session, conventionally
-  `STARFLEET_SHIP_ID=control` (overridable via `$AGENT_CONTROLLER`).
-  Runs `.starfleet-ai/bin/starfleetctl agent-bus board` to watch the fleet and
-  `.starfleet-ai/bin/starfleetctl agent-bus asks` to see pending questions.
-- **Workers** — every other session. They route questions and tool-permission
-  prompts to the control agent and block locally for the answer.
-
-**Quickstart** — in the session you want to man as controller:
+- **Control agent** — `STARFLEET_SHIP_ID=control`, watches fleet via `board` and `asks`
+- **Workers** — route questions to control agent via `ask`, block for answer
 
 ```sh
-export STARFLEET_SHIP_ID=control
-.starfleet-ai/bin/starfleetctl agent-bus board   # who's online
-.starfleet-ai/bin/starfleetctl agent-bus asks    # pending questions
+# As worker — ask controller
+starfleetctl agent-bus ask "should I force-push?"
+
+# As controller — answer
+starfleetctl agent-bus reply <qid> "yes, proceed"
+starfleetctl agent-bus reply <qid> allow   # permit tool call
+starfleetctl agent-bus reply <qid> deny    # deny tool call
 ```
-
-When a worker asks something, answer it:
-
-```sh
-.starfleet-ai/bin/starfleetctl agent-bus reply <qid> "your answer"
-.starfleet-ai/bin/starfleetctl agent-bus reply <qid> allow   # [perm] request
-.starfleet-ai/bin/starfleetctl agent-bus reply <qid> deny    # [perm] request
-```
-
-Any session can ask the controller:
-
-```sh
-.starfleet-ai/bin/starfleetctl agent-bus ask "should I force-push?"
-```
-
-**Tool-permission forwarding** — wire a worker's `PreToolUse` hook so every
-`Bash` permission prompt routes to the controller instead of blocking the
-worker. Add to that worker's `.claude/settings.local.json` (never to the
-shared `settings.json` — an absent controller would gate every session):
-
-```json
-"hooks": { "PreToolUse": [ { "matcher": "Bash",
-  "hooks": [ { "type": "command", "timeout": 120,
-    "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/agent-permission-hook" } ] } ] }
-```
-
-Fail-safe: Claude Code's own hook timeout **fails open** (tool proceeds), so
-the hook enforces its **own shorter** timeout and returns first:
-- `$AGENT_PERM_TIMEOUT` (default 60s; keep below the hook's `timeout`),
-- `$AGENT_PERM_TIMEOUT_DECISION` = `deny` (default, fail-closed) | `ask`,
-- `$AGENT_CONTROLLER` (default `control`).
-
-The hook cannot override a `deny`/`ask` permission *rule* (most-restrictive
-wins), so it widens nothing — it only answers what would otherwise be a prompt.
