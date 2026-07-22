@@ -80,3 +80,33 @@ retrying the same model — switch to a different provider/model (use the
 web `models.yaml` / `starfleetctl` model list) and continue. The fleet
 console and flagship already see the `error_tag`, so no extra reporting is
 needed beyond resuming your task on the alternate model.
+
+### External model switching (setModel directive)
+
+Ships can switch their model at runtime via an agent-bus directive — no
+session restart required. Any ship or the web frontend can trigger this:
+
+```sh
+starfleetctl agent-bus tell <ship> "setModel <model-name>"
+```
+
+Example:
+```sh
+starfleetctl agent-bus tell Enterprise "setModel opencode/big-pickle"
+starfleetctl agent-bus tell Yamato "setModel anthropic/claude-sonnet-4"
+```
+
+The dispatch plugin parses the `setModel` directive from the inbox,
+executes `client.session.switchModel()` on the opencode runtime, and
+logs the result to the tick log. A toast notification confirms the
+switch (success or failure). The health record is updated with the new
+model after the next assistant turn.
+
+**Limitations:**
+- Only one `setModel` per error-recovery cycle (the `hasSwitchedToFallback`
+  flag prevents double-switches during automated error handling; external
+  `setModel` directives bypass this guard).
+- The model name must match an entry in the configured model list.
+- The directive is fire-and-forget — no RPC response to the sender.
+  Check the tick log (`_WORK_/agent-bus/poll/<SHIP>.tick`) or health
+  record to verify the switch succeeded.
