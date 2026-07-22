@@ -87,74 +87,84 @@ function handleMessage(
   msg: { id: string; from: string; text: string; type?: string },
   client: any, sessionID: string,
 ): boolean {
-  const type = msg.type || 'ship'
   const text = msg.text.trim()
 
-  // Commands (type=command): text is the verb, optionally with args
-  if (type === 'command') {
-    const verb = text.split(/\s+/)[0].toLowerCase()
-    const args = text.slice(verb.length).trim()
+  switch (msg.type || 'ship') {
+    // --- directives: inject as system prompt ---
+    case 'ship':
+    case 'user':
+    case 'control':
+      return false
 
-    switch (verb) {
-      case 'model': {
-        if (!args) { tickLog(`command model from=${msg.from}: missing model name`); return true }
-        const src = `[command model from=${msg.from}]`
-        tickLog(`${src}: switching to ${args}`)
-        toast('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${args}`, 5000)
-        client.session.switchModel({ path: { id: sessionID }, body: { model: args } })
-          .then(() => {
-            tickLog(`${src}: ok → ${args}`)
-            toast('success', 'starfleet-dispatch', `Model switched to ${args}`, 5000)
-            bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
-          })
-          .catch((e: any) => {
-            const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
-            tickLog(emsg)
-            toast('error', 'starfleet-dispatch', emsg, 8000)
-          })
-        return true
-      }
-      case 'quit': {
-        const src = `[command quit from=${msg.from}]`
-        tickLog(`${src}: shutting down`)
-        toast('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
-        bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
-        setTimeout(() => process.exit(0), 500)
-        return true
-      }
-      case 'reset': {
-        const src = `[command reset from=${msg.from}]`
-        tickLog(`${src}: clearing session`)
-        toast('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
-        client.session.clear({ path: { id: sessionID } })
-          .then(() => {
-            tickLog(`${src}: ok`)
-            toast('success', 'starfleet-dispatch', 'Session cleared', 3000)
-            bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
-          })
-          .catch((e: any) => {
-            const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
-            tickLog(emsg)
-            toast('error', 'starfleet-dispatch', emsg, 8000)
-          })
-        return true
-      }
-      case 'status': {
-        const src = `[command status from=${msg.from}]`
-        tickLog(`${src}: reporting status`)
-        bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
-        toast('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
-        return true
-      }
-      default: {
-        tickLog(`unknown command from=${msg.from}: ${verb}`)
-        return true
+    // --- commands: execute locally, never inject ---
+    case 'command': {
+      const verb = text.split(/\s+/)[0].toLowerCase()
+      const args = text.slice(verb.length).trim()
+
+      switch (verb) {
+        case 'model': {
+          if (!args) { tickLog(`command model from=${msg.from}: missing model name`); return true }
+          const src = `[command model from=${msg.from}]`
+          tickLog(`${src}: switching to ${args}`)
+          toast('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${args}`, 5000)
+          client.session.switchModel({ path: { id: sessionID }, body: { model: args } })
+            .then(() => {
+              tickLog(`${src}: ok → ${args}`)
+              toast('success', 'starfleet-dispatch', `Model switched to ${args}`, 5000)
+              bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+            })
+            .catch((e: any) => {
+              const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+              tickLog(emsg)
+              toast('error', 'starfleet-dispatch', emsg, 8000)
+            })
+          return true
+        }
+        case 'quit': {
+          const src = `[command quit from=${msg.from}]`
+          tickLog(`${src}: shutting down`)
+          toast('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
+          bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
+          setTimeout(() => process.exit(0), 500)
+          return true
+        }
+        case 'reset': {
+          const src = `[command reset from=${msg.from}]`
+          tickLog(`${src}: clearing session`)
+          toast('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
+          client.session.clear({ path: { id: sessionID } })
+            .then(() => {
+              tickLog(`${src}: ok`)
+              toast('success', 'starfleet-dispatch', 'Session cleared', 3000)
+              bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+            })
+            .catch((e: any) => {
+              const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+              tickLog(emsg)
+              toast('error', 'starfleet-dispatch', emsg, 8000)
+            })
+          return true
+        }
+        case 'status': {
+          const src = `[command status from=${msg.from}]`
+          tickLog(`${src}: reporting status`)
+          bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
+          toast('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
+          return true
+        }
+        default: {
+          tickLog(`unknown command from=${msg.from}: ${verb}`)
+          return true
+        }
       }
     }
-  }
 
-  // Directives (type=ship/user/control): inject as system prompt
-  return false
+    // --- unknown type: log and don't inject ---
+    default: {
+      tickLog(`unknown message type=${msg.type} from=${msg.from}`)
+      return true
+    }
+  }
 }
 
 // Execute a policy action returned by starfleetctl error-handle.
