@@ -161,7 +161,12 @@ func globSortedFiles(dir, prefix, ext string) []string {
 func (b *Bus) AllStatusRecords() []StatusRecord {
 	var out []StatusRecord
 	for _, agent := range globSortedFiles(b.StatusDir, "", ".json") {
-		if r, ok := parseStatusFile(filepath.Join(b.StatusDir, agent+".json")); ok {
+		path := filepath.Join(b.StatusDir, agent+".json")
+		if r, ok := parseStatusFile(path); ok {
+			// If Agent field is empty, use the filename (without .json)
+			if r.Agent == "" {
+				r.Agent = agent
+			}
 			out = append(out, r)
 		}
 	}
