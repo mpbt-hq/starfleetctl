@@ -13,6 +13,65 @@ starfleetctl agent-bus <command> [args...]
 Each agent session ("ship") writes a heartbeat file and reads messages from a shared
 state directory underneath `.starfleet-ai/var/...`.
 
+## Message Format
+
+Messages are JSON files stored in `msgs/<target>/unseen/`:
+
+```json
+{
+  "id": "msg-abc123",
+  "epoch": 1753190400,
+  "iso": "2026-07-21T12:00:00Z",
+  "from": "Enterprise",
+  "target": "Voyager",
+  "text": "model gpt-4o",
+  "type": "command"
+}
+```
+
+**Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Unique message ID (`msg-<random>`) |
+| `epoch` | yes | Unix timestamp |
+| `iso` | yes | ISO 8601 timestamp |
+| `from` | yes | Sender ship ID |
+| `target` | yes | Recipient ship ID or `all` for broadcast |
+| `text` | yes | Message body |
+| `type` | yes | Message type (see below) |
+| `reply_to` | no | ID of message being replied to |
+| `attach` | no | Attachment filename if present |
+
+**Message types (`type` field):**
+
+| Type | Plugin behavior | CLI command |
+|------|-----------------|-------------|
+| `ship` | Injected as system prompt (directive) | `tell`, `broadcast` |
+| `user` | Injected as system prompt (directive) | `tell`, `broadcast` |
+| `control` | Injected as system prompt (directive) | `tell`, `broadcast` |
+| `command` | Executed locally by plugin, NOT injected | `cmd` |
+
+**Commands** (`type=command`) — executed by opencode plugin's `handleMessage()`:
+
+| Verb | Args | Effect |
+|------|------|--------|
+| `model` | `<model-name>` | Switch session model (e.g. `model gpt-4o`) |
+| `quit` | — | Gracefully shut down the session |
+| `reset` | — | Clear session conversation |
+| `status` | — | Report status back to sender |
+
+```sh
+# Commands (executed, not injected as text)
+starfleetctl agent-bus cmd Voyager model gpt-4o
+starfleetctl agent-bus cmd Voyager quit
+starfleetctl agent-bus cmd Voyager reset
+
+# Directives (injected as system prompt)
+starfleetctl agent-bus tell Voyager "run tests"
+starfleetctl agent-bus broadcast "roll call"
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -116,4 +175,4 @@ starfleetctl agent-bus prune
 
 ## Interoperability
 
-Reads/writes the same TSV format as the bash original (`scripts/agent-bus`). Go and bash sessions can operate on the same bus concurrently.
+Reads/writes JSON message format. Go and bash sessions can operate on the same bus concurrently.

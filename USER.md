@@ -68,16 +68,52 @@ Each AI agent session = one **ship** with a unique name:
 
 File-based pub/sub system in `.starfleet-ai/var/agent-bus/`:
 
-- **Heartbeats** — each ship writes `status/<ship>.tsv` every few seconds
-- **Directives** — messages as `msgs/m####.tsv` (unique IDs: m0001, m0002…)
-- **Acknowledgments** — `acks/m####.<ship>` marks message processed
+- **Heartbeats** — each ship writes `status/<ship>.json` every few seconds
+- **Messages** — JSON files in `msgs/<target>/unseen/` (auto-moved to `seen/` on ack)
+- **Acknowledgments** — messages move from `unseen/` to `seen/<ship>/` on ack
 - **Locking** — all writes go through `flock(2)` on `.lock` (bash & Go interoperable)
 
+#### Message Format
+
+Messages are JSON files:
+
+```json
+{
+  "id": "msg-abc123",
+  "epoch": 1753190400,
+  "iso": "2026-07-21T12:00:00Z",
+  "from": "Enterprise",
+  "target": "Voyager",
+  "text": "model gpt-4o",
+  "type": "command"
+}
+```
+
 **Message types:**
-- `tell` — direct message to one ship
-- `broadcast` — to all ships
-- `ask` — blocking question to control agent
-- `reply` — answer to an `ask`
+
+| Type | Behavior | CLI |
+|------|----------|-----|
+| `ship` / `user` / `control` | Injected as system prompt (directive) | `tell`, `broadcast` |
+| `command` | Executed by plugin, NOT injected | `cmd` |
+
+**Commands** (`type=command`) — executed by opencode plugin:
+
+| Verb | Args | Effect |
+|------|------|--------|
+| `model` | `<model-name>` | Switch session model |
+| `quit` | — | Shut down session |
+| `reset` | — | Clear conversation |
+| `status` | — | Report status to sender |
+
+```sh
+# Commands (executed, not injected)
+starfleetctl agent-bus cmd Voyager model gpt-4o
+starfleetctl agent-bus cmd Voyager quit
+
+# Directives (injected as system prompt)
+starfleetctl agent-bus tell Voyager "run tests"
+starfleetctl agent-bus broadcast "roll call"
+```
 
 ### PR Claims — Advisory Branch Locking
 
@@ -413,9 +449,12 @@ workspace/
 │   │   ├── agent-bus/
 │   │   │   ├── .lock            # flock domain
 │   │   │   ├── .seq             # message counter
-│   │   │   ├── status/          # heartbeats (Enterprise.tsv, Voyager.tsv)
-│   │   │   ├── msgs/            # directives (m0001.tsv, ...)
-│   │   │   ├── acks/            # acknowledgments
+│   │   │   ├── status/          # heartbeats (Enterprise.json, Voyager.json)
+│   │   │   ├── msgs/            # messages by target
+│   │   │   │   ├── Enterprise/unseen/  # incoming for Enterprise
+│   │   │   │   ├── Enterprise/seen/    # acked by Enterprise
+│   │   │   │   ├── Voyager/unseen/
+│   │   │   │   └── all/unseen/         # broadcast inbox
 │   │   │   ├── attachments/     # large payloads
 │   │   │   └── events.log       # audit trail
 │   │   └── agent-claims/        # PR claims (pr-3162.tsv, ...)
