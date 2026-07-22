@@ -251,8 +251,8 @@ export const plugin = async ({ client, $ }: any) => {
   // fleet can see and react to transient model-API faults.
   let lastRetryDetail = ''
   let retryCooldownUntil = 0
-  const RETRY_POLL_MS = 15000
-  const RETRY_COOLDOWN_MS = 5 * 60 * 1000
+  const RETRY_POLL_MS = 5000
+  const RETRY_COOLDOWN_MS = 30 * 1000
 
   const pollRetryStatus = async () => {
     tickLog(`retry-poll tick sid=${currentSessionID || '(empty)'}`)
@@ -298,11 +298,11 @@ export const plugin = async ({ client, $ }: any) => {
   const retryPollTimer = setInterval(pollRetryStatus, RETRY_POLL_MS)
 
   // Log-monitoring: detect stream errors (e.g. ResourceExhausted) that opencode
-  // doesn't surface via session.error or retry status. Runs every 30s.
+  // doesn't surface via session.error or retry status. Runs every 10s.
   // Cooldown prevents retry storms when the rate limit is still saturated.
   let logMonitorCooldownUntil = 0
-  const LOG_POLL_MS = 30000
-  const LOG_COOLDOWN_MS = 2 * 60 * 1000
+  const LOG_POLL_MS = 10000
+  const LOG_COOLDOWN_MS = 30 * 1000
   const logPollTimer = setInterval(async () => {
     if (!currentSessionID) return
     if (Date.now() < logMonitorCooldownUntil) return
