@@ -29,7 +29,7 @@ starfleetctl is deployed into a workspace via the **genesis → bootstrap** two-
    allowlist entries, agent fragments, and opencode plugins/scripts.
 
 2. **Phase B (bootstrap):** The committed `starfleet-bootstrap` script clones or pulls the
-   starfleetctl source repo, builds it with `go build`, symlinks the binary to
+   starfleetctl source repo, builds it with `make build`, symlinks the binary to
    `.starfleet-ai/bin/starfleetctl`, and re-runs `bootstrap --fix`:
    ```
    ./starfleet-bootstrap
@@ -60,18 +60,12 @@ scripts with no shared-state risk are still bash-only there.
 
 ## Build
 
-Plain Go, stdlib only (no third-party dependencies):
+Plain Go, stdlib only (no third-party dependencies). **Always build via `make`**:
 
 ```sh
 make build      # -> ./starfleetctl
 make test       # go test ./...
 make fmt vet    # go fmt / go vet
-```
-
-or directly:
-
-```sh
-go build -o starfleetctl ./cmd/starfleetctl
 ```
 
 Inside `mpbt-workspace`, starfleetctl is deployed under `.starfleet-ai/` by the

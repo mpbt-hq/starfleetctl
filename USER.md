@@ -30,6 +30,7 @@ make build              # produces ./starfleetctl binary
 ```
 
 **Requirements:** Go 1.21+ (stdlib only, no external dependencies).
+**Build is always via `make` — `go build` and `go install` are not supported.**
 
 ### Option B: Use the Bootstrap Script (Workspace Setup)
 
@@ -41,13 +42,6 @@ cd /path/to/your/workspace
 ```
 
 This is **idempotent** — safe to run repeatedly for updates.
-
-### Option C: `go install` (Global Install)
-
-```sh
-go install github.com/metux/starfleetctl@latest
-# Ensure ~/go/bin is in your PATH
-```
 
 ---
 
