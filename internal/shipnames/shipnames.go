@@ -21,21 +21,43 @@ import (
 
 const Flagship = "Enterprise"
 
+// defaultNames is the compiled-in ship-name pool. Order matters: AssignName
+// picks the first unused name, so more "important" ships come first.
+// Users can override or extend this list via .starfleet-ai/conf/ship-names.yaml.
+var defaultNames = []string{
+	// Federation
+	"Defiant", "Voyager", "Discovery", "Excelsior", "Reliant",
+	"Hood", "Potemkin", "Endeavour", "Farragut", "Constellation",
+	"Intrepid", "Pegasus", "Sutherland", "Agamemnon", "Saratoga",
+	"Lexington", "Yamato", "Phoenix", "Prometheus", "Titan",
+	"Thunderchild", "Odyssey", "Pasteur", "Bozeman", "Stargazer",
+	"Hathaway", "Trieste", "Grissom", "Tsiolkovsky",
+	// Klingon
+	"Rotarran", "Bortas", "Negh-Var", "Klothos", "Gr-oth",
+	"Pagh", "Orantho", "Toh-Kaht", "Maht-Ha", "Hegh-ta",
+	// Romulan
+	"Valdore", "Decius", "Haakona", "Devoras", "T-Met",
+	// Cardassian
+	"Groumall", "Trager", "Prakesh",
+	// Bajoran / Maquis
+	"Jas-Tor", "Val-Jean",
+}
+
 // Registry holds one invocation's resolved locations.
 type Registry struct {
 	Root      string
-	NamesFile string // <root>/.starfleet-ai/etc/ship-names.txt
 	ShipsDir  string
 	StatusDir string
+	ConfDir   string // <root>/.starfleet-ai/conf/
 }
 
 func New(root string) *Registry {
 	busDir := config.BusDir(root)
 	return &Registry{
 		Root:      root,
-		NamesFile: filepath.Join(root, ".starfleet-ai", "etc", "ship-names.txt"),
 		ShipsDir:  filepath.Join(busDir, "ships"),
 		StatusDir: filepath.Join(busDir, "status"),
+		ConfDir:   filepath.Join(root, ".starfleet-ai", "conf"),
 	}
 }
 
@@ -47,22 +69,100 @@ func (r *Registry) shipFile(name string) (string, error) {
 	return filepath.Join(r.ShipsDir, safe), nil
 }
 
-// readNames returns the candidate ship names from NamesFile, in file order,
-// skipping blank lines, '#' comments, and the flagship name — mirrors the
-// bash `while IFS= read -r name || [ -n "$name" ]; case ... esac` loop.
+// readNames returns the candidate ship names: the compiled-in defaults,
+// optionally overridden by .starfleet-ai/conf/ship-names.yaml.
+// YAML format: a plain list of names (one per line) or a map with a "names" key.
+// The flagship name ("Enterprise") is always excluded from the pool.
 func (r *Registry) readNames() ([]string, error) {
-	data, err := os.ReadFile(r.NamesFile)
+	names, err := r.readNamesYAML()
 	if err != nil {
+		// YAML unreadable or missing — fall back to compiled-in defaults
+		names = make([]string, len(defaultNames))
+		copy(names, defaultNames)
+	}
+	// Filter out the flagship
+	var out []string
+	for _, n := range names {
+		if n != "" && n != Flagship {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// readNamesYAML tries to load .starfleet-ai/conf/ship-names.yaml.
+// Returns nil, nil if the file doesn't exist.
+func (r *Registry) readNamesYAML() ([]string, error) {
+	path := filepath.Join(r.ConfDir, "ship-names.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
+	return parseShipNamesYAML(data)
+}
+
+// parseShipNamesYAML parses a simple YAML list of ship names.
+// Supports two formats:
+//   - Plain list (one name per line, possibly with "- " prefix)
+//   - Map with "names:" key containing the list
+func parseShipNamesYAML(data []byte) ([]string, error) {
 	var names []string
-	for _, line := range splitLines(string(data)) {
-		if line == "" || line[0] == '#' || line == Flagship {
+	lines := splitLines(string(data))
+	inNamesBlock := false
+	for _, line := range lines {
+		trimmed := trimSpace(line)
+		if trimmed == "" || trimmed[0] == '#' {
 			continue
 		}
-		names = append(names, line)
+		// Check for "names:" block start
+		if trimmed == "names:" || trimmed == "names :" {
+			inNamesBlock = true
+			continue
+		}
+		// If in a names block, collect indented lines
+		if inNamesBlock {
+			if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+				name := parseYAMLListItem(trimmed)
+				if name != "" {
+					names = append(names, name)
+				}
+				continue
+			}
+			// Non-indented line ends the block
+			inNamesBlock = false
+		}
+		// Plain list item: "- Name" or just "Name"
+		name := parseYAMLListItem(trimmed)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("ship-names.yaml: no names found")
 	}
 	return names, nil
+}
+
+func parseYAMLListItem(s string) string {
+	// Strip "- " prefix
+	if len(s) >= 2 && s[0] == '-' && s[1] == ' ' {
+		s = s[2:]
+	}
+	return trimSpace(s)
+}
+
+func trimSpace(s string) string {
+	start, end := 0, len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
+		end--
+	}
+	return s[start:end]
 }
 
 func splitLines(s string) []string {

@@ -14,11 +14,10 @@ const usage = `starfleetctl genesis-init [dir]
 Bootstraps a workspace that has NOTHING fleet-related yet — no CLAUDE.md, no
 .starfleet-ai/, no scripts/ — from just this one already-built starfleetctl
 binary. Writes the small set of project-independent files that bootstrap
-starfleetctl itself (starfleet-bootstrap, .starfleet-ai/etc/ship-names.txt),
-skipping any that already exist, then runs the same checks as 'bootstrap --fix'
-(CLAUDE.md + agents.d/index.md, DASHBOARD.md, fleet directory tree,
-.claude/settings.json allowlist entries, the starfleetctl self-fragment,
-opencode plugins & scripts).
+starfleetctl itself (starfleet-bootstrap), skipping any that already exist,
+then runs the same checks as 'bootstrap --fix' (CLAUDE.md + agents.d/index.md,
+DASHBOARD.md, fleet directory tree, .claude/settings.json allowlist entries,
+the starfleetctl self-fragment, opencode plugins & scripts).
 
 dir defaults to the current directory. Deliberately does NOT use the normal
 CLAUDE.md+scripts/ workspace-root discovery — that's exactly what doesn't

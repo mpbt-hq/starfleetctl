@@ -33,7 +33,7 @@ func (r *Registry) DoAssignFlagship() error {
 }
 
 // DoAssign implements `ship-names assign`: atomically pick the first unused
-// name from NamesFile, falling back to "ws-<pid>" if all are taken.
+// name from the pool, falling back to "ws-<pid>" if all are taken.
 func (r *Registry) DoAssign() error {
 	name, err := r.AssignName()
 	if err != nil {
@@ -43,7 +43,7 @@ func (r *Registry) DoAssign() error {
 	return nil
 }
 
-// AssignName picks the first unused name from NamesFile, falling back to
+// AssignName picks the first unused name from the pool, falling back to
 // "ws-<pid>" if all are taken.  Returns the name (not printed), for use
 // from the session package.
 func (r *Registry) AssignName() (string, error) {
