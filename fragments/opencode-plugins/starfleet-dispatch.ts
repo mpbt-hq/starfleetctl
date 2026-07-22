@@ -81,74 +81,79 @@ function toast(variant: string, title: string, message: string, duration = 2500)
   } catch { /* tui not ready / unavailable */ }
 }
 
-// Parse and handle special fleet directives from agent-bus.
-// Returns true if the directive was handled (should NOT be injected as system prompt).
-function handleDirective(
-  msg: { id: string; from: string; text: string },
+// Parse and handle fleet messages by type.
+// Returns true if the message was handled (should NOT be injected as system prompt).
+function handleMessage(
+  msg: { id: string; from: string; text: string; type?: string },
   client: any, sessionID: string,
 ): boolean {
+  const type = msg.type || 'ship'
   const text = msg.text.trim()
 
-  // model <model> — switch the session's model (from another ship or web frontend)
-  const setModelMatch = text.match(/^model\s+(\S+)/i)
-  if (setModelMatch) {
-    const targetModel = setModelMatch[1]
-    const src = `[directive model from=${msg.from}]`
-    tickLog(`${src}: switching to ${targetModel}`)
-    toast('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${targetModel}`, 5000)
-    client.session.switchModel({ path: { id: sessionID }, body: { model: targetModel } })
-      .then(() => {
-        tickLog(`${src}: ok → ${targetModel}`)
-        toast('success', 'starfleet-dispatch', `Model switched to ${targetModel}`, 5000)
-        bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
-      })
-      .catch((e: any) => {
-        const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
-        tickLog(emsg)
-        toast('error', 'starfleet-dispatch', emsg, 8000)
-      })
-    return true
+  // Commands (type=command): text is the verb, optionally with args
+  if (type === 'command') {
+    const verb = text.split(/\s+/)[0].toLowerCase()
+    const args = text.slice(verb.length).trim()
+
+    switch (verb) {
+      case 'model': {
+        if (!args) { tickLog(`command model from=${msg.from}: missing model name`); return true }
+        const src = `[command model from=${msg.from}]`
+        tickLog(`${src}: switching to ${args}`)
+        toast('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${args}`, 5000)
+        client.session.switchModel({ path: { id: sessionID }, body: { model: args } })
+          .then(() => {
+            tickLog(`${src}: ok → ${args}`)
+            toast('success', 'starfleet-dispatch', `Model switched to ${args}`, 5000)
+            bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+          })
+          .catch((e: any) => {
+            const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+            tickLog(emsg)
+            toast('error', 'starfleet-dispatch', emsg, 8000)
+          })
+        return true
+      }
+      case 'quit': {
+        const src = `[command quit from=${msg.from}]`
+        tickLog(`${src}: shutting down`)
+        toast('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
+        bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
+        setTimeout(() => process.exit(0), 500)
+        return true
+      }
+      case 'reset': {
+        const src = `[command reset from=${msg.from}]`
+        tickLog(`${src}: clearing session`)
+        toast('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
+        client.session.clear({ path: { id: sessionID } })
+          .then(() => {
+            tickLog(`${src}: ok`)
+            toast('success', 'starfleet-dispatch', 'Session cleared', 3000)
+            bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+          })
+          .catch((e: any) => {
+            const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+            tickLog(emsg)
+            toast('error', 'starfleet-dispatch', emsg, 8000)
+          })
+        return true
+      }
+      case 'status': {
+        const src = `[command status from=${msg.from}]`
+        tickLog(`${src}: reporting status`)
+        bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
+        toast('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
+        return true
+      }
+      default: {
+        tickLog(`unknown command from=${msg.from}: ${verb}`)
+        return true
+      }
+    }
   }
 
-  // quit — gracefully shut down the session
-  if (/^quit$/i.test(text)) {
-    const src = `[directive quit from=${msg.from}]`
-    tickLog(`${src}: shutting down`)
-    toast('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
-    bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
-    // Give the status write a moment to flush, then exit
-    setTimeout(() => process.exit(0), 500)
-    return true
-  }
-
-  // reset — clear the session conversation
-  if (/^reset$/i.test(text)) {
-    const src = `[directive reset from=${msg.from}]`
-    tickLog(`${src}: clearing session`)
-    toast('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
-    client.session.clear({ path: { id: sessionID } })
-      .then(() => {
-        tickLog(`${src}: ok`)
-        toast('success', 'starfleet-dispatch', 'Session cleared', 3000)
-        bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
-      })
-      .catch((e: any) => {
-        const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
-        tickLog(emsg)
-        toast('error', 'starfleet-dispatch', emsg, 8000)
-      })
-    return true
-  }
-
-  // status — report status back as a tell
-  if (/^status$/i.test(text)) {
-    const src = `[directive status from=${msg.from}]`
-    tickLog(`${src}: reporting status`)
-    bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
-    toast('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
-    return true
-  }
-
+  // Directives (type=ship/user/control): inject as system prompt
   return false
 }
 
@@ -331,32 +336,21 @@ export const plugin = async ({ client, $ }: any) => {
     const r = bus({ cmd: 'inbox' })
     const msgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
     if (msgs.length === 0) return
-    const commandMsgs: any[] = []
-    const directiveMsgs: any[] = []
+    const injectable: any[] = []
     for (const msg of msgs) {
       submitted.add(msg.id)
       client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from=${msg.from} type=${msg.type || 'ship'}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
-      // Commands (type=command) are handled by handleDirective and NOT injected as system prompts
-      if (msg.type === 'command') {
-        commandMsgs.push(msg)
-        if (handleDirective(msg, client, currentSessionID)) continue
-        // Unknown command — log but don't inject
-        tickLog(`unknown command from ${msg.from}: ${msg.text}`)
-        continue
-      }
-      // Regular directives (type=ship/user/control) — show toast and inject
-      directiveMsgs.push(msg)
-      client.tui.showToast({ body: { title: `[fleet] ${msg.id} von ${msg.from}`, message: msg.text, variant: 'info', duration: 10000 } }).catch(() => {})
-      // Handle special directives (setModel, etc.) — skip system prompt injection.
-      if (handleDirective(msg, client, currentSessionID)) continue
+      // handleMessage: type=command → execute, type=ship/user/control → false (inject)
+      if (handleMessage(msg, client, currentSessionID)) continue
+      injectable.push(msg)
     }
-    // Only inject non-command messages as system prompts
-    if (directiveMsgs.length > 0) {
+    // Inject remaining directives as system prompts
+    if (injectable.length > 0) {
       try {
         await client.session.promptAsync({
           path: { id: currentSessionID },
           body: {
-            parts: [{ type: 'text', text: `(Fleet directive${directiveMsgs.length > 1 ? 's' : ''} received)`, synthetic: true }],
+            parts: [{ type: 'text', text: `(Fleet directive${injectable.length > 1 ? 's' : ''} received)`, synthetic: true }],
           },
         })
       } catch { /* ignore */ }
@@ -413,13 +407,8 @@ export const plugin = async ({ client, $ }: any) => {
         if (submitted.has(msg.id)) continue
         bus({ cmd: 'seen_mark', id: msg.id })
         submitted.add(msg.id)
-        // Commands (type=command) are handled in poll(), not injected as system prompts
-        if (msg.type === 'command') {
-          if (currentSessionID) handleDirective(msg, client, currentSessionID)
-          continue
-        }
-        // Handle special directives (setModel, etc.) — skip system prompt injection.
-        if (currentSessionID && handleDirective(msg, client, currentSessionID)) continue
+        // handleMessage: type=command → execute, type=ship/user/control → inject
+        if (currentSessionID && handleMessage(msg, client, currentSessionID)) continue
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
       }
       if (lines.length > 0) {
