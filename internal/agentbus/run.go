@@ -119,6 +119,8 @@ func Run(root string, args []string) int {
 	case "broadcast", "--all":
 		words, useStdin, attachPath, replyTo := parsePostFlags(args[1:])
 		cmdErr = b.DoPost("all", words, useStdin, attachPath, replyTo, "ship")
+	case "cmd":
+		cmdErr = b.DoCommand(args[1:])
 	case "get":
 		id, out := "", ""
 		for i := 1; i < len(args); i++ {

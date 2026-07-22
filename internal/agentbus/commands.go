@@ -623,6 +623,39 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 	return nil
 }
 
+// Command posts a command directive (type="command") to the target.
+// Commands are structurally different from regular directives: they carry
+// a verb (setModel, /quit, /reset, etc.) and are handled by the plugin's
+// command dispatch, not injected as system prompts.
+func (b *Bus) Command(target, verb, args string) (string, error) {
+	text := verb
+	if args != "" {
+		text = verb + " " + args
+	}
+	return b.post(target, text, "", "cmd", "", "command")
+}
+
+// DoCommand implements `agent-bus cmd <target> <verb> [args...]`.
+func (b *Bus) DoCommand(args []string) error {
+	if len(args) < 2 {
+		return usageErr("agent-bus: cmd needs <target> <verb> [args...]")
+	}
+	target := args[0]
+	verb := args[1]
+	extra := ""
+	if len(args) > 2 {
+		extra = strings.Join(args[2:], " ")
+	}
+	b.warnID()
+	id, err := b.Command(target, verb, extra)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "agent-bus: command %s from '%s' → %s (%s)\n", id, b.ShipID, target, verb)
+	fmt.Printf("%s\n", id)
+	return nil
+}
+
 const defaultController = "control"
 
 // Controller returns the agent ID of the control agent from $AGENT_CONTROLLER

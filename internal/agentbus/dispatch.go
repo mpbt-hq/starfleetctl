@@ -114,6 +114,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchAck(req)
 	case "tell":
 		return b.dispatchTell(req)
+	case "command":
+		return b.dispatchCommand(req)
 	case "seen_mark":
 		return b.dispatchSeenMark(req)
 	case "seen_load":
@@ -240,6 +242,16 @@ func (b *Bus) dispatchTell(req dispatchRequest) dispatchResponse {
 		msgType = "ship"
 	}
 	if err := b.DoPost(req.Target, []string{req.Text}, false, "", req.ReplyTo, msgType); err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
+	return dispatchResponse{OK: true}
+}
+
+func (b *Bus) dispatchCommand(req dispatchRequest) dispatchResponse {
+	if req.Target == "" || req.Text == "" {
+		return dispatchResponse{OK: false, Error: "command: need target and text (verb)"}
+	}
+	if _, err := b.Command(req.Target, req.Text, ""); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
 	return dispatchResponse{OK: true}

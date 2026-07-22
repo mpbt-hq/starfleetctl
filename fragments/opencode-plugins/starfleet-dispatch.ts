@@ -114,6 +114,45 @@ function handleDirective(
     return true
   }
 
+  // /quit or cmd:/quit — gracefully shut down the session
+  if (/^\/quit$/i.test(text) || /^cmd:\/quit$/i.test(text)) {
+    const src = `[directive /quit from=${msg.from}]`
+    tickLog(`${src}: shutting down`)
+    toast('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
+    bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
+    // Give the status write a moment to flush, then exit
+    setTimeout(() => process.exit(0), 500)
+    return true
+  }
+
+  // /reset or cmd:/reset — clear the session conversation
+  if (/^\/reset$/i.test(text) || /^cmd:\/reset$/i.test(text)) {
+    const src = `[directive /reset from=${msg.from}]`
+    tickLog(`${src}: clearing session`)
+    toast('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
+    client.session.clear({ path: { id: sessionID } })
+      .then(() => {
+        tickLog(`${src}: ok`)
+        toast('success', 'starfleet-dispatch', 'Session cleared', 3000)
+        bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+      })
+      .catch((e: any) => {
+        const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+        tickLog(emsg)
+        toast('error', 'starfleet-dispatch', emsg, 8000)
+      })
+    return true
+  }
+
+  // /status or cmd:/status — report status back as a tell
+  if (/^\/status$/i.test(text) || /^cmd:\/status$/i.test(text)) {
+    const src = `[directive /status from=${msg.from}]`
+    tickLog(`${src}: reporting status`)
+    bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
+    toast('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
+    return true
+  }
+
   return false
 }
 
@@ -296,21 +335,36 @@ export const plugin = async ({ client, $ }: any) => {
     const r = bus({ cmd: 'inbox' })
     const msgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
     if (msgs.length === 0) return
+    const commandMsgs: any[] = []
+    const directiveMsgs: any[] = []
     for (const msg of msgs) {
       submitted.add(msg.id)
-      client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from ${msg.from}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
+      client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from=${msg.from} type=${msg.type || 'ship'}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
+      // Commands (type=command) are handled by handleDirective and NOT injected as system prompts
+      if (msg.type === 'command') {
+        commandMsgs.push(msg)
+        if (handleDirective(msg, client, currentSessionID)) continue
+        // Unknown command — log but don't inject
+        tickLog(`unknown command from ${msg.from}: ${msg.text}`)
+        continue
+      }
+      // Regular directives (type=ship/user/control) — show toast and inject
+      directiveMsgs.push(msg)
       client.tui.showToast({ body: { title: `[fleet] ${msg.id} von ${msg.from}`, message: msg.text, variant: 'info', duration: 10000 } }).catch(() => {})
       // Handle special directives (setModel, etc.) — skip system prompt injection.
       if (handleDirective(msg, client, currentSessionID)) continue
     }
-    try {
-      await client.session.promptAsync({
-        path: { id: currentSessionID },
-        body: {
-          parts: [{ type: 'text', text: `(Fleet directive${msgs.length > 1 ? 's' : ''} received)`, synthetic: true }],
-        },
-      })
-    } catch { /* ignore */ }
+    // Only inject non-command messages as system prompts
+    if (directiveMsgs.length > 0) {
+      try {
+        await client.session.promptAsync({
+          path: { id: currentSessionID },
+          body: {
+            parts: [{ type: 'text', text: `(Fleet directive${directiveMsgs.length > 1 ? 's' : ''} received)`, synthetic: true }],
+          },
+        })
+      } catch { /* ignore */ }
+    }
   }
 
   const pollTimer = setInterval(poll, POLL_MS)
@@ -356,13 +410,18 @@ export const plugin = async ({ client, $ }: any) => {
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
-      // Fetch inbox and inject new directives.
+      // Fetch inbox and inject new directives (skip commands — handled in poll).
       const lines: string[] = []
       const r = bus({ cmd: 'inbox' })
       for (const msg of (r.messages || [])) {
         if (submitted.has(msg.id)) continue
         bus({ cmd: 'seen_mark', id: msg.id })
         submitted.add(msg.id)
+        // Commands (type=command) are handled in poll(), not injected as system prompts
+        if (msg.type === 'command') {
+          if (currentSessionID) handleDirective(msg, client, currentSessionID)
+          continue
+        }
         // Handle special directives (setModel, etc.) — skip system prompt injection.
         if (currentSessionID && handleDirective(msg, client, currentSessionID)) continue
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
