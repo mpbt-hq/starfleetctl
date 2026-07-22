@@ -75,8 +75,8 @@ func (r *Registry) shipFile(name string) (string, error) {
 // The flagship name ("Enterprise") is always excluded from the pool.
 func (r *Registry) readNames() ([]string, error) {
 	names, err := r.readNamesYAML()
-	if err != nil {
-		// YAML unreadable or missing — fall back to compiled-in defaults
+	if err != nil || len(names) == 0 {
+		// YAML unreadable, missing, or empty — fall back to compiled-in defaults
 		names = make([]string, len(defaultNames))
 		copy(names, defaultNames)
 	}
