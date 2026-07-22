@@ -70,6 +70,7 @@ type inboxMsg struct {
 	ID   string `json:"id"`
 	From string `json:"from"`
 	Text string `json:"text"`
+	Type string `json:"type,omitempty"`
 }
 
 // DoDispatch implements `agent-bus dispatch --stdin` — the single JSON-RPC
@@ -216,7 +217,7 @@ func (b *Bus) dispatchInbox() dispatchResponse {
 		if b.acked(m.ID, agent) {
 			continue
 		}
-		out = append(out, inboxMsg{ID: m.ID, From: m.From, Text: m.Text})
+		out = append(out, inboxMsg{ID: m.ID, From: m.From, Text: m.Text, Type: m.Type})
 	}
 	return dispatchResponse{OK: true, Messages: orEmptyInbox(out)}
 }
