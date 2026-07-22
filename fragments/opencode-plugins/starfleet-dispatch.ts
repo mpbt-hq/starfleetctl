@@ -30,9 +30,21 @@ function bus(cmd: Record<string, unknown>): any {
 let HEARTBEAT_MS = 0
 let POLL_MS = 0
 let FALLBACK_MODEL = ''
+let RETRY_POLL_MS = 2000
+let RETRY_COOLDOWN_MS = 10000
+let LOG_POLL_MS = 10000
+let LOG_COOLDOWN_MS = 10000
 function loadConfig(): void {
   const r = bus({ cmd: 'config' })
-  if (r.ok) { HEARTBEAT_MS = r.heartbeat_ms; POLL_MS = r.poll_ms; FALLBACK_MODEL = r.fallback_model || '' }
+  if (r.ok) {
+    HEARTBEAT_MS = r.heartbeat_ms
+    POLL_MS = r.poll_ms
+    FALLBACK_MODEL = r.fallback_model || ''
+    RETRY_POLL_MS = r.retry_poll_ms || 2000
+    RETRY_COOLDOWN_MS = r.retry_cooldown_ms || 10000
+    LOG_POLL_MS = r.log_poll_ms || 10000
+    LOG_COOLDOWN_MS = r.log_cooldown_ms || 10000
+  }
 }
 
 // Log-monitoring: detect errors that opencode doesn't surface via session.error
@@ -251,8 +263,6 @@ export const plugin = async ({ client, $ }: any) => {
   // fleet can see and react to transient model-API faults.
   let lastRetryDetail = ''
   let retryCooldownUntil = 0
-  const RETRY_POLL_MS = 2000
-  const RETRY_COOLDOWN_MS = 10 * 1000
 
   const pollRetryStatus = async () => {
     tickLog(`retry-poll tick sid=${currentSessionID || '(empty)'}`)
@@ -298,11 +308,9 @@ export const plugin = async ({ client, $ }: any) => {
   const retryPollTimer = setInterval(pollRetryStatus, RETRY_POLL_MS)
 
   // Log-monitoring: detect stream errors (e.g. ResourceExhausted) that opencode
-  // doesn't surface via session.error or retry status. Runs every 10s.
+  // doesn't surface via session.error or retry status.
   // Cooldown prevents retry storms when the rate limit is still saturated.
   let logMonitorCooldownUntil = 0
-  const LOG_POLL_MS = 10000
-  const LOG_COOLDOWN_MS = 10 * 1000
   const logPollTimer = setInterval(async () => {
     if (!currentSessionID) return
     if (Date.now() < logMonitorCooldownUntil) return

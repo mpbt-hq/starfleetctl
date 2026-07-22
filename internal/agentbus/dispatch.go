@@ -56,9 +56,13 @@ type dispatchResponse struct {
 	Tag      string   `json:"tag,omitempty"`
 
 	// config response
-	HeartbeatMS   int    `json:"heartbeat_ms,omitempty"`
-	PollMS        int    `json:"poll_ms,omitempty"`
-	FallbackModel string `json:"fallback_model,omitempty"`
+	HeartbeatMS       int    `json:"heartbeat_ms,omitempty"`
+	PollMS            int    `json:"poll_ms,omitempty"`
+	FallbackModel     string `json:"fallback_model,omitempty"`
+	RetryPollMS       int    `json:"retry_poll_ms,omitempty"`
+	RetryCooldownMS   int    `json:"retry_cooldown_ms,omitempty"`
+	LogPollMS         int    `json:"log_poll_ms,omitempty"`
+	LogCooldownMS     int    `json:"log_cooldown_ms,omitempty"`
 
 	// error-handle policy response
 	Action       string `json:"action,omitempty"`
@@ -148,10 +152,14 @@ func (b *Bus) dispatchConfig() dispatchResponse {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
 	return dispatchResponse{
-		OK:            true,
-		HeartbeatMS:   cfg.AgentBus.HeartbeatMS,
-		PollMS:        cfg.AgentBus.PollMS,
-		FallbackModel: cfg.AgentBus.FallbackModel,
+		OK:              true,
+		HeartbeatMS:     cfg.AgentBus.HeartbeatMS,
+		PollMS:          cfg.AgentBus.PollMS,
+		FallbackModel:   cfg.AgentBus.FallbackModel,
+		RetryPollMS:     cfg.AgentBus.RetryPollMS,
+		RetryCooldownMS: cfg.AgentBus.RetryCooldownMS,
+		LogPollMS:       cfg.AgentBus.LogPollMS,
+		LogCooldownMS:   cfg.AgentBus.LogCooldownMS,
 	}
 }
 

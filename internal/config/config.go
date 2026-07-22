@@ -34,9 +34,13 @@ type WebConfig struct {
 
 // AgentBusConfig holds agent-bus / opencode plugin tuning knobs.
 type AgentBusConfig struct {
-	HeartbeatMS  int    `yaml:"heartbeat_ms"`
-	PollMS       int    `yaml:"poll_ms"`
-	FallbackModel string `yaml:"fallback_model"`
+	HeartbeatMS       int    `yaml:"heartbeat_ms"`
+	PollMS            int    `yaml:"poll_ms"`
+	FallbackModel     string `yaml:"fallback_model"`
+	RetryPollMS       int    `yaml:"retry_poll_ms"`
+	RetryCooldownMS   int    `yaml:"retry_cooldown_ms"`
+	LogPollMS         int    `yaml:"log_poll_ms"`
+	LogCooldownMS     int    `yaml:"log_cooldown_ms"`
 }
 
 // DefaultConfig returns defaults.
@@ -49,8 +53,12 @@ func DefaultConfig() *Config {
 			LogFile:         ".starfleet-ai/logs/web.log",
 		},
 		AgentBus: AgentBusConfig{
-			HeartbeatMS: 300_000,
-			PollMS:      3_000,
+			HeartbeatMS:     300_000,
+			PollMS:          3_000,
+			RetryPollMS:     2_000,
+			RetryCooldownMS: 10_000,
+			LogPollMS:       10_000,
+			LogCooldownMS:   10_000,
 		},
 	}
 }
