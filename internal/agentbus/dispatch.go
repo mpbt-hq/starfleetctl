@@ -132,6 +132,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchErrorHandle(req)
 	case "clear":
 		return b.dispatchClear()
+	case "tick":
+		return b.dispatchTick(req)
 	case "exit":
 		return b.dispatchExit(req)
 	default:
@@ -422,6 +424,15 @@ func (b *Bus) dispatchClear() dispatchResponse {
 	if err := b.DoClear(); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
+	return dispatchResponse{OK: true}
+}
+
+func (b *Bus) dispatchTick(req dispatchRequest) dispatchResponse {
+	note := req.Note
+	if note == "" {
+		note = "tick"
+	}
+	b.logEvent("tick", note)
 	return dispatchResponse{OK: true}
 }
 

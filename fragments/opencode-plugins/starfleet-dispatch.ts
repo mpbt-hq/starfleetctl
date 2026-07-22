@@ -7,7 +7,6 @@
 // Edit the canonical copy in the starfleetctl repo instead.
 
 import { execSync } from 'node:child_process'
-import { appendFileSync, mkdirSync } from 'node:fs'
 
 const ROOT = process.cwd()
 
@@ -68,13 +67,10 @@ function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
 }
 
-// Reliable, TUI-independent tick log: appends a line per poll so the operator
-// can `tail -f` it (client.app.log only lands in opencode.log; client.tui.toast
-// is unreliable in background/detached ship mode).
-const TICK_DIR = ROOT + '/.starfleet-ai/var/agent-bus/poll'
-mkdirSync(TICK_DIR, { recursive: true })
+// Reliable, TUI-independent tick log: sends to starfleetctl agent-bus dispatch
+// so logs are centralized in the events file (can `starfleetctl events` to view).
 function tickLog(line: string): void {
-  try { appendFileSync(TICK_DIR + '/' + aid() + '.tick', new Date().toISOString() + ' ' + line + '\n') } catch { /* ignore */ }
+  try { bus({ cmd: 'tick', note: line }) } catch { /* ignore */ }
 }
 
 // Visible TUI toast (best-effort; may be a no-op in detached mode).
