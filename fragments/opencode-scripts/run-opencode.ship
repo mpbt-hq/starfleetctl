@@ -31,4 +31,4 @@ ARGS=()
 if [ -n "$NAME" ]; then
     ARGS+=(--name "$NAME")
 fi
-exec "$SCRIPT_DIR/starfleetctl" run --client opencode "${ARGS[@]}" "${EXTRA[@]+"${EXTRA[@]}"}"
+exec "$SCRIPT_DIR/starfleetctl" run --client opencode --exec "${ARGS[@]}" "${EXTRA[@]+"${EXTRA[@]}"}"

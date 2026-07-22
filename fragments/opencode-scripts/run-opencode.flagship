@@ -8,4 +8,4 @@
 # Do NOT hand-edit this file — edit the canonical copy in the starfleetctl repo.
 
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
-exec "$SCRIPT_DIR/starfleetctl" run --client opencode --flagship "$@"
+exec "$SCRIPT_DIR/starfleetctl" run --client opencode --flagship --exec "$@"
