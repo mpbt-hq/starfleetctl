@@ -34,7 +34,7 @@ type LaunchVars struct {
 }
 
 // runLaunch implements `session run <release> [flags...] [-- <args...>]`.
-// By default it launches a detached termctl terminal (replacing tmux); pass --print
+// By default it launches a detached termctl terminal; pass --print
 // to emit shell-evaluable launch variables instead (legacy mode).
 func runLaunch(root string, args []string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {

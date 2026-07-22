@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package session manages session lifecycle (attach, list, run, autoscale)
-// for the fleet — using termctl for terminal management instead of tmux.
+// for the fleet — using termctl for terminal management.
 package session
 
 import (

@@ -28,21 +28,6 @@ func providerFromModel(model string) string {
 
 const sessPrefix = "mpbt-"
 
-// tmuxSafe sanitizes a string to tmux-safe characters (same as bash's
-// tr -c 'A-Za-z0-9_-' '_'). Kept for backward compatibility in name generation.
-func tmuxSafe(s string) string {
-	b := make([]byte, len(s))
-	for i, c := range []byte(s) {
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-			(c >= '0' && c <= '9') || c == '_' || c == '-' {
-			b[i] = c
-		} else {
-			b[i] = '_'
-		}
-	}
-	return string(b)
-}
-
 // ResolveID resolves an agent ID / handle / unique substring to the concrete
 // termctl pipe path. Returns empty string on failure.
 func ResolveID(root, arg string) string {
