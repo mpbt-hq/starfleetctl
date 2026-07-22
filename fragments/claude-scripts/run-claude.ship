@@ -19,10 +19,9 @@
 #   ./run-claude [--release <rel>] [--name <id>] [-- <claude args>]
 #
 #   --release <rel>   source that project's cf/<rel>/config.sh (exports
-#                      XLIBRE_RELEASE) before starting claude. <rel> accepts
-#                      the same short/full forms as run-opencode.* (e.g.
-#                      "master", "25.2", "xserver-25.2") as well as the
-#                      non-xserver solutions ("flyingtux", "go-x11proto").
+#                      PROJECT_RELEASE) before starting claude. <rel> accepts
+#                      short/full forms (e.g. "master", "1.0", "myproject-1.0")
+#                      for any solution defined in project.yaml.
 #   --name <id>       override STARFLEET_SHIP_ID (default: next free ship name from
 #                      scripts/ship-names, falling back to "<rel>-$$"/"ws-$$"
 #                      if the registry has none free)
@@ -62,17 +61,17 @@ get_solution_config() {
 
 get_solution_prefix() {
     if [ -f "$PROJECT_CONFIG" ] && command -v yq >/dev/null 2>&1; then
-        yq eval '.solutions."master".release_prefix // .solutions."xserver-25.2".release_prefix // "xserver-"' "$PROJECT_CONFIG" 2>/dev/null || echo "xserver-"
+        yq eval '.solutions."master".release_prefix' "$PROJECT_CONFIG" 2>/dev/null || echo ""
     else
-        echo "xserver-"
+        echo ""
     fi
 }
 
 get_solution_env_var() {
     if [ -f "$PROJECT_CONFIG" ] && command -v yq >/dev/null 2>&1; then
-        yq eval '.solutions."master".env_var // .solutions."xserver-25.2".env_var // "XLIBRE_RELEASE"' "$PROJECT_CONFIG" 2>/dev/null || echo "XLIBRE_RELEASE"
+        yq eval '.solutions."master".env_var // "PROJECT_RELEASE"' "$PROJECT_CONFIG" 2>/dev/null || echo "PROJECT_RELEASE"
     else
-        echo "XLIBRE_RELEASE"
+        echo "PROJECT_RELEASE"
     fi
 }
 
@@ -93,7 +92,7 @@ if [ -n "$RELEASE" ]; then
     ENV_VAR=$(get_solution_env_var)
     export "$ENV_VAR"
 else
-    unset XLIBRE_RELEASE 2>/dev/null || true
+    unset PROJECT_RELEASE 2>/dev/null || true
 fi
 
 if [ -z "$NAME" ]; then

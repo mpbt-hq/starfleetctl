@@ -57,7 +57,7 @@ type SolutionConfig struct {
 	// ReleasePrefix is the prefix for release names (e.g., "xserver-")
 	ReleasePrefix string `yaml:"release_prefix"`
 
-	// EnvVar is the environment variable that holds the release (e.g., "XLIBRE_RELEASE")
+	// EnvVar is the environment variable that holds the release (e.g., "MY_PROJECT_RELEASE")
 	EnvVar string `yaml:"env_var"`
 }
 

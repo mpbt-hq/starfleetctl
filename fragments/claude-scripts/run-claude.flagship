@@ -28,7 +28,6 @@ while [ "$#" -gt 0 ]; do
 done
 
 export STARFLEET_SHIP_ID="Enterprise"
-unset XLIBRE_RELEASE 2>/dev/null || true
 
 INSTRUCTIONS_FILE=".starfleet-ai/agents.d/index.md"
 SYSTEM_PROMPT=""

@@ -159,7 +159,6 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 	defer stop()
 
 	os.Unsetenv("STARFLEET_SHIP_ID") // confirm no ambient identity leaks through
-	os.Unsetenv("XLIBRE_RELEASE")
 
 	const n = 15
 	var wg sync.WaitGroup
