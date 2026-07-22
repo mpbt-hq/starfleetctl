@@ -145,6 +145,6 @@ func (c *Claims) logEvent(kind, note string) {
 
 func (c *Claims) warnID() {
 	if !c.ShipIDSet {
-		fmt.Fprintf(os.Stderr, "pr-claim: note: STARFLEET_SHIP_ID (or AGENT_ID) not set; using '%s' — set a unique STARFLEET_SHIP_ID per agent.\n", c.ShipID)
+		fmt.Fprintf(os.Stderr, "pr-claim: note: STARFLEET_SHIP_ID not set; using '%s' — set a unique STARFLEET_SHIP_ID per agent.\n", c.ShipID)
 	}
 }

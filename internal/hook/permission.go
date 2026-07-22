@@ -31,7 +31,7 @@ import (
 func permission(root string) int {
 	shipID := identity.ShipID()
 	if shipID == "" {
-		emitPermission("ask", "STARFLEET_SHIP_ID (or AGENT_ID) not set — cannot route to control agent")
+		emitPermission("ask", "STARFLEET_SHIP_ID not set — cannot route to control agent")
 		return 0
 	}
 

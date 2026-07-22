@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package identity resolves the calling agent's fleet identity.
-// Env var is STARFLEET_SHIP_ID (AGENT_ID no longer supported).
+// Env var is STARFLEET_SHIP_ID.
 package identity
 
 import "os"

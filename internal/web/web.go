@@ -51,7 +51,7 @@ func New(root, addr string) (*Server, error) {
 	// config file (web.ship_id / web.ship_handle) or the STARFLEET_WEB_SHIP_ID
 	// env override, independent of the process environment the server was
 	// launched from. Without this, the frontend would appear on the bus under
-	// whatever STARFLEET_SHIP_ID / AGENT_ID the launching shell happened to
+	// whatever STARFLEET_SHIP_ID the launching shell happened to
 	// export (or user@host), which is why it could show the wrong ship name.
 	if cfg, cerr := config.Load(root); cerr == nil {
 		shipID := os.Getenv("STARFLEET_WEB_SHIP_ID")
