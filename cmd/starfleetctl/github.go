@@ -223,11 +223,11 @@ Verbs:
   set-body          set PR body text
   append-body       append text to PR body
   amend-push        amend and force-push a PR branch
-  checkout          checkout a PR into an agent clone (needs workspace)
+  checkout          checkout a PR into a ship clone (needs workspace)
   claim             claim/unclaim a PR (needs workspace)
   show-branch-file  show a file from a branch
   show-conflict     show merge conflict details for a PR
-  mk-agent-clone    create an isolated agent worktree clone (needs workspace)
+  mk-agent-clone    create an isolated ship worktree clone (needs workspace)
   make              create a PR with commit-message conventions (formerly xx-make-pr)
 
 Run 'starfleetctl github pr <verb> --help' for verb-specific help.

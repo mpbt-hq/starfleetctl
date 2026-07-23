@@ -1,6 +1,6 @@
 # agent-bus
 
-Cross-session messaging and status board for coordinating agent sessions.
+Cross-session messaging and status board for coordinating ships.
 
 ## Synopsis
 
@@ -10,7 +10,7 @@ starfleetctl agent-bus <command> [args...]
 
 ## How It Works
 
-Each agent session ("ship") writes a heartbeat file and reads messages from a shared
+Each ship writes a heartbeat file and reads messages from a shared
 state directory underneath `.starfleet-ai/var/...`.
 
 ## Message Format
@@ -114,13 +114,13 @@ Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. S
 ### Directives (Messaging)
 
 ```sh
-# Send a message to a specific agent
+# Send a message to a specific ship
 starfleetctl agent-bus tell Voyager "run tests on branch feature-x"
 
 # Ship names with spaces MUST be quoted
 starfleetctl agent-bus tell 'Wild Mary' "check status"
 
-# Broadcast to all agents
+# Broadcast to all ships
 starfleetctl agent-bus broadcast "build is broken, hold off"
 
 # Send large payloads via stdin (bypasses ARG_MAX limit)
@@ -139,7 +139,7 @@ starfleetctl agent-bus ack m0042 "done"
 ### Ask/Reply (Blocking Questions)
 
 ```sh
-# Ask the control agent a question (blocks until reply)
+# Ask the flagship a question (blocks until reply)
 starfleetctl agent-bus ask "should I force-push?"
 
 # Custom controller and timeout

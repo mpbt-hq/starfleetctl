@@ -45,11 +45,11 @@ Usage:  starfleetctl <subcommand> [args...]
 Fleet management:
   agent-bus         operate the session bus (read/write/ack/notify/status/health)
   bootstrap         verify/fix workspace structure (dirs, allowlist, fragments)
-  bridged           manage bridged agent sessions (exec/status/log)
+  bridged           manage bridged ship sessions (exec/status/log)
   dashboard         render the workspace dashboard
-  hook              handle agent lifecycle hooks (pre/post)
-  run               start an AI agent session (replaces run-opencode/run-claude scripts)
-  session           manage agent sessions (list/ship)
+  hook              handle ship lifecycle hooks (pre/post)
+  run               start an AI ship session (replaces run-opencode/run-claude scripts)
+  session           manage ship sessions (list/ship)
   ship-names        assign/release/list ship names
   with-clone-lock   serialize git operations via flock
   worktree          create/list/remove throwaway git worktrees

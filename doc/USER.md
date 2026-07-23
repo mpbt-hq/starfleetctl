@@ -213,14 +213,14 @@ starfleetctl agent-bus get m0042 --out report.txt
 ### 4.4 Asking Questions (Blocking)
 
 ```sh
-# Ask control agent (blocks until reply)
+# Ask the flagship (blocks until reply)
 starfleetctl agent-bus ask "force-push to fix history?"
 
 # Custom controller & timeout
 starfleetctl agent-bus ask "approve PR?" --to control --timeout 60
 ```
 
-**Control agent side:**
+**Flagship side:**
 ```sh
 starfleetctl agent-bus asks          # list pending questions
 starfleetctl agent-bus reply m0042 "yes, proceed"

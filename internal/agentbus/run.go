@@ -26,12 +26,12 @@ Control agent:
   board [--json]            the whole board
   asks [--json]             pending questions addressed to me
   reply <qid> <answer…>     answer a worker's question
-  tell <agent> <text…>      queue a directive for one agent
-  tell <agent> --stdin      read the directive body from stdin (bypasses
+  tell <ship> <text…>      queue a directive for one ship
+  tell <ship> --stdin      read the directive body from stdin (bypasses
                             argv/ARG_MAX size limit for large messages)
-  tell <agent> --attach <f> attach file <f> as the body; inline text is a
-                            short summary (agent fetches full body via get)
-  broadcast <text…>         queue a directive for ALL agents
+  tell <ship> --attach <f> attach file <f> as the body; inline text is a
+                            short summary (ship fetches full body via get)
+  broadcast <text…>         queue a directive for ALL ships
   broadcast --stdin         read the broadcast body from stdin
   broadcast --attach <f>    broadcast a file as the body (short summary inline)
   get <id> [--out <path>]   print (or write) the attachment payload of <id>
@@ -45,11 +45,11 @@ Control agent:
 Large inline directives (>768 bytes, e.g. a full hard-reset broadcast) are
 auto-spilled into an attachment automatically: the inline text becomes a short
 "fetch: agent-bus get <id>" pointer and is marked [ATT] in inbox/msgs, so it
-can never be truncated by an agent display. Retrieve the full payload with
+can never be truncated by a ship display. Retrieve the full payload with
 'agent-bus get <id>'.
 
 --json on board/inbox/msgs/asks prints a JSON array instead of the
-human-formatted table — for scripts/agents, so no grep/awk/cut is needed.
+human-formatted table — for scripts/ships, so no grep/awk/cut is needed.
 `
 
 // hasJSON reports whether --json is present anywhere in the command's
