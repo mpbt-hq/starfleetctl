@@ -50,7 +50,7 @@ func DefaultConfig() *Config {
 			ListenAddr:      "0.0.0.0:8080",
 			AutostartEnabled: false,
 			PIDFile:         ".starfleet-ai/var/web.pid",
-			LogFile:         ".starfleet-ai/logs/web.log",
+			LogFile:         ".starfleet-ai/var/log/web.log",
 		},
 		AgentBus: AgentBusConfig{
 			HeartbeatMS:     300_000,
@@ -75,6 +75,11 @@ func WorkDir(root string) string {
 // BusDir returns the agent-bus directory under WorkDir.
 func BusDir(root string) string {
 	return filepath.Join(WorkDir(root), "agent-bus")
+}
+
+// LogDir returns the centralised log directory under WorkDir.
+func LogDir(root string) string {
+	return filepath.Join(WorkDir(root), "log")
 }
 
 // Load reads configuration from .starfleet-ai/conf/web.yaml and

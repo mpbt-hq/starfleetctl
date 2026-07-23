@@ -169,8 +169,7 @@ func LogFiles(root string) []string {
 			files = append(files, filepath.Join(shipDir, e.Name()))
 		}
 	}
-	work := config.BusDir(root)
-	ev := filepath.Join(work, "agent-bus", "events.log")
+	ev := filepath.Join(config.LogDir(root), "events.log")
 	if _, err := os.Stat(ev); err == nil {
 		files = append(files, ev)
 	}

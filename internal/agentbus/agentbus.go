@@ -72,7 +72,7 @@ func New(root string) (*Bus, error) {
 		StatusDir:  filepath.Join(busDir, "status"),
 		MsgDir:     filepath.Join(busDir, "msgs"),
 		AttachDir:  filepath.Join(busDir, "attachments"),
-		Events:     filepath.Join(busDir, "events.log"),
+		Events:     filepath.Join(config.LogDir(root), "events.log"),
 	}
 	for _, d := range []string{b.StatusDir, b.MsgDir, b.AttachDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

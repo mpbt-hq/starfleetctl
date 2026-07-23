@@ -24,7 +24,7 @@ import (
 const (
 	defaultListenAddr = "0.0.0.0:8080"
 	defaultPIDFile    = ".starfleet-ai/var/web.pid"
-	defaultLogFile    = ".starfleet-ai/logs/web.log"
+	defaultLogFile    = ".starfleet-ai/var/log/web.log"
 )
 
 // autostartConfig holds resolved paths for autostart.

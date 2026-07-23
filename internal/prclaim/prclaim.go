@@ -59,7 +59,7 @@ func New(root string) (*Claims, error) {
 		ClaimTTL:   ttl,
 		ShipID:     shipID,
 		ShipIDSet:  shipIDSet,
-		Events:     filepath.Join(dir, "events.log"),
+		Events:     filepath.Join(config.LogDir(root), "events.log"),
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err

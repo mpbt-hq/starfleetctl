@@ -19,7 +19,6 @@ import (
 
 const (
 	statusDir  = "agent-bus/status"
-	auditLog   = "agent-bus/autoscale-events.log"
 	defaultMax = 6
 	busTTL     = 900
 )
@@ -284,7 +283,7 @@ func fleetCounts(root string) (total, idle int) {
 // appendAudit appends a line to the autoscale audit log, creating the log
 // directory if needed.
 func appendAudit(root, msg string) {
-	logPath := filepath.Join(config.BusDir(root), "autoscale-events.log")
+	logPath := filepath.Join(config.LogDir(root), "autoscale-events.log")
 	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
 	callerID := identity.ShipID()
 	if callerID == "" {

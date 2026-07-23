@@ -1066,8 +1066,8 @@ autostart_enabled: false
 pid_file: ".starfleet-ai/var/web.pid"
 
 # Log file for web server daemon
-# Default: .starfleet-ai/logs/web.log
-log_file: ".starfleet-ai/logs/web.log"
+# Default: .starfleet-ai/var/log/web.log
+log_file: ".starfleet-ai/var/log/web.log"
 `
 
 func verifyWebConf(b *Bootstrap) (bool, string) {
