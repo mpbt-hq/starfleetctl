@@ -24,7 +24,7 @@ const usage = `starfleetctl timer — fleet scheduling (one-time, interval, cron
 
 Usage:
   timer set --at "17:30" --type ship --text "status?" [flags]     one-time directive
-  timer set --every 10m --type ship --text "check status" [flags] recurring directive
+  timer set --every 10m --type ship --text "check status" recurring directive
   timer set --cron "0 4 * * *" --type ship --text "morning"       cron directive
   timer set --every 5m --type command --text "model gpt-4o"       command timer
 
@@ -43,11 +43,14 @@ Flags for set:
   timer clear                      cancel all my timers
   timer pause <id>                 disable a timer
   timer resume <id>                re-enable a timer
-  timer worker                     run in foreground (blocking)
-  timer worker --start             fork daemon in background
-  timer worker --stop              stop the daemon
-  timer worker --restart           restart the daemon
   timer status                     show worker status
+
+Timer worker subcommands:
+  timer worker                     show this help
+  timer worker start               run in foreground (blocking)
+  timer worker stop                stop the daemon
+  timer worker autostart           start daemon if not running
+  timer worker restart             stop + autostart (background)
 `
 
 // Run dispatches a `timer` invocation given the resolved workspace root.
@@ -432,50 +435,54 @@ func runWorker(root string, args []string) int {
 		return 0
 	}
 
-	stop := false
-	restart := false
-	start := false
-	for _, a := range args {
-		switch a {
-		case "--stop":
-			stop = true
-		case "--restart":
-			restart = true
-		case "--start":
-			start = true
-		}
-	}
-	if restart {
-		if err := RestartWorker(root); err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
-			return 1
-		}
-		fmt.Println("timer worker restarted")
+	// No args or help → show usage
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		fmt.Print(usage)
 		return 0
 	}
-	if stop {
+
+	switch args[0] {
+	case "start":
+		// Run in foreground (blocking).
+		if err := RunWorker(root); err != nil {
+			fmt.Fprintf(os.Stderr, "timer worker: %v\n", err)
+			return 1
+		}
+		return 0
+
+	case "stop":
 		if err := StopWorker(root); err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
+			fmt.Fprintf(os.Stderr, "timer worker stop: %v\n", err)
 			return 1
 		}
 		fmt.Println("timer worker stopped")
 		return 0
-	}
-	if start {
-		// Fork a daemon in background.
+
+	case "autostart":
+		running, pid := WorkerStatus(root)
+		if running {
+			fmt.Printf("timer worker: already running (pid %d)\n", pid)
+			return 0
+		}
 		if err := StartWorker(root); err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
+			fmt.Fprintf(os.Stderr, "timer worker autostart: %v\n", err)
 			return 1
 		}
 		fmt.Println("timer worker started")
 		return 0
+
+	case "restart":
+		if err := RestartWorker(root); err != nil {
+			fmt.Fprintf(os.Stderr, "timer worker restart: %v\n", err)
+			return 1
+		}
+		fmt.Println("timer worker restarted")
+		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr, "timer worker: unknown subcommand: %s\n\n%s", args[0], usage)
+		return 2
 	}
-	// No flags: run in foreground (blocking).
-	if err := RunWorker(root); err != nil {
-		fmt.Fprintf(os.Stderr, "timer worker: %v\n", err)
-		return 1
-	}
-	return 0
 }
 
 func runStatus(root string) int {
