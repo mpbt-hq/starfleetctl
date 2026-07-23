@@ -133,7 +133,7 @@ ship's context automatically.
 
 | Document | Description |
 |---|---|
-| **[User Guide](USER.md)** | **Start here** — installation, concepts, workflows, troubleshooting |
+| **[User Guide](doc/USER.md)** | **Start here** — installation, concepts, workflows, troubleshooting |
 | [Architecture](doc/architecture.md) | How it works — data flow, file formats, locking |
 | [Agent Bus](doc/agent-bus.md) | Cross-session messaging reference |
 | [Dashboard](doc/dashboard.md) | Project status tracking |
