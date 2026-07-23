@@ -389,6 +389,8 @@ func decideAction(tag string, hasFallback bool, source string) (action, reason s
 		return "retry", "transient stream disconnect, retry alone should suffice"
 	case "resource-exhausted":
 		return "retry", "transient resource exhaustion, retry alone should suffice"
+	case "no-provider":
+		return "retry", "no provider available for model, transient pool rotation, retry alone should suffice"
 	case "zen-ratelimit":
 		if hasFallback {
 			return "switch-model", "quota/rate limit exhausted, switch to fallback model"

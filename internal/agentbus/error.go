@@ -19,6 +19,7 @@ import (
 //   zen-ratelimit      — 429 / quota / usage limit / rate limit
 //   resource-exhausted — worker capacity / token quota / context length
 //   nim-overload       — NVIDIA inference microservice overload (5xx / conn reset)
+//   no-provider        — no provider available for the requested model
 func (b *Bus) DoErrorClassify(detail string) error {
 	tag := ClassifyModelError(detail)
 	if tag != "" {
@@ -64,6 +65,12 @@ func ClassifyModelError(detail string) string {
 	if streamingFailedRe.MatchString(d) {
 		return "streaming-response-failed"
 	}
+	// No provider available: the model API backend has no active provider
+	// for the requested model.  Transient — the provider pool may rotate
+	// or recover; a retry usually succeeds.
+	if noProviderRe.MatchString(d) {
+		return "no-provider"
+	}
 	return ""
 }
 
@@ -71,7 +78,7 @@ func ClassifyModelError(detail string) string {
 // affected ship should be told to simply re-run its last prompt (resume),
 // rather than only notifying the flagship.
 func isAutoRestartTag(tag string) bool {
-	return tag == "streaming-response-failed" || tag == "nim-overload" || tag == "resource-exhausted"
+	return tag == "streaming-response-failed" || tag == "nim-overload" || tag == "resource-exhausted" || tag == "no-provider"
 }
 
 // IsUserAbort reports whether a session.error detail is a user-initiated
@@ -91,6 +98,7 @@ var (
 	resourceExhaustedRe = regexp.MustCompile(`(resourceexhausted|resource exhausted|request limit reached|context length|maximum context|context window|token.{0,12}(limit|quota)|too many tokens|input.{0,12}too long)`)
 	nimOverloadRe = regexp.MustCompile(`(nim|5\d\d|overload|bad gateway|connection reset|econnreset|econnrefused|upstream)`)
 	streamingFailedRe = regexp.MustCompile(`(?i)(streaming (response|request) failed|stream interrupted|response stream|connection closed|broken pipe|unexpected eof|stream closed)`)
+	noProviderRe = regexp.MustCompile(`(?i)(no provider available|provider.*unavailable|no.*provider.*found)`)
 	userAbortRe = regexp.MustCompile(`(^|\W)(abort|cancel|interrupt|signal|sigint|econnaborted|context (deadline|canceled))`)
 )
 

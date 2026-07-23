@@ -90,7 +90,7 @@ var patterns = []pattern{
 		category:  "opencode-api",
 		severity:  2,
 		component: "opencode",
-		re:        regexp.MustCompile(`(?i)(production API error|noSuchModelError|tooManyRequests|429|rate limit|quota|model .* not found|context length)`),
+		re:        regexp.MustCompile(`(?i)(production API error|noSuchModelError|tooManyRequests|429|rate limit|quota|model .* not found|context length|no provider available)`),
 		sig: func(g []string) (string, string) {
 			norm := strings.ToLower(g[1])
 			norm = regexp.MustCompile(`\s+`).ReplaceAllString(norm, " ")
