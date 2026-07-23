@@ -102,7 +102,7 @@ func Checks() []Check {
 			Fix:    fixSettingsPermissionHook,
 		},
 		{
-			Name:   ".starfleet-ai/agents.d/index.md",
+			Name:   ".starfleet-ai/var/agents.d/index.md",
 			Verify: verifyAgentsIndex,
 			Fix:    fixAgentsIndex,
 		},
@@ -170,13 +170,13 @@ func Checks() []Check {
 	}
 }
 
-// verifyAgentsIndex/fixAgentsIndex ensure .starfleet-ai/agents.d/index.md exists.
+// verifyAgentsIndex/fixAgentsIndex ensure .starfleet-ai/var/agents.d/index.md exists.
 func verifyAgentsIndex(b *Bootstrap) (bool, string) {
-	path := filepath.Join(b.Root, ".starfleet-ai", "agents.d", "index.md")
+	path := filepath.Join(b.Root, ".starfleet-ai", "var", "agents.d", "index.md")
 	if _, err := os.Stat(path); err == nil {
 		return true, "present"
 	}
-	return false, "missing (no .starfleet-ai/agents.d/index.md)"
+	return false, "missing (no .starfleet-ai/var/agents.d/index.md)"
 }
 
 func fixAgentsIndex(b *Bootstrap) error {
@@ -407,7 +407,7 @@ func fixSettingsAllowlist(b *Bootstrap) error {
 
 // verifyStarfleetFragments checks that every .md file embedded under
 // fragments/starfleet/ in the starfleetctl binary is installed to
-// .starfleet-ai/agents.d/starfleet/<slug>.md and byte-identical to what the
+// .starfleet-ai/var/agents.d/starfleet/<slug>.md and byte-identical to what the
 // current binary would write. This is a bulk, always-overwrite check like the
 // self-fragment.
 func verifyStarfleetFragments(b *Bootstrap) (bool, string) {

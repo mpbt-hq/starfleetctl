@@ -146,7 +146,7 @@ func RunCmd(root string, args []string) int {
 	}
 
 	// Load instructions
-	instructionsPath := filepath.Join(root, ".starfleet-ai", "agents.d", "index.md")
+	instructionsPath := filepath.Join(root, ".starfleet-ai", "var", "agents.d", "index.md")
 	systemPrompt := ""
 	if data, err := os.ReadFile(instructionsPath); err == nil {
 		systemPrompt = string(data)
@@ -197,7 +197,7 @@ func RunCmd(root string, args []string) int {
 // defaultPrompt returns the standard prompt for the given client/role combination.
 func defaultPrompt(client, shipID, role, model string) string {
 	if client == "opencode" {
-		configContent := fmt.Sprintf(`{"username":"%s","instructions":[".starfleet-ai/agents.d/index.md"]}`, shipID)
+		configContent := fmt.Sprintf(`{"username":"%s","instructions":[".starfleet-ai/var/agents.d/index.md"]}`, shipID)
 		os.Setenv("OPENCODE_CONFIG_CONTENT", configContent)
 
 		if role == "flagship" {
@@ -299,7 +299,7 @@ func buildInnerCommand(client, shipID, role, systemPrompt, prompt, model string,
 
 	// Set OPENCODE_CONFIG_CONTENT for opencode
 	if client == "opencode" {
-		configContent := `{"username":"` + shipID + `","instructions":[".starfleet-ai/agents.d/index.md"]}`
+		configContent := `{"username":"` + shipID + `","instructions":[".starfleet-ai/var/agents.d/index.md"]}`
 		parts = append(parts, "export OPENCODE_CONFIG_CONTENT="+shellQuote(configContent))
 	}
 
