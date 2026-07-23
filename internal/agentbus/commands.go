@@ -611,6 +611,9 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 		fmt.Fprintf(os.Stderr, "agent-bus: broadcast %s from '%s' → ALL\n", id, b.ShipID)
 	} else {
 		fmt.Fprintf(os.Stderr, "agent-bus: directive %s from '%s' → %s\n", id, b.ShipID, target)
+		if !b.shipExists(target) {
+			fmt.Fprintf(os.Stderr, "agent-bus: warning: ship '%s' has no heartbeat on the board\n", target)
+		}
 	}
 	fmt.Printf("%s\n", id)
 	return nil
@@ -645,6 +648,9 @@ func (b *Bus) DoCommand(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "agent-bus: command %s from '%s' → %s (%s)\n", id, b.ShipID, target, verb)
+	if !b.shipExists(target) {
+		fmt.Fprintf(os.Stderr, "agent-bus: warning: ship '%s' has no heartbeat on the board\n", target)
+	}
 	fmt.Printf("%s\n", id)
 	return nil
 }

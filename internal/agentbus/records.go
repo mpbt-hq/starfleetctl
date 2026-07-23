@@ -242,3 +242,10 @@ func (b *Bus) inboxCount(agent string) int {
 	}
 	return cnt
 }
+
+// shipExists reports whether a status file exists for the given ship name.
+func (b *Bus) shipExists(name string) bool {
+	path := filepath.Join(b.StatusDir, name+".json")
+	_, err := os.Stat(path)
+	return err == nil
+}

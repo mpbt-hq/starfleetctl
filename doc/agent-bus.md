@@ -134,6 +134,8 @@ starfleetctl agent-bus ack m0042
 starfleetctl agent-bus ack m0042 "done"
 ```
 
+**Note:** `tell` and `cmd` print a warning to stderr when the target ship has no heartbeat on the board (e.g. not running or stale). The message is still delivered — the warning is informational only.
+
 ### Ask/Reply (Blocking Questions)
 
 ```sh
