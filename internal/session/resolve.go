@@ -4,7 +4,6 @@
 package session
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -35,48 +34,6 @@ func shellQuote(s string) string {
 func providerFromModel(model string) string {
 	if i := strings.IndexByte(model, '/'); i >= 0 {
 		return model[:i]
-	}
-	return ""
-}
-
-const sessPrefix = "mpbt-"
-
-// ResolveID resolves an agent ID / handle / unique substring to the concrete
-// termctl pipe path. Returns empty string on failure.
-func ResolveID(root, arg string) string {
-	// 1) Direct lookup by ship ID — pipe path is deterministic
-	if arg != "" {
-		pipe := PipePath(root, arg)
-		if _, err := os.Stat(pipe); err == nil {
-			return pipe
-		}
-	}
-
-	// 2) Check agent-bus board for matching agent/handle
-	bus, err := agentbus.New(root)
-	if err != nil {
-		return ""
-	}
-	for _, r := range bus.AllStatusRecords() {
-		if r.Agent == arg || r.Handle == arg {
-			return PipePath(root, r.Agent)
-		}
-	}
-
-	// 3) Unique substring of a known ship name from agent-bus board
-	var match string
-	seen := make(map[string]bool)
-	for _, r := range bus.AllStatusRecords() {
-		if !seen[r.Agent] && strings.Contains(r.Agent, arg) {
-			if match != "" {
-				return "" // ambiguous
-			}
-			match = r.Agent
-			seen[r.Agent] = true
-		}
-	}
-	if match != "" {
-		return PipePath(root, match)
 	}
 	return ""
 }

@@ -301,11 +301,6 @@ func exists(path string) bool {
 	return err == nil
 }
 
-func isFile(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && !fi.IsDir()
-}
-
 func isDir(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.IsDir()
