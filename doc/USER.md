@@ -127,7 +127,7 @@ Claims are **cooperative** — they don't block git at filesystem level, but all
 
 ### Dashboard — Project Status Tracking
 
-Markdown-based topic tracking in `DASHBOARD.md` + `dashboard/topics/*.md`. Managed via `starfleetctl dashboard topic <cmd>`.
+Markdown-based topic tracking in `.starfleet-ai/var/DASHBOARD.md` + `.starfleet-ai/var/dashboard/topics/*.md`. Managed via `starfleetctl dashboard topic <cmd>`.
 
 ---
 
@@ -328,14 +328,14 @@ starfleetctl worktree remove <branch>
 | `genesis-init` | Bootstrap from nothing |
 | `self-install` | Clone/build/install updates |
 | `json` | JSON validate/pretty/get |
-| `web` | Start fleet web UI |
+| `web` | Fleet web UI (start/stop/autostart/restart) |
 
 ---
 
 ## 6. Web UI
 
 ```sh
-starfleetctl web [--addr :8080]
+starfleetctl web start [--addr :8080]
 ```
 
 Open `http://localhost:8080` — single-page app with tabs:
@@ -346,11 +346,13 @@ Open `http://localhost:8080` — single-page app with tabs:
 - **Funk** — send messages via dropdown
 - **Log** — real-time event feed
 
-**Daemon mode:**
+**Subcommands:**
 ```sh
-starfleetctl web autostart        # start background
-starfleetctl web autostart stop   # stop
-starfleetctl web autostart restart
+starfleetctl web              # show help
+starfleetctl web start        # foreground
+starfleetctl web stop         # stop daemon
+starfleetctl web autostart    # start daemon (if not running)
+starfleetctl web restart      # stop + autostart
 ```
 
 ---
@@ -398,8 +400,8 @@ starfleetctl pr-claim --steal 3162  # take over (with reason)
 ### 7.5 Web UI Not Loading / Port in Use
 
 ```sh
-starfleetctl web --addr :8081       # different port
-starfleetctl web autostart stop     # kill daemon
+starfleetctl web start --addr :8081   # different port
+starfleetctl web stop                  # kill daemon
 ```
 
 ### 7.6 opencode Plugin Not Delivering Messages
@@ -457,15 +459,19 @@ workspace/
 │   │   │   │   └── all/unseen/         # broadcast inbox
 │   │   │   ├── attachments/     # large payloads
 │   │   │   └── events.log       # audit trail
-│   │   └── agent-claims/        # PR claims (pr-3162.tsv, ...)
-│   ├── agents.d/                # fleet coordination fragments
+│   │   ├── agent-claims/        # PR claims (pr-3162.tsv, ...)
+│   │   ├── agents.d/            # fleet coordination fragments
+│   │   ├── DASHBOARD.md         # project status index
+│   │   ├── dashboard/
+│   │   │   └── topics/          # project tasks
+│   │   ├── log/                 # centralised logs (web.log, timer-worker.log)
+│   │   └── ships/               # session pipes + logs
 │   ├── conf/
-│   │   └── models.yaml          # model registry for web UI
-│   └── dashboard/
-│       └── topics/              # project tasks
+│   │   ├── models.yaml          # model registry for web UI
+│   │   └── timers/              # persistent timers
+│   └── web.pid                  # web server PID (when daemonised)
 ├── run-opencode.flagship        # launcher (flagship)
-├── run-opencode.ship            # launcher (worker)
-└── DASHBOARD.md                 # project status index
+└── run-opencode.ship            # launcher (worker)
 ```
 
 ---

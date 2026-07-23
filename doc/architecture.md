@@ -33,8 +33,9 @@ workspace/
 │   └── agent-claims/       # PR-branch locks
 │       ├── pr-3162.tsv
 │       └── pr-3163.tsv
-├── DASHBOARD.md            # Project status index
-└── dashboard/topics/       # Per-topic status files
+├── .starfleet-ai/var/
+│   ├── DASHBOARD.md            # Project status index
+│   └── dashboard/topics/       # Per-topic status files
 ```
 
 ## Core Concepts

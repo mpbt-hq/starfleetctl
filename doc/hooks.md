@@ -28,12 +28,12 @@ Safe to run multiple times. Verifies and repairs everything:
 |---|---|---|
 | `./.starfleet-ai/var/...` dirs | `./.starfleet-ai/var/agent-bus`, `./.starfleet-ai/var/agent-claims/` | Bus storage, claim files |
 | Allowlist | `.claude/settings.json` | Permits `starfleetctl` commands without prompts |
-| Agent fragments | `.starfleet-ai/agents.d/` | Fleet coordination instructions |
+| Agent fragments | `.starfleet-ai/var/agents.d/` | Fleet coordination instructions |
 | Skills | `.claude/skills/` | On-demand reference docs (concurrency, starfleetctl, etc.) |
 | opencode plugins | `.opencode/plugins/` | Agent-bus polling, inbox injection |
 | Launcher scripts | `.starfleet-ai/bin/` | `run-opencode.ship`, `run-opencode.flagship`, `run-claude.*` |
 | Claude hooks | `.claude/hooks/` | `agent-permission-hook` for tool gating |
-| Dashboard | `DASHBOARD.md` + `dashboard/topics/` | Project status tracking |
+| Dashboard | `.starfleet-ai/var/DASHBOARD.md` + `.starfleet-ai/var/dashboard/topics/` | Project status tracking |
 
 ## What the launcher scripts do
 

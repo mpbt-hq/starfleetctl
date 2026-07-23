@@ -5,7 +5,7 @@ A browser-based dashboard for monitoring and controlling your agent fleet.
 ## Starting the Web UI
 
 ```sh
-starfleetctl web [--addr :8080] [--root /path/to/workspace]
+starfleetctl web start [--addr :8080]
 ```
 
 Opens a single-page app at `http://localhost:8080` (default). The server reads the agent-bus state from the workspace and serves both the API and the embedded frontend.
@@ -120,7 +120,7 @@ The frontend polls every 15 seconds for the Flotte, Log, and Bus views. The ship
 The web UI is a single embedded HTML file (`internal/web/index.html`) with vanilla JavaScript — no build step, no framework, no npm. The Go server serves it via `go:embed`.
 
 ```
-Browser  ──HTTP──▶  starfleetctl web
+Browser  ──HTTP──▶  starfleetctl web start
                        │
                        ├── /api/board     ──▶ agent-bus status/
                        ├── /api/msgs      ──▶ agent-bus msgs/
