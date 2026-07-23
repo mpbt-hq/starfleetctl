@@ -75,9 +75,7 @@ func Run(root string, args []string) int {
 	}
 
 	if len(args) == 0 {
-		if err := b.DoBoard(); err != nil {
-			return reportErr(err)
-		}
+		fmt.Print(usage)
 		return 0
 	}
 
