@@ -85,7 +85,7 @@ func WorkDir(root string) string {
 
 // BusDir returns the comms directory under WorkDir.
 func BusDir(root string) string {
-	return filepath.Join(WorkDir(root), "agent-bus")
+	return filepath.Join(WorkDir(root), "comms")
 }
 
 // LogDir returns the centralised log directory under WorkDir.

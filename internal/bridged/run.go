@@ -20,7 +20,7 @@ const usage = `bridged <command> [args…]
                               self-daemonize)
   status [--socket <path>]   connect and report whether a daemon is up
 
-Default socket: .starfleet-ai/var/agent-bus/bridged.sock
+Default socket: .starfleet-ai/var/comms/bridged.sock
 
 NOT wired into any hook/script/existing caller — this is a new, additive,
 opt-in access path only. See DASHBOARD.md "Long-term fleet architecture

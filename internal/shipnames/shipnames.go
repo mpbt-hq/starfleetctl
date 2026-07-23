@@ -5,7 +5,7 @@
 // ship name registry each agent instance uses for its STARFLEET_SHIP_ID, so the
 // agent-bus board and detached session list read like a fleet roster instead of
 // a wall of PIDs. Enterprise is reserved for the control/flagship session.
-// Reservations live in .starfleet-ai/var/agent-bus/ships/ (one file per active name,
+// Reservations live in .starfleet-ai/var/comms/ships/ (one file per active name,
 // gitignored, SAME format/location as the bash original), so a Go and bash
 // invocation share the registry transparently.
 package shipnames

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	statusDir  = "agent-bus/status"
+	statusDir  = "comms/status"
 	defaultMax = 6
 	busTTL     = 900
 )
