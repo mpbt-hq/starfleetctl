@@ -43,10 +43,10 @@ func newScratchRoot(t *testing.T) string {
 	run(root, "config", "user.email", "test@test.com")
 	run(root, "config", "user.name", "Test")
 	run(root, "remote", "add", "origin", origin)
-	if err := os.MkdirAll(filepath.Join(root, ".starfleet-ai"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".starfleet-ai", "var"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".starfleet-ai", "DASHBOARD.md"), []byte("# DASHBOARD\n\ninitial\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".starfleet-ai", "var", "DASHBOARD.md"), []byte("# DASHBOARD\n\ninitial\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// .starfleet-ai/ is a generated dir (like .bin/, .claude/hooks/) — ignore it
@@ -267,7 +267,7 @@ func TestDashboardRoundTrip(t *testing.T) {
 		t.Fatalf("write: exit %d, stderr=%q", resp.ExitCode, resp.Stderr)
 	}
 
-	got, err := os.ReadFile(filepath.Join(root, ".starfleet-ai", "DASHBOARD.md"))
+	got, err := os.ReadFile(filepath.Join(root, ".starfleet-ai", "var", "DASHBOARD.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
