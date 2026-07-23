@@ -3,7 +3,7 @@
 //
 // Package web is a minimalist, mobile-first web interface for the fleet. It
 // does NOT reimplement any fleet logic — it drives the EXISTING starfleetctl
-// packages (agentbus, dashboard, task) in-process, exactly like the CLI
+// packages (comms, dashboard, task) in-process, exactly like the CLI
 // subcommands do, so the web UI and `starfleetctl <cmd>` stay in lockstep.
 // The frontend (embedded index.html) is plain HTML/CSS/JS with no dependencies,
 // so it renders well even on tiny mobile screens and never needs a build step.
@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/session"
@@ -34,7 +34,7 @@ var indexFS embed.FS
 type Server struct {
 	Root string
 	Addr string
-	bus  *agentbus.Bus
+	bus  *comms.Bus
 	dash *dashboard.Dashboard
 	mux  *http.ServeMux
 }
@@ -43,7 +43,7 @@ type Server struct {
 // (e.g. ":8080" or "127.0.0.1:8080"). The agent-bus board identity is taken
 // from the environment exactly like `agent-bus` (STARFLEET_SHIP_ID etc.).
 func New(root, addr string) (*Server, error) {
-	b, err := agentbus.New(root)
+	b, err := comms.New(root)
 	if err != nil {
 		return nil, fmt.Errorf("web: agent-bus: %w", err)
 	}
@@ -176,7 +176,7 @@ func (s *Server) apiIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiTell POSTs a directive: {"target": "all"|"<ship>", "text": "..."}.
-// Delegates to agentbus.Tell / broadcast — the same code path as
+// Delegates to comms.Tell / broadcast — the same code path as
 // `agent-bus tell` / `agent-bus broadcast`. Body via JSON or form.
 func (s *Server) apiTell(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -811,7 +811,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 const usage = `web [start|stop|autostart|restart] [options]
 
   Minimalist mobile-first fleet web console. Reuses the same in-process
-  agentbus / dashboard / task code as the CLI subcommands, so the web UI
+  comms / dashboard / task code as the CLI subcommands, so the web UI
   and 'starfleetctl <cmd>' stay in lockstep. Defaults to listening on
   0.0.0.0:8080 (all interfaces, so it is reachable from other devices —
   e.g. a phone on the LAN).

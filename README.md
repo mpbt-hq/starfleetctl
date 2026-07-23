@@ -38,7 +38,7 @@ starfleetctl genesis-init .
 |---|---|
 | **[User Guide](doc/USER.md)** | **Start here** — installation, concepts, workflows, troubleshooting |
 | [Architecture](doc/architecture.md) | How it works — data flow, file formats, locking |
-| [Agent Bus](doc/agent-bus.md) | Cross-session messaging reference |
+| [Comms](doc/comms.md) | Inter-ship communication reference |
 | [Dashboard](doc/dashboard.md) | Project status tracking |
 | [PR Claim](doc/pr-claim.md) | PR-branch locking |
 | [Session](doc/session.md) | Agent session management (termctl) |

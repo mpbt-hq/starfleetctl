@@ -86,22 +86,22 @@ starfleetctl task capture --title "WIP: refactor dashboard" --no-push
 7. `dashboard.DoReindex()` + `dashboard.DoCommit("reindex: add task "+slug, push)`
    — refresh DASHBOARD.md index.
 8. If ship commissioned: `agentbus.Tell(ship, german directive)` — notify via
-   agent-bus.
+   comms.
 
-## Integration with agent-bus
+## Integration with comms
 
 When a ship is commissioned, it receives a German-language directive via
-`agent-bus tell`:
+`comms tell`:
 
 ```
 Neue Aufgabe für dich erfasst: <title> (Dashboard-Topic `<slug>`). Bitte dort
-Details lesen und abarbeiten. Status danach via agent-bus melden.
+Details lesen und abarbeiten. Status danach via comms melden.
 ```
 
 The receiving ship should:
 1. Read the dashboard topic via `starfleetctl dashboard topic show <slug>`.
 2. Execute the task.
-3. Report completion via `agent-bus tell` to the praetor/sender.
+3. Report completion via `comms tell` to the praetor/sender.
 
 ---
 
@@ -116,7 +116,7 @@ starfleetctl task assign <slug> [<ship>] [--no-push]
 ## Description
 
 Re-assigns an existing dashboard task topic to a ship. With no `<ship>`, picks
-the first `idle`, non-stale ship from the agent-bus board (same logic as
+the first `idle`, non-stale ship from the comms board (same logic as
 `capture --assign`) and commissions it. Commits the topic, refreshes
 `DASHBOARD.md`'s index automatically (no separate `reindex`), and sends the
 ship a German directive.

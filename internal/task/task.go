@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 )
@@ -166,7 +166,7 @@ func runCapture(root string, args []string) int {
 	if assignMode != "" && assign != "" {
 		msg := "Neue Aufgabe für dich erfasst: " + title +
 			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
-		b, berr := agentbus.New(root)
+		b, berr := comms.New(root)
 		if berr != nil {
 			fmt.Fprintln(os.Stderr, "task capture:", berr)
 			return 1
@@ -261,7 +261,7 @@ func deriveSlug(title string) string {
 // board, or "" if none is available. Mirrors scripts/task-capture's python
 // one-liner (cand[0] of idle+!stale).
 func pickFreeShip(root string) (string, error) {
-	b, err := agentbus.New(root)
+	b, err := comms.New(root)
 	if err != nil {
 		return "", err
 	}
@@ -387,7 +387,7 @@ func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
 		msg = "Neue Aufgabe für dich erfasst: " + title +
 			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
 	}
-	b, err := agentbus.New(root)
+	b, err := comms.New(root)
 	if err != nil {
 		return err
 	}

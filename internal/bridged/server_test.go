@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// newScratchRoot builds a workspace root suitable for both agentbus (just
+// newScratchRoot builds a workspace root suitable for both comms (just
 // needs _WORK_/agent-bus/ to exist under it) and dashboard (needs to be a
 // real git working tree with a DASHBOARD.md and an origin remote, since
 // pull/commit shell out to real git) — entirely local, no network.
@@ -123,7 +123,7 @@ func TestAgentBusRoundTrip(t *testing.T) {
 	os.Setenv("STARFLEET_SHIP_ID", "TestShip")
 	defer os.Unsetenv("STARFLEET_SHIP_ID")
 
-	resp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"status", "working", "via bridged"}}, time.Second)
+	resp, err := Call(sockPath, Request{Cmd: "comms", Args: []string{"status", "working", "via bridged"}}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAgentBusRoundTrip(t *testing.T) {
 		t.Fatalf("status: exit %d, stderr=%q", resp.ExitCode, resp.Stderr)
 	}
 
-	resp, err = Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"board"}}, time.Second)
+	resp, err = Call(sockPath, Request{Cmd: "comms", Args: []string{"board"}}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestAgentBusRoundTrip(t *testing.T) {
 // process env) at once, and confirm each one's response reflects only its
 // own identity — none see another's, and none see the ambient ("unset")
 // identity either. Execution is serialized by execMu, so true
-// interleaving inside a single agentbus.Run call is impossible; this test
+// interleaving inside a single comms.Run call is impossible; this test
 // instead guards against the failure mode that WOULD leak: a bug in
 // applyEnvOverrides that restores the wrong value, or restores too early/
 // late relative to the mutex, would show up here as ships seeing each
@@ -171,7 +171,7 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 			note := fmt.Sprintf("note-%02d", i)
 
 			statusResp, err := Call(sockPath, Request{
-				Cmd:  "agent-bus",
+				Cmd:  "comms",
 				Args: []string{"status", "working", note},
 				Env:  map[string]string{"STARFLEET_SHIP_ID": ship},
 			}, 5*time.Second)
@@ -189,7 +189,7 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 			}
 
 			whoResp, err := Call(sockPath, Request{
-				Cmd:  "agent-bus",
+				Cmd:  "comms",
 				Args: []string{"inbox"},
 				Env:  map[string]string{"STARFLEET_SHIP_ID": ship},
 			}, 5*time.Second)
@@ -212,7 +212,7 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 	// The board must show all N ships as distinct rows with their own
 	// notes — proves the writes themselves landed under the right
 	// identity, not just that each response echoed the right name.
-	boardResp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"board"}}, 5*time.Second)
+	boardResp, err := Call(sockPath, Request{Cmd: "comms", Args: []string{"board"}}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 	// back to the ambient (still-unset) identity, not leak the last
 	// override — proves restoration actually ran, not just that concurrent
 	// calls happened to not collide.
-	plainResp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{"status", "idle", "no override"}}, 5*time.Second)
+	plainResp, err := Call(sockPath, Request{Cmd: "comms", Args: []string{"status", "idle", "no override"}}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestDashboardRoundTrip(t *testing.T) {
 // TestDangerousSubcommandsRejected is the single most important safety
 // test in this package: "ask" blocks polling for a reply and calls
 // os.Exit(3) on timeout; "monitor-loop"/"fleet-watch"/"watch" are
-// intentionally infinite loops. Any of them reaching agentbus.Run() through
+// intentionally infinite loops. Any of them reaching comms.Run() through
 // the daemon would wedge or kill the whole process for every connected
 // client, not just the caller. The allowlist in server.go must reject all
 // four before they're ever invoked.
@@ -289,7 +289,7 @@ func TestDangerousSubcommandsRejected(t *testing.T) {
 
 	for _, sub := range []string{"ask", "monitor-loop", "fleet-watch", "watch"} {
 		t.Run(sub, func(t *testing.T) {
-			resp, err := Call(sockPath, Request{Cmd: "agent-bus", Args: []string{sub, "irrelevant arg"}}, 2*time.Second)
+			resp, err := Call(sockPath, Request{Cmd: "comms", Args: []string{sub, "irrelevant arg"}}, 2*time.Second)
 			if err != nil {
 				t.Fatalf("call for %q errored (server may have hung/died): %v", sub, err)
 			}

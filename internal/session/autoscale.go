@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/identity"
 	"github.com/metux/starfleetctl/internal/shipnames"
@@ -236,7 +236,7 @@ func spawnShips(root string, spawn int, release, client, supervisor, permissionM
 		bcastText := fmt.Sprintf("Auto-scale: spawned %d new worker ship(s) [%s] (release=%s, supervisor=%s%s) — reason: %s — triggered by %s, fleet now %d/%d",
 			len(spawned), strings.Join(spawned, " "), release, supervisor, permPart, reason, callerID, total+len(spawned), max)
 
-		if bus, err := agentbus.New(root); err == nil {
+		if bus, err := comms.New(root); err == nil {
 			_ = bus.DoPost("all", []string{bcastText}, false, "", "", "control")
 		}
 	}

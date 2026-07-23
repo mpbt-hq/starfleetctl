@@ -10,7 +10,7 @@ owner: "starfleetctl"
 ## Fleet-wide autonomy — execute and delegate tasks independently
 
 The entire fleet (Enterprise, Reliant, Titan, …) works autonomously:
-every ship processes incoming agent-bus directives on its own,
+every ship processes incoming comms directives on its own,
 without asking the Praetor first.
 
 ### Scope
@@ -25,8 +25,8 @@ without asking the Praetor first.
 Ships may delegate tasks among themselves:
 
 - A ship that cannot or will not handle a directive itself
-  forwards it via `starfleetctl agent-bus tell <target>` (or
-  `starfleetctl agent-bus tell <target> --stdin` for a large payload) to a more
+  forwards it via `starfleetctl comms tell <target>` (or
+  `starfleetctl comms tell <target> --stdin` for a large payload) to a more
   suitable ship.
 - The receiver processes the delegated task autonomously.
 - The sender of the original directive is informed about
@@ -45,5 +45,5 @@ Ships may delegate tasks among themselves:
 ### Reporting
 
 After every executed action, a brief status is reported to the
-sender via `starfleetctl agent-bus tell <sender>` (or `… --stdin` for a large
+sender via `starfleetctl comms tell <sender>` (or `… --stdin` for a large
 status payload) so the fleet stays informed.

@@ -1,11 +1,11 @@
-# agent-bus
+# comms
 
 Cross-session messaging and status board for coordinating ships.
 
 ## Synopsis
 
 ```
-starfleetctl agent-bus <command> [args...]
+starfleetctl comms <command> [args...]
 ```
 
 ## How It Works
@@ -63,13 +63,13 @@ Messages are JSON files stored in `msgs/<target>/unseen/`:
 
 ```sh
 # Commands (executed, not injected as text)
-starfleetctl agent-bus cmd Voyager model gpt-4o
-starfleetctl agent-bus cmd Voyager quit
-starfleetctl agent-bus cmd Voyager reset
+starfleetctl comms cmd Voyager model gpt-4o
+starfleetctl comms cmd Voyager quit
+starfleetctl comms cmd Voyager reset
 
 # Directives (injected as system prompt)
-starfleetctl agent-bus tell Voyager "run tests"
-starfleetctl agent-bus broadcast "roll call"
+starfleetctl comms tell Voyager "run tests"
+starfleetctl comms broadcast "roll call"
 ```
 
 ## Environment Variables
@@ -77,7 +77,7 @@ starfleetctl agent-bus broadcast "roll call"
 | Variable | Default | Description |
 |---|---|---|
 | `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
-| `STARFLEET_BUS_DIR` | `./.starfleet-ai/var/agent-bus` | Storage directory |
+| `STARFLEET_BUS_DIR*...var/agent-bus` | Storage directory |
 | `STARFLEET_STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
 | `PROJECT` | — | Project label on the board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
@@ -88,25 +88,25 @@ starfleetctl agent-bus broadcast "roll call"
 
 ```sh
 # Post/update your status
-starfleetctl agent-bus status working "building feature X"
-starfleetctl agent-bus status idle
-starfleetctl agent-bus status blocked "waiting for review"
+starfleetctl comms status working "building feature X"
+starfleetctl comms status idle
+starfleetctl comms status blocked "waiting for review"
 
 # Refresh heartbeat without changing state (for monitor loops)
-starfleetctl agent-bus touch
+starfleetctl comms touch
 
 # Remove your heartbeat (call on session exit)
-starfleetctl agent-bus clear
+starfleetctl comms clear
 ```
 
 ### Board
 
 ```sh
 # See all ships and their status
-starfleetctl agent-bus board
+starfleetctl comms board
 
 # Machine-readable output
-starfleetctl agent-bus board --json
+starfleetctl comms board --json
 ```
 
 Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. Stale entries (older than `STARFLEET_STARFLEET_BUS_TTL`) are marked `[STALE]`.
@@ -115,23 +115,23 @@ Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. S
 
 ```sh
 # Send a message to a specific ship
-starfleetctl agent-bus tell Voyager "run tests on branch feature-x"
+starfleetctl comms tell Voyager "run tests on branch feature-x"
 
 # Ship names with spaces MUST be quoted
-starfleetctl agent-bus tell 'Wild Mary' "check status"
+starfleetctl comms tell 'Wild Mary' "check status"
 
 # Broadcast to all ships
-starfleetctl agent-bus broadcast "build is broken, hold off"
+starfleetctl comms broadcast "build is broken, hold off"
 
 # Send large payloads via stdin (bypasses ARG_MAX limit)
-cat report.txt | starfleetctl agent-bus tell Voyager --stdin
+cat report.txt | starfleetctl comms tell Voyager --stdin
 
 # Check your inbox
-starfleetctl agent-bus inbox
+starfleetctl comms inbox
 
 # Acknowledge a directive (removes from inbox)
-starfleetctl agent-bus ack m0042
-starfleetctl agent-bus ack m0042 "done"
+starfleetctl comms ack m0042
+starfleetctl comms ack m0042 "done"
 ```
 
 **Note:** `tell` and `cmd` print a warning to stderr when the target ship has no heartbeat on the board (e.g. not running or stale). The message is still delivered — the warning is informational only.
@@ -140,16 +140,16 @@ starfleetctl agent-bus ack m0042 "done"
 
 ```sh
 # Ask the flagship a question (blocks until reply)
-starfleetctl agent-bus ask "should I force-push?"
+starfleetctl comms ask "should I force-push?"
 
 # Custom controller and timeout
-starfleetctl agent-bus ask "approve PR?" --to control --timeout 30
+starfleetctl comms ask "approve PR?" --to control --timeout 30
 
 # Reply to a pending question (control side)
-starfleetctl agent-bus reply m0042 "yes, proceed"
+starfleetctl comms reply m0042 "yes, proceed"
 
 # List pending questions (control side)
-starfleetctl agent-bus asks
+starfleetctl comms asks
 ```
 
 ### Large Payloads
@@ -158,21 +158,21 @@ Messages over 768 bytes are auto-spilled into attachments:
 
 ```sh
 # Retrieve a large payload
-starfleetctl agent-bus get m0042              # print to stdout
-starfleetctl agent-bus get m0042 --out file  # write to file
+starfleetctl comms get m0042              # print to stdout
+starfleetctl comms get m0042 --out file  # write to file
 ```
 
 ### Maintenance
 
 ```sh
 # List all directives (control side)
-starfleetctl agent-bus msgs
+starfleetctl comms msgs
 
 # Show recent events
-starfleetctl agent-bus events 20
+starfleetctl comms events 20
 
 # Garbage-collect stale entries
-starfleetctl agent-bus prune
+starfleetctl comms prune
 ```
 
 ## Interoperability

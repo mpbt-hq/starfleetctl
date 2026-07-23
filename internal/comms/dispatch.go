@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 
-package agentbus
+package comms
 
 import (
 	"encoding/json"
@@ -150,13 +150,13 @@ func (b *Bus) dispatchConfig() dispatchResponse {
 	}
 	return dispatchResponse{
 		OK:              true,
-		HeartbeatMS:     cfg.AgentBus.HeartbeatMS,
-		PollMS:          cfg.AgentBus.PollMS,
-		FallbackModel:   cfg.AgentBus.FallbackModel,
-		RetryPollMS:     cfg.AgentBus.RetryPollMS,
-		RetryCooldownMS: cfg.AgentBus.RetryCooldownMS,
-		LogPollMS:       cfg.AgentBus.LogPollMS,
-		LogCooldownMS:   cfg.AgentBus.LogCooldownMS,
+		HeartbeatMS:     cfg.Comms.HeartbeatMS,
+		PollMS:          cfg.Comms.PollMS,
+		FallbackModel:   cfg.Comms.FallbackModel,
+		RetryPollMS:     cfg.Comms.RetryPollMS,
+		RetryCooldownMS: cfg.Comms.RetryCooldownMS,
+		LogPollMS:       cfg.Comms.LogPollMS,
+		LogCooldownMS:   cfg.Comms.LogCooldownMS,
 	}
 }
 
@@ -359,8 +359,8 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	target := ""
 	if action == "switch-model" {
 		cfg, err := config.Load(b.Root)
-		if err == nil && cfg.AgentBus.FallbackModel != "" {
-			target = cfg.AgentBus.FallbackModel
+		if err == nil && cfg.Comms.FallbackModel != "" {
+			target = cfg.Comms.FallbackModel
 		} else {
 			// No fallback configured → can't switch, fall back to retry.
 			action = "retry"

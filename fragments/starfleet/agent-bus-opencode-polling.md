@@ -36,11 +36,11 @@ their model.
 
 ### Rules for the assistant
 
-1. **Never manually call `starfleetctl agent-bus inbox`.** The poller already injects
+1. **Never manually call `starfleetctl comms inbox`.** The poller already injects
    new messages into the next turn's context. Doing so wastes a turn and
    is redundant.
 
-2. **Never call `starfleetctl agent-bus --help`.** The full interface (tell, ack, ask,
+2. **Never call `starfleetctl comms --help`.** The full interface (tell, ack, ask,
    board, status, etc.) is documented in the inter-ship-communication
    fragment (typically `agents.d/inter-ship-communication.md` or
    `agents.d/starfleet/inter-ship-communication.md`). These fragments are
@@ -81,17 +81,17 @@ needed beyond resuming your task on the alternate model.
 
 ### External model switching (setModel directive)
 
-Ships can switch their model at runtime via an agent-bus directive — no
+Ships can switch their model at runtime via an comms directive — no
 session restart required. Any ship or the web frontend can trigger this:
 
 ```sh
-starfleetctl agent-bus tell <ship> "setModel <model-name>"
+starfleetctl comms tell <ship> "setModel <model-name>"
 ```
 
 Example:
 ```sh
-starfleetctl agent-bus tell Enterprise "setModel opencode/big-pickle"
-starfleetctl agent-bus tell Yamato "setModel anthropic/claude-sonnet-4"
+starfleetctl comms tell Enterprise "setModel opencode/big-pickle"
+starfleetctl comms tell Yamato "setModel anthropic/claude-sonnet-4"
 ```
 
 The dispatch plugin parses the `setModel` directive from the inbox,

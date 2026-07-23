@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // starfleetctl consolidates the flock/race-prone mpbt-workspace
-// fleet-coordination scripts (agent-bus, pr-claim, ws-commit — in that
+// fleet-coordination scripts (comms, pr-claim, ws-commit — in that
 // order) into one Go CLI, one subcommand per script. See
 // mpbt-workspace/DASHBOARD.md ("mpbtctl" row) and .starfleet-ai/agents.d/index.md for the full
 // rationale and rollout plan. Lives in its own repo (metux/starfleetctl),
@@ -16,10 +16,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
 	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/bootstrap"
 	"github.com/metux/starfleetctl/internal/bridged"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/genesis"
 	"github.com/metux/starfleetctl/internal/hook"
@@ -38,12 +38,12 @@ import (
 	"github.com/metux/starfleetctl/internal/wscommit"
 )
 
-const helpText = `starfleetctl — fleet-coordination tool for the mpbt-workspace agent-bus.
+const helpText = `starfleetctl — fleet-coordination tool for the mpbt-workspace fleet.
 
 Usage:  starfleetctl <subcommand> [args...]
 
 Fleet management:
-  agent-bus         operate the session bus (read/write/ack/notify/status/health)
+  comms             inter-ship communication: read/write/ack/notify/status/health
   bootstrap         verify/fix workspace structure (dirs, allowlist, fragments)
   bridged           manage bridged ship sessions (exec/status/log)
   dashboard         render the workspace dashboard
@@ -211,8 +211,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
-	case "agent-bus":
-		os.Exit(agentbus.Run(root, os.Args[2:]))
+	case "comms":
+		os.Exit(comms.Run(root, os.Args[2:]))
 	case "dashboard":
 		os.Exit(dashboard.Run(root, os.Args[2:]))
 	case "ws-commit":

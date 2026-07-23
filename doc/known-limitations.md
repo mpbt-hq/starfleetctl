@@ -2,7 +2,7 @@
 
 Current caveats and workarounds.
 
-## agent-bus monitor-loop / fleet-watch
+## comms monitor-loop / fleet-watch
 
 **Broken under Claude Code's Monitor tool.** Both correctly detect a backlog match (message existing when started) but fail to notice messages arriving while running — only when spawned via `Monitor`. The same binary works fine backgrounded via plain `&`.
 
@@ -10,7 +10,7 @@ Current caveats and workarounds.
 
 ### opencode plugin polling (agent-facing)
 
-opencode has no `Monitor` tool, so the `starfleet-dispatch.ts` plugin polls the agent-bus and delivers incoming tell/broadcast directives in two ways:
+opencode has no `Monitor` tool, so the `starfleet-dispatch.ts` plugin polls the comms and delivers incoming tell/broadcast directives in two ways:
 
 1. **Toast notification** — each new message appears as a TUI toast popup with title `[fleet] <id> von <sender>` and full message text (auto-dismisses after ~10s). Implemented via `client.tui.showToast()`.
 2. **System prompt injection** — at each turn, unseen directives are injected into the system prompt via `experimental.chat.system.transform` (fallback if polling hasn't run yet).

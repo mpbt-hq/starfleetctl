@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 )
 
 // PipePath returns the canonical termctl pipe path for a ship.
@@ -40,7 +40,7 @@ func providerFromModel(model string) string {
 
 // ListSessions returns the list of running terminals (ship IDs from agent-bus).
 func ListSessions(root string) []string {
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err != nil {
 		return nil
 	}
@@ -56,8 +56,8 @@ func ListSessions(root string) []string {
 }
 
 // ListBoard returns all status records from the bus board.
-func ListBoard(root string) []agentbus.StatusRecord {
-	bus, err := agentbus.New(root)
+func ListBoard(root string) []comms.StatusRecord {
+	bus, err := comms.New(root)
 	if err != nil {
 		return nil
 	}

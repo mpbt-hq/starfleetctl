@@ -13,7 +13,7 @@
 # instead of prompting the local session.
 #
 # Delegates to `starfleetctl hook claude permission`, which reads the
-# PreToolUse JSON from stdin, asks the controller via agent-bus, blocks for
+# PreToolUse JSON from stdin, asks the controller via comms, blocks for
 # the answer, and emits the decision JSON.
 #
 # OPT-IN, PER WORKER. Enable by adding a PreToolUse entry pointing at this

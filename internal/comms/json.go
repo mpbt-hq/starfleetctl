@@ -7,7 +7,7 @@
 // Field names/values mirror the text columns exactly (age as a computed
 // integer of seconds rather than the "3m"/"1h2m" string, so callers don't
 // have to re-derive it) — same underlying data, just structured.
-package agentbus
+package comms
 
 import (
 	"encoding/json"

@@ -6,7 +6,7 @@
 // show-pr-conflict) — DASHBOARD.md "starfleetctl" row, Phase 2. Each script
 // becomes its own top-level starfleetctl subcommand (not grouped behind a
 // single "gh" verb) since none of them share state or a lock file the way
-// the fleet-coordination packages (agentbus/prclaim/wscommit) do — they are
+// the fleet-coordination packages (comms/prclaim/wscommit) do — they are
 // stateless, read-only wrappers around `gh`.
 //
 // All of them still shell out to the `gh` CLI rather than talking to the

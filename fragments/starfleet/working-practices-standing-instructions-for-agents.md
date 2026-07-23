@@ -13,7 +13,7 @@ These apply to **every** session — they keep knowledge and tooling from decayi
 cleared:
 
 - **Language policy: converse with the praetor and other ships in the project's primary spoken
-   language, everything else in English.** Any `starfleetctl agent-bus tell`/`broadcast` text — whether directed
+   language, everything else in English.** Any `starfleetctl comms tell`/`broadcast` text — whether directed
   at the praetor or at another ship — is in the project's primary spoken language (e.g. German for
   the XLibre fleet). Anything that becomes part of the project's durable artifacts stays English:
   code, code comments, commit messages, PR titles/descriptions/review comments, other GitHub
@@ -51,7 +51,7 @@ cleared:
    `background` or `auto` (detached, no human at the terminal), do NOT ask clarifying questions on
    the console and never block waiting for stdin — there is nobody there to answer. Act autonomously
    from the directive you were given; if you genuinely must ask, do it ONLY over the agent bus
-   (`starfleetctl agent-bus ask "<question>"` or `tell <sender>`), which the praetor/another ship can
+   (`starfleetctl comms ask "<question>"` or `tell <sender>`), which the praetor/another ship can
    answer asynchronously. The launch prompt already states this; treat it as binding. Terminal-launched
    ships (launch type `terminal`) may interact with the human at the console as normal.
 - **Never `nohup` the web server.** Use `starfleetctl web restart` to start or restart the fleet
@@ -60,9 +60,9 @@ cleared:
    running. Never use `nohup starfleetctl web …` — it bypasses PID tracking and leaves orphan
    processes.
 - **Always respond to bus messages over the bus.** When a `tell` or `ask` arrives in your inbox,
-   always send a reply via `starfleetctl agent-bus tell <sender> <reply>` — never only process
+   always send a reply via `starfleetctl comms tell <sender> <reply>` — never only process
    it internally without answering. The sender expects a bus response; silence means the message
-   was lost. Ack the message (`agent-bus ack <id>`) after responding.
+   was lost. Ack the message (`comms ack <id>`) after responding.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.

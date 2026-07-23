@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Package agentbus is the Go port of scripts/agent-bus — the file-based
+// Package comms is the Go port of scripts/agent-bus — the file-based
 // status + directive bus for coordinating many independent agent sessions.
 // It reads/writes the exact same .starfleet-ai/var/agent-bus/ file format as the
 // bash original, so a Go and bash session can interoperate on one bus
 // without either side knowing the other is a different implementation.
-package agentbus
+package comms
 
 import (
 	"fmt"
@@ -169,7 +169,7 @@ func (b *Bus) sfile(agent string) string {
 func (b *Bus) mfile(id string, target string) (string, error) {
 	safe, ok := fsutil.Safe(id)
 	if !ok {
-		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
+		return "", fmt.Errorf("comms: invalid message id %q", id)
 	}
 	if target == "" {
 		// For backwards compat during migration: try to find the message in any target subdir
@@ -188,7 +188,7 @@ func (b *Bus) mfile(id string, target string) (string, error) {
 func (b *Bus) mfileSeen(target, id string) (string, error) {
 	safe, ok := fsutil.Safe(id)
 	if !ok {
-		return "", fmt.Errorf("agent-bus: invalid message id %q", id)
+		return "", fmt.Errorf("comms: invalid message id %q", id)
 	}
 	targetSafe := fsafe(target)
 	seenDir := filepath.Join(b.MsgDir, targetSafe, "seen")
@@ -298,7 +298,7 @@ func (b *Bus) ackedCount(id string) int {
 // warnID warns if STARFLEET_SHIP_ID is not set (uses fallback "anon-<pid>").
 func (b *Bus) warnID() {
 	if !b.ShipIDSet {
-		fmt.Fprintf(os.Stderr, "agent-bus: note: STARFLEET_SHIP_ID not set; using '%s' — set a unique STARFLEET_SHIP_ID per agent.\n", b.ShipID)
+		fmt.Fprintf(os.Stderr, "comms: note: STARFLEET_SHIP_ID not set; using '%s' — set a unique STARFLEET_SHIP_ID per agent.\n", b.ShipID)
 	}
 }
 

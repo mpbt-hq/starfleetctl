@@ -73,7 +73,7 @@ Each PR can be "claimed" by one agent at a time. Claims are advisory (cooperativ
 ```
 1. Agent session starts
 2. ship-names assign → gets "Voyager"
-3. agent-bus status working "starting up"
+3. comms status working "starting up"
 4. Dashboard shows: Voyager | working | 0s
 ```
 
@@ -82,14 +82,14 @@ Each PR can be "claimed" by one agent at a time. Claims are advisory (cooperativ
 ```
 Enterprise                          Voyager
     │                                   │
-    │  agent-bus tell Voyager "..."     │
+    │  comms tell Voyager "..."     │
     │  ─────────────────────────────►   │
     │                                   │
-    │                           agent-bus inbox
+    │                           comms inbox
     │                           shows m0042
     │                                   │
-    │                           agent-bus ack m0042
-    │                           agent-bus tell Enterprise "done"
+    │                           comms ack m0042
+    │                           comms tell Enterprise "done"
     │  ◄─────────────────────────────   │
     │                                   │
 ```

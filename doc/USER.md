@@ -107,12 +107,12 @@ Messages are JSON files:
 
 ```sh
 # Commands (executed, not injected)
-starfleetctl agent-bus cmd Voyager model gpt-4o
-starfleetctl agent-bus cmd Voyager quit
+starfleetctl comms cmd Voyager model gpt-4o
+starfleetctl comms cmd Voyager quit
 
 # Directives (injected as system prompt)
-starfleetctl agent-bus tell Voyager "run tests"
-starfleetctl agent-bus broadcast "roll call"
+starfleetctl comms tell Voyager "run tests"
+starfleetctl comms broadcast "roll call"
 ```
 
 ### PR Claims — Advisory Branch Locking
@@ -161,7 +161,7 @@ This creates `starfleet-bootstrap` — commit this file. On fresh clones, teamma
 ### 3.4 Verify Fleet is Running
 
 ```sh
-starfleetctl agent-bus board
+starfleetctl comms board
 ```
 
 You should see `Enterprise` (flagship) and your worker ships.
@@ -173,57 +173,57 @@ You should see `Enterprise` (flagship) and your worker ships.
 ### 4.1 Posting Status
 
 ```sh
-starfleetctl agent-bus status working "implementing feature X"
-starfleetctl agent-bus status blocked "waiting for review on PR #3142"
-starfleetctl agent-bus status idle
-starfleetctl agent-bus touch      # refresh heartbeat without changing state
-starfleetctl agent-bus clear      # call on session exit
+starfleetctl comms status working "implementing feature X"
+starfleetctl comms status blocked "waiting for review on PR #3142"
+starfleetctl comms status idle
+starfleetctl comms touch      # refresh heartbeat without changing state
+starfleetctl comms clear      # call on session exit
 ```
 
 ### 4.2 Sending Messages
 
 ```sh
 # Direct message
-starfleetctl agent-bus tell Voyager "run tests on branch feature-x"
+starfleetctl comms tell Voyager "run tests on branch feature-x"
 
 # Ship names with spaces need quotes
-starfleetctl agent-bus tell 'Wild Mary' "check status"
+starfleetctl comms tell 'Wild Mary' "check status"
 
 # Broadcast to all
-starfleetctl agent-bus broadcast "build broken, hold off pushes"
+starfleetctl comms broadcast "build broken, hold off pushes"
 
 # Large payloads via stdin
-cat big-report.txt | starfleetctl agent-bus tell Voyager --stdin
+cat big-report.txt | starfleetctl comms tell Voyager --stdin
 ```
 
 ### 4.3 Receiving Messages
 
 ```sh
 # Check inbox
-starfleetctl agent-bus inbox
+starfleetctl comms inbox
 
 # Acknowledge (removes from inbox)
-starfleetctl agent-bus ack m0042
-starfleetctl agent-bus ack m0042 "done, tests pass"
+starfleetctl comms ack m0042
+starfleetctl comms ack m0042 "done, tests pass"
 
 # Get large attachment
-starfleetctl agent-bus get m0042 --out report.txt
+starfleetctl comms get m0042 --out report.txt
 ```
 
 ### 4.4 Asking Questions (Blocking)
 
 ```sh
 # Ask the flagship (blocks until reply)
-starfleetctl agent-bus ask "force-push to fix history?"
+starfleetctl comms ask "force-push to fix history?"
 
 # Custom controller & timeout
-starfleetctl agent-bus ask "approve PR?" --to control --timeout 60
+starfleetctl comms ask "approve PR?" --to control --timeout 60
 ```
 
 **Flagship side:**
 ```sh
-starfleetctl agent-bus asks          # list pending questions
-starfleetctl agent-bus reply m0042 "yes, proceed"
+starfleetctl comms asks          # list pending questions
+starfleetctl comms reply m0042 "yes, proceed"
 ```
 
 ### 4.5 Safe Commits (Serialized Git Operations)
@@ -294,7 +294,7 @@ starfleetctl worktree remove <branch>
 
 | Command | Purpose |
 |---------|---------|
-| `agent-bus` | Status board + cross-session messaging |
+| `comms` | Status board + cross-session messaging |
 | `dashboard` | Project topic tracking |
 | `pr-claim` | Advisory PR-branch locks |
 | `ws-commit` | Atomic commit+push under lock |
@@ -379,7 +379,7 @@ ls -la .starfleet-ai/var/agent-bus/status/
 echo $STARFLEET_BUS_DIR
 
 # Prune stale entries
-starfleetctl agent-bus prune
+starfleetctl comms prune
 ```
 
 ### 7.3 "Ship name already in use"
@@ -414,7 +414,7 @@ starfleetctl web stop                  # kill daemon
 
 - Both **must** use same `STARFLEET_BUS_DIR` (default `.starfleet-ai/var/agent-bus`)
 - Both use same `flock` on `.lock` — don't mix custom lock paths
-- Run `starfleetctl agent-bus prune` periodically
+- Run `starfleetctl comms prune` periodically
 
 ### 7.8 Agent Bus Monitor Loop Not Seeing New Messages
 
@@ -482,7 +482,7 @@ workspace/
 |----------|-------------|
 | [README.md](README.md) | Project overview & quick reference |
 | [doc/architecture.md](doc/architecture.md) | Internal architecture & data flow |
-| [doc/agent-bus.md](doc/agent-bus.md) | Agent bus command reference |
+| [doc/comms.md](doc/agent-bus.md) | Comms command reference |
 | [doc/session.md](doc/session.md) | Session & worktree management |
 | [doc/pr-claim.md](doc/pr-claim.md) | PR locking details |
 | [doc/web-ui.md](doc/web-ui.md) | Web UI deep dive |

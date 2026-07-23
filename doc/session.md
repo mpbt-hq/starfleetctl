@@ -51,7 +51,7 @@ starfleetctl session ship-run --name Voyager --model opencode/big-pickle
 ```
 
 Launches an opencode control-agent session in a detached terminal. The ship
-appears on the fleet board and participates in agent-bus communication.
+appears on the fleet board and participates in comms communication.
 
 ### stop
 
@@ -60,7 +60,7 @@ appears on the fleet board and participates in agent-bus communication.
 starfleetctl session stop Voyager
 ```
 
-Kills the terminal, clears the agent-bus heartbeat, and releases the ship name.
+Kills the terminal, clears the comms heartbeat, and releases the ship name.
 
 ### autoscale
 

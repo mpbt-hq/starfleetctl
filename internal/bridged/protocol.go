@@ -28,7 +28,7 @@ import (
 const maxFrameSize = 64 * 1024 * 1024
 
 // Request is one bridged call: cmd selects the command family (only
-// "agent-bus" and "dashboard" are dispatchable in this step; "ping" is
+// "comms" and "dashboard" are dispatchable in this step; "ping" is
 // handled specially as a liveness check, not forwarded to either), args are
 // the same argv a CLI invocation of that family would receive.
 //

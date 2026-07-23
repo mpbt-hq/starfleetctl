@@ -14,9 +14,9 @@ import (
 
 // Config holds all starfleetctl configuration.
 type Config struct {
-	Web      WebConfig      `yaml:"web"`
-	AgentBus AgentBusConfig `yaml:"agent_bus"`
-	Fleet    FleetConfig    `yaml:"fleet"`
+	Web   WebConfig   `yaml:"web"`
+	Comms CommsConfig `yaml:"comms"`
+	Fleet FleetConfig `yaml:"fleet"`
 }
 
 // FleetConfig holds fleet-wide identity settings.
@@ -43,8 +43,8 @@ type WebConfig struct {
 	ShipHandle string `yaml:"ship_handle"`
 }
 
-// AgentBusConfig holds agent-bus / opencode plugin tuning knobs.
-type AgentBusConfig struct {
+// CommsConfig holds comms / opencode plugin tuning knobs.
+type CommsConfig struct {
 	HeartbeatMS     int    `yaml:"heartbeat_ms"`
 	PollMS          int    `yaml:"poll_ms"`
 	FallbackModel   string `yaml:"fallback_model"`
@@ -63,7 +63,7 @@ func DefaultConfig() *Config {
 			PIDFile:          ".starfleet-ai/var/web.pid",
 			LogFile:          ".starfleet-ai/var/log/web.log",
 		},
-		AgentBus: AgentBusConfig{
+		Comms: CommsConfig{
 			HeartbeatMS:     300_000,
 			PollMS:          3_000,
 			RetryPollMS:     2_000,
@@ -83,7 +83,7 @@ func WorkDir(root string) string {
 	return filepath.Join(root, ".starfleet-ai", "var")
 }
 
-// BusDir returns the agent-bus directory under WorkDir.
+// BusDir returns the comms directory under WorkDir.
 func BusDir(root string) string {
 	return filepath.Join(WorkDir(root), "agent-bus")
 }
@@ -94,8 +94,8 @@ func LogDir(root string) string {
 }
 
 // Load reads configuration from .starfleet-ai/conf/web.yaml and
-// .starfleet-ai/conf/agent-bus.yaml. Missing files are OK (defaults apply).
-// Each YAML file wraps its content under a top-level key (web:, agent_bus:),
+// .starfleet-ai/conf/comms.yaml. Missing files are OK (defaults apply).
+// Each YAML file wraps its content under a top-level key (web:, comms:),
 // so we unmarshal into a node map to extract the inner config.
 func Load(root string) (*Config, error) {
 	cfg := DefaultConfig()
@@ -106,7 +106,7 @@ func Load(root string) (*Config, error) {
 		dst  interface{}
 	}{
 		{"web.yaml", "web", &cfg.Web},
-		{"agent-bus.yaml", "agent_bus", &cfg.AgentBus},
+		{"comms.yaml", "comms", &cfg.Comms},
 		{"fleet.yaml", "fleet", &cfg.Fleet},
 	} {
 		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)

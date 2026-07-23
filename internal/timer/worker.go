@@ -24,7 +24,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/robfig/cron/v3"
 )
@@ -38,7 +38,7 @@ const (
 // RunWorker starts the timer worker daemon (blocking). It polls all timer
 // directories, fires due timers, and handles SIGHUP/SIGTERM.
 func RunWorker(root string) error {
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err != nil {
 		return fmt.Errorf("timer worker: agent-bus: %w", err)
 	}
@@ -146,7 +146,7 @@ func WorkerStatus(root string) (running bool, pid int) {
 }
 
 // processTimers fires all due timers across all stores.
-func processTimers(stores []*Store, bus *agentbus.Bus, logFile *os.File, persistentVarDir string) {
+func processTimers(stores []*Store, bus *comms.Bus, logFile *os.File, persistentVarDir string) {
 	now := time.Now()
 
 	for _, store := range stores {
@@ -192,7 +192,7 @@ func processTimers(stores []*Store, bus *agentbus.Bus, logFile *os.File, persist
 
 // resolveTargets returns the list of ship IDs to send the directive to,
 // based on the timer's target spec and the current fleet board.
-func resolveTargets(bus *agentbus.Bus, t *TimerRecord) []string {
+func resolveTargets(bus *comms.Bus, t *TimerRecord) []string {
 	switch t.Target.Type {
 	case TargetShip:
 		return []string{t.Target.Value}
@@ -210,7 +210,7 @@ func resolveTargets(bus *agentbus.Bus, t *TimerRecord) []string {
 }
 
 // fleetIdle returns all non-stale board entries with state idle or done.
-func fleetIdle(bus *agentbus.Bus) []string {
+func fleetIdle(bus *comms.Bus) []string {
 	var out []string
 	for _, e := range bus.BoardEntries() {
 		if e.Stale {

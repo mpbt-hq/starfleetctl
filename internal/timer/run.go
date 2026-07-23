@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/robfig/cron/v3"
 )
@@ -215,7 +215,7 @@ func runSet(root string, args []string) int {
 	}
 
 	// Resolve owner from bus identity.
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "timer: agent-bus: %v\n", err)
 		return 1
@@ -268,7 +268,7 @@ func runList(root string, args []string) int {
 		}
 	}
 
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "timer: agent-bus: %v\n", err)
 		return 1
@@ -360,7 +360,7 @@ func runCancel(root string, args []string) int {
 }
 
 func runClear(root string, args []string) int {
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "timer: agent-bus: %v\n", err)
 		return 1

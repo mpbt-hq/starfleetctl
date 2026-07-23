@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 )
 
 const usage = `session <command> [args…]
@@ -180,7 +180,7 @@ func resolvePipe(root, id string) (string, bool) {
 	}
 
 	// 2. Check agent-bus board for matching agent/handle
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err != nil {
 		return "", false
 	}

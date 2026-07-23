@@ -8,7 +8,7 @@ A browser-based dashboard for monitoring and controlling your agent fleet.
 starfleetctl web start [--addr :8080]
 ```
 
-Opens a single-page app at `http://localhost:8080` (default). The server reads the agent-bus state from the workspace and serves both the API and the embedded frontend.
+Opens a single-page app at `http://localhost:8080` (default). The server reads the comms state from the workspace and serves both the API and the embedded frontend.
 
 ## Screenshots
 
@@ -87,11 +87,11 @@ Send a message to any agent or broadcast to the entire fleet.
 
 - Select target from dropdown (populated from live board)
 - Type message and click "Senden"
-- Uses the real agent-bus (`agent-bus tell` / `agent-bus broadcast`)
+- Uses the real comms (`comms tell` / `comms broadcast`)
 
 ### Log
 
-Live event feed from the agent-bus audit log. Shows the last N events (default 20, configurable via `?n=`). Auto-refreshes every 15 seconds.
+Live event feed from the comms audit log. Shows the last N events (default 20, configurable via `?n=`). Auto-refreshes every 15 seconds.
 
 ## API Endpoints
 
@@ -122,13 +122,13 @@ The web UI is a single embedded HTML file (`internal/web/index.html`) with vanil
 ```
 Browser  ──HTTP──▶  starfleetctl web start
                        │
-                       ├── /api/board     ──▶ agent-bus status/
-                       ├── /api/msgs      ──▶ agent-bus msgs/
+                       ├── /api/board     ──▶ comms status/
+                       ├── /api/msgs      ──▶ comms msgs/
                        ├── /api/inbox     ──▶ (filtered msgs)
                        ├── /api/asks      ──▶ (filtered msgs)
-                       ├── /api/events    ──▶ agent-bus events.log
+                       ├── /api/events    ──▶ comms events.log
                        ├── /api/tasks     ──▶ dashboard/topics/*.md
-                       ├── /api/tell      ──▶ agent-bus tell/broadcast
+                       ├── /api/tell      ──▶ comms tell/broadcast
                        ├── /api/models    ──▶ models.yaml
                        ├── /api/ship      ──▶ session.LaunchShip()
                        └── /              ──▶ index.html (embedded)

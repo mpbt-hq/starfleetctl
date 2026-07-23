@@ -14,21 +14,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/dashboard"
 )
 
-// allowedAgentBusSubcommands is a deliberate ALLOWLIST, not a blocklist.
-// agentbus.Run() also dispatches "ask" (blocks polling for a reply, up to
+// allowedCommsSubcommands is a deliberate ALLOWLIST, not a blocklist.
+// comms.Run() also dispatches "ask" (blocks polling for a reply, up to
 // --timeout, and calls os.Exit(3) directly on timeout — which would kill
 // this whole daemon, not just fail one request) and "monitor-loop" /
 // "fleet-watch" / "watch" (each an intentionally infinite polling loop that
 // never returns). Any of those reaching the shared dispatch path would wedge
 // or kill the daemon for every connected client, not just the one that
-// asked for it. An allowlist means a future agentbus subcommand that turns
+// asked for it. An allowlist means a future comms subcommand that turns
 // out to block is safe-by-default (rejected) until explicitly reviewed and
 // added here, rather than silently reachable through the daemon.
-var allowedAgentBusSubcommands = map[string]bool{
+var allowedCommsSubcommands = map[string]bool{
 	"":          true, // no args -> DoBoard default, same as the CLI
 	"-h":        true,
 	"--help":    true,
@@ -53,13 +53,13 @@ var allowedAgentBusSubcommands = map[string]bool{
 
 // execMu serializes command *execution* (not connection acceptance) across
 // all connections. This exists solely to make the os.Stdout/os.Stderr
-// swap-and-capture trick below safe under concurrency — agentbus.Run and
+// swap-and-capture trick below safe under concurrency — comms.Run and
 // dashboard.Run are CLI-shaped (print to the process-wide stdout/stderr,
 // return an int exit code) rather than writer-injectable, so capturing one
 // call's output means temporarily redirecting the real os.Stdout/os.Stderr
 // for that call's duration; without serializing, two concurrent requests
 // would corrupt each other's captured output. File-level correctness was
-// never resting on this mutex — agentbus/dashboard already serialize their
+// never resting on this mutex — comms/dashboard already serialize their
 // real mutations via flock independently of this.
 var execMu sync.Mutex
 
@@ -75,28 +75,28 @@ func dispatch(root string, req Request) Response {
 	switch req.Cmd {
 	case "ping":
 		return Response{ExitCode: 0, Stdout: "pong\n"}
-	case "agent-bus":
+	case "comms":
 		sub := ""
 		if len(req.Args) > 0 {
 			sub = req.Args[0]
 		}
-		if !allowedAgentBusSubcommands[sub] {
+		if !allowedCommsSubcommands[sub] {
 			return Response{ExitCode: 2, Stderr: fmt.Sprintf(
-				"bridged: agent-bus subcommand %q is not available via the daemon "+
+				"bridged: comms subcommand %q is not available via the daemon "+
 					"(blocking/long-running or process-exiting) — use the CLI directly\n", sub)}
 		}
-		code, stdout, stderr := runCaptured(req.Env, func() int { return agentbus.Run(root, req.Args) })
+		code, stdout, stderr := runCaptured(req.Env, func() int { return comms.Run(root, req.Args) })
 		return Response{ExitCode: code, Stdout: stdout, Stderr: stderr}
 	case "dashboard":
 		code, stdout, stderr := runCaptured(req.Env, func() int { return dashboard.Run(root, req.Args) })
 		return Response{ExitCode: code, Stdout: stdout, Stderr: stderr}
 	default:
-		return Response{ExitCode: 2, Stderr: fmt.Sprintf("bridged: unknown cmd %q (want \"agent-bus\" or \"dashboard\")\n", req.Cmd)}
+		return Response{ExitCode: 2, Stderr: fmt.Sprintf("bridged: unknown cmd %q (want \"comms\" or \"dashboard\")\n", req.Cmd)}
 	}
 }
 
 // allowedEnvOverrides is the identity-related subset of environment
-// variables a request may override — exactly what agentbus.New reads to
+// variables a request may override — exactly what comms.New reads to
 // resolve an agent's identity (STARFLEET_SHIP_ID, PROJECT,
 // STARFLEET_AGENT_HANDLE), per Enterprise's directive (m0082). Deliberately NOT
 // including infra-level vars like STARFLEET_BUS_DIR/STARFLEET_BUS_TTL: overriding those per

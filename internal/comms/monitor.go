@@ -33,7 +33,7 @@
 // original failure mode either way — untested, not confirmed safe or
 // unsafe. See DASHBOARD.md's starfleetctl row / the m0047 topic file for
 // the full writeup.
-package agentbus
+package comms
 
 import (
 	"fmt"

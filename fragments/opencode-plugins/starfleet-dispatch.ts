@@ -10,15 +10,15 @@ import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
 
-// Generic JSON-RPC to starfleetctl agent-bus dispatch.
+// Generic JSON-RPC to starfleetctl comms dispatch.
 // JSON in via stdin → JSON out. No shell escaping, no text parsing.
 function bus(cmd: Record<string, unknown>): any {
   try {
     const raw = execSync(
-      `.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
+      `.starfleet-ai/bin/starfleetctl comms dispatch --stdin`,
       { input: JSON.stringify(cmd), cwd: ROOT, timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'] }
     ).toString().trim()
-    // starfleetctl may emit "agent-bus: directive ..." lines before the JSON response.
+    // starfleetctl may emit "comms: directive ..." lines before the JSON response.
     // Strip non-JSON lines to avoid parse errors.
     const jsonStart = raw.indexOf('{')
     const jsonStr = jsonStart >= 0 ? raw.slice(jsonStart) : raw
@@ -79,7 +79,7 @@ function aid(): string {
   return process.env.STARFLEET_SHIP_ID || 'default'
 }
 
-// Reliable, TUI-independent tick log: sends to starfleetctl agent-bus dispatch
+// Reliable, TUI-independent tick log: sends to starfleetctl comms dispatch
 // so logs are centralized in the events file (can `starfleetctl events` to view).
 function tickLog(line: string): void {
   try { bus({ cmd: 'tick', note: line }) } catch { /* ignore */ }
@@ -385,7 +385,7 @@ export const plugin = async ({ client, $ }: any) => {
     clearInterval(logPollTimer)
     try {
       const { execSync } = require('node:child_process')
-      execSync(`.starfleet-ai/bin/starfleetctl agent-bus dispatch --stdin`,
+      execSync(`.starfleet-ai/bin/starfleetctl comms dispatch --stdin`,
         { input: '{"cmd":"exit","note":"process exit"}', cwd: ROOT, timeout: 2000, stdio: ['pipe', 'ignore', 'ignore'] })
     } catch { /* ignore */ }
   })
@@ -431,7 +431,7 @@ export const plugin = async ({ client, $ }: any) => {
       }
       if (lines.length > 0) {
         output.system.push(
-          '', '--- fleet directives (from other ships via agent-bus) ---',
+          '', '--- fleet directives (from other ships via comms) ---',
           'These are directives received from other ships in the fleet.',
           'Process each directive and carry out the requested action.',
           '', ...lines,

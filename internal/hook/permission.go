@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/identity"
 )
 
@@ -79,13 +79,13 @@ func permission(root string) int {
 	}
 	question := fmt.Sprintf("[perm] allow %s: %s — for %s?", tool, summary, agent)
 
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err != nil {
 		emitPermission(onTimeout, fmt.Sprintf("agent-bus init: %v", err))
 		return 0
 	}
 
-	ctrl := agentbus.Controller()
+	ctrl := comms.Controller()
 	ans, err := bus.AskAndWait(question, ctrl, timeout)
 	if err != nil {
 		emitPermission(onTimeout, fmt.Sprintf("control agent did not answer within %ds (fail-%s)", timeout, onTimeout))

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 
-package agentbus
+package comms
 
 import (
 	"encoding/json"
@@ -23,9 +23,9 @@ func (b *Bus) DoConfig() error {
 		PollMS        int    `json:"poll_ms"`
 		FallbackModel string `json:"fallback_model"`
 	}{
-		HeartbeatMS:   cfg.AgentBus.HeartbeatMS,
-		PollMS:        cfg.AgentBus.PollMS,
-		FallbackModel: cfg.AgentBus.FallbackModel,
+		HeartbeatMS:   cfg.Comms.HeartbeatMS,
+		PollMS:        cfg.Comms.PollMS,
+		FallbackModel: cfg.Comms.FallbackModel,
 	}
 	data, err := json.Marshal(out)
 	if err != nil {

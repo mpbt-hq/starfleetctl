@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -168,9 +168,9 @@ func RunCmd(root string, args []string) int {
 	}
 
 	// Post initial heartbeat
-	if bus, err := agentbus.New(root); err == nil {
+	if bus, err := comms.New(root); err == nil {
 		provider := providerFromModel(model)
-		_ = bus.DoStatus("idle", client+" session starting (run)", agentbus.StatusPatch{
+		_ = bus.DoStatus("idle", client+" session starting (run)", comms.StatusPatch{
 			LaunchType: "terminal",
 			Parent:     shipnames.FlagshipName(root),
 			Provider:   provider,

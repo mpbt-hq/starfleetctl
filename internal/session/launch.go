@@ -12,7 +12,7 @@ import (
 	"syscall"
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
-	"github.com/metux/starfleetctl/internal/agentbus"
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -495,7 +495,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 // `session stop`, also usable from the web console's "stop ship" action.
 func StopShip(root string, id string) error {
 	// Check agent-bus for a matching agent/handle to resolve the canonical ID
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err == nil {
 		for _, r := range bus.AllStatusRecords() {
 			if r.Agent == id || r.Handle == id {
@@ -517,7 +517,7 @@ func StopShip(root string, id string) error {
 	shipReg := shipnames.New(root)
 	_, nameReserved := shipReg.Lookup(id)
 	_ = os.Setenv("STARFLEET_SHIP_ID", id)
-	if bus, err := agentbus.New(root); err == nil {
+	if bus, err := comms.New(root); err == nil {
 		_ = bus.DoClear()
 	}
 	_ = shipReg.DoRelease(id)
@@ -592,7 +592,7 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 	if vars.ReleaseFull != "" {
 		os.Setenv("PROJECT", vars.ReleaseFull)
 	}
-	if bus, err := agentbus.New(root); err == nil {
+	if bus, err := comms.New(root); err == nil {
 		provider := vars.Provider
 		if provider == "" {
 			provider = providerFromModel(vars.Model)
@@ -605,7 +605,7 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 		if parent == "" {
 			parent = shipnames.FlagshipName(root)
 		}
-		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")", agentbus.StatusPatch{
+		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")", comms.StatusPatch{
 			LaunchType: launchType,
 			Parent:     parent,
 			Provider:   provider,
@@ -639,7 +639,7 @@ func runStop(root string, args []string) int {
 	id := args[0]
 
 	// Check agent-bus for a matching agent/handle to resolve the canonical ID
-	bus, err := agentbus.New(root)
+	bus, err := comms.New(root)
 	if err == nil {
 		for _, r := range bus.AllStatusRecords() {
 			if r.Agent == id || r.Handle == id {
@@ -665,7 +665,7 @@ func runStop(root string, args []string) int {
 	shipReg := shipnames.New(root)
 	_, nameReserved := shipReg.Lookup(id)
 	os.Setenv("STARFLEET_SHIP_ID", id)
-	if bus, err := agentbus.New(root); err == nil {
+	if bus, err := comms.New(root); err == nil {
 		_ = bus.DoClear()
 	}
 	_ = shipReg.DoRelease(id)

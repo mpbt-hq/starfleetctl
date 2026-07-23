@@ -1,15 +1,15 @@
 ---
 slug: starfleet/inter-ship-communication
-title: "Inter-ship communication (agent-bus)"
+title: "Inter-ship communication (comms)"
 order: 12
 owner: "starfleetctl"
 ---
 
 <!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/inter-ship-communication.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
 
-## Inter-ship communication (agent-bus)
+## Inter-ship communication (comms)
 
-Ships communicate autonomously via `starfleetctl agent-bus`. No central
+Ships communicate autonomously via `starfleetctl comms`. No central
 orchestrator is required — every ship reads its inbox, acts on directives,
 and responds.
 
@@ -17,23 +17,23 @@ and responds.
 
 1. **Always answer broadcast check-ins / roll calls.** When another ship sends
    a broadcast asking all ships to check in, ack the message
-   (`starfleetctl agent-bus ack <id>`) and reply with status (`starfleetctl agent-bus tell <sender> ...`).
+   (`starfleetctl comms ack <id>`) and reply with status (`starfleetctl comms tell <sender> ...`).
 
 2. **Ships accept and process tasks autonomously.** If a directive can be
    handled without human intervention, do it and report back. If clarification
-   is needed, use `starfleetctl agent-bus ask` (blocking) or `starfleetctl agent-bus tell` to the
+   is needed, use `starfleetctl comms ask` (blocking) or `starfleetctl comms tell` to the
    sender.
 
 3. **Report status proactively.** After any action taken on behalf of another
-   ship, send a status update (`starfleetctl agent-bus tell <sender>`) so the fleet knows
+   ship, send a status update (`starfleetctl comms tell <sender>`) so the fleet knows
    the state of play.
 
-4. **Keep the board current.** Run `starfleetctl agent-bus status <state> [note]` after
+4. **Keep the board current.** Run `starfleetctl comms status <state> [note]` after
    starting or finishing work so the fleet sees who is idle/working/blocked.
 
 ### Commands you will use
 
-All commands prefixed with `starfleetctl agent-bus`.
+All commands prefixed with `starfleetctl comms`.
 
 | Command | Purpose |
 |---------|---------|
@@ -55,7 +55,7 @@ All commands prefixed with `starfleetctl agent-bus`.
 For multi-line or large messages, pipe via stdin:
 
 ```sh
-cat <<'EOF' | starfleetctl agent-bus tell Yamato --stdin
+cat <<'EOF' | starfleetctl comms tell Yamato --stdin
 multi-line message here
 EOF
 ```
@@ -69,10 +69,10 @@ When a **human** needs to centrally steer workers, use the **control agent** mod
 
 ```sh
 # As worker — ask controller
-starfleetctl agent-bus ask "should I force-push?"
+starfleetctl comms ask "should I force-push?"
 
 # As controller — answer
-starfleetctl agent-bus reply <qid> "yes, proceed"
-starfleetctl agent-bus reply <qid> allow   # permit tool call
-starfleetctl agent-bus reply <qid> deny    # deny tool call
+starfleetctl comms reply <qid> "yes, proceed"
+starfleetctl comms reply <qid> allow   # permit tool call
+starfleetctl comms reply <qid> deny    # deny tool call
 ```

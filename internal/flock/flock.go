@@ -12,7 +12,7 @@
 // misreport.
 //
 // Before this package existed, six near-identical lockHandle + lock()
-// implementations lived in agentbus/prclaim/dashboard/agents/shipnames/
+// implementations lived in comms/prclaim/dashboard/agents/shipnames/
 // wscommit; they diverged (some blocked forever, some never recorded a
 // holder). This package is the one true implementation.
 package flock

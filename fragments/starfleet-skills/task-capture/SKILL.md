@@ -20,9 +20,9 @@ and forwards the printed summary. No judgement, no file editing.
 2. **No direct file access.** Never `Read`/`Edit`/`Write` `DASHBOARD.md` or
    `dashboard/topics/*.md`. All access goes through `starfleetctl task …` or
    `starfleetctl dashboard topic …` (the helper already does this).
-3. **Messages to other ships / the praetor go in German** (agent-bus
+3. **Messages to other ships / the praetor go in German** (comms
    `tell`/`broadcast`). Code, commits, and doc files stay English.
-4. **Report back** to the sender (e.g. Enterprise) via `agent-bus tell` with
+4. **Report back** to the sender (e.g. Enterprise) via `comms tell` with
    the printed summary after running.
 
 ## The one-liner (preferred — small-model friendly)
@@ -36,7 +36,7 @@ starfleetctl task capture --title "<short task title>" \
 ```
 
 - `--assign` with **no ship name** → picks the first `idle`, non-stale ship
-  from the agent-bus board and commissions it.
+  from the comms board and commissions it.
 - `--assign <ship>` → commission that specific ship.
 - Without `--assign` → task is recorded as `open` (open), no ship yet.
 - `--no-push` → stage + commit locally but don't push to origin.
@@ -55,7 +55,7 @@ that to the sender.
    `created-by`, `created`, `assigned-to`, plus the description body.
 4. `starfleetctl dashboard topic commit` — commits + pushes just that one file.
 5. `starfleetctl dashboard reindex` + `dashboard commit` — refreshes the index.
-6. If a ship was chosen: `starfleetctl agent-bus tell <ship>` with a German
+6. If a ship was chosen: `starfleetctl comms tell <ship>` with a German
    directive pointing at the dashboard topic.
 
 ## Assigning, unassigning, and updating existing tasks
@@ -81,7 +81,7 @@ starfleetctl task status <slug> <status> [--no-push]
   refresh `DASHBOARD.md`'s "Active Topics"/"Parked" index automatically — no
   separate `reindex` step is needed.
 - `task assign` with **no `<ship>`** behaves like `capture --assign`: it picks
-  the first `idle`, non-stale ship from the agent-bus board and commissions it.
+  the first `idle`, non-stale ship from the comms board and commissions it.
   With `<ship>` it commissions that specific ship (the German directive reads as
   a fresh assignment vs. a reassignment automatically).
 - The commands print `task-assigned: …`, `task-unassigned: …`,
@@ -103,6 +103,6 @@ starfleetctl dashboard topic commit "$SLUG" -m "task: <title>"
 starfleetctl dashboard reindex
 starfleetctl dashboard commit -m "reindex: add task $SLUG"
 # optional commission:
-SHIP=$(starfleetctl agent-bus board --json | <pick idle,non-stale>)
-starfleetctl agent-bus tell "$SHIP" "Neue Aufgabe für dich erfasst: <title> (Dashboard-Topic \`$SLUG\`). Bitte dort Details lesen und abarbeiten."
+SHIP=$(starfleetctl comms board --json | <pick idle,non-stale>)
+starfleetctl comms tell "$SHIP" "Neue Aufgabe für dich erfasst: <title> (Dashboard-Topic \`$SLUG\`). Bitte dort Details lesen und abarbeiten."
 ```

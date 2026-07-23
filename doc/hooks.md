@@ -66,7 +66,7 @@ starfleetctl hook claude monitor-hint
 ```
 
 Emits JSON telling the assistant to arm Monitor-tool watchers on its
-agent-bus inbox. Wired as a `SessionStart` hook in `.claude/settings.json`.
+comms inbox. Wired as a `SessionStart` hook in `.claude/settings.json`.
 
 ### PreToolUse — permission
 
@@ -75,7 +75,7 @@ starfleetctl hook claude permission
 ```
 
 Reads tool-invocation JSON from stdin, asks the control agent
-(`$AGENT_CONTROLLER`) via agent-bus for allow/deny, blocks up to
+(`$AGENT_CONTROLLER`) via comms for allow/deny, blocks up to
 `$AGENT_PERM_TIMEOUT` (default 60s).
 
 | Variable | Default | Description |

@@ -32,24 +32,24 @@ starfleetctl github pr claim --release <pr#>    # when done
 - Pushing to **distinct** branches never conflicts, so across *different* PRs you still
   parallelize freely.
 
-### Central control plane — one agent monitors/steers the others (`starfleetctl agent-bus`)
+### Central control plane — one agent monitors/steers the others (`starfleetctl comms`)
 
-`github pr claim` coordinates *ownership of one PR branch*; `agent-bus` is the broader **control plane**
+`github pr claim` coordinates *ownership of one PR branch*; `comms` is the broader **control plane**
 so a flagship agent — or a future dashboard / voice UI / MCP bus — can see what every independent
 session is doing and steer it. All parties read/write the same gitignored files, serialized via
 `flock`, so it works across **totally independent** sessions, not just spawned subagents.
 
 - **Worker session** (one per task): set a unique `$STARFLEET_SHIP_ID`, then
-  `starfleetctl agent-bus status <state> ["note"]` (or `… --task T --progress N --branch B --eta D --blocker X` for rich detail) to report a heartbeat.
-  Check `starfleetctl agent-bus inbox` for directives, and `starfleetctl agent-bus ack <id>` when
-  handled. `starfleetctl agent-bus clear` on exit.
-- **Control agent** (the flagship): `starfleetctl agent-bus board` is the whole-fleet view.
-  Steer with `starfleetctl agent-bus tell <agent> <text...>` (one agent) or
-  `starfleetctl agent-bus broadcast <text...>` (all). Replies can reference a prior
+  `starfleetctl comms status <state> ["note"]` (or `… --task T --progress N --branch B --eta D --blocker X` for rich detail) to report a heartbeat.
+  Check `starfleetctl comms inbox` for directives, and `starfleetctl comms ack <id>` when
+  handled. `starfleetctl comms clear` on exit.
+- **Control agent** (the flagship): `starfleetctl comms board` is the whole-fleet view.
+  Steer with `starfleetctl comms tell <agent> <text...>` (one agent) or
+  `starfleetctl comms broadcast <text...>` (all). Replies can reference a prior
   message with `--reply <id>` (sets an In-Reply-To marker, shown as a thread in the web console).
   For payloads larger than ~100 KB (logs, diffs, long briefings) pass the body via stdin to avoid the
   OS `ARG_MAX` limit on command-line arguments:
-  `starfleetctl agent-bus tell <agent> --stdin < brief.txt` (or
+  `starfleetctl comms tell <agent> --stdin < brief.txt` (or
   `… broadcast --stdin`).
 
 **Heartbeats are auto-reported** via session hooks or wrappers — details are workspace-specific.
@@ -68,7 +68,7 @@ Ships spawned by `starfleetctl fleet-autoscale` are a distinct, lower **tier**:
 - **Lower tier** — auto-spawned workers: launched with `--permission-mode dontAsk` (Claude Code),
   so anything outside the pre-authorized allowlist is rejected outright instead of blocking on a
   confirmation nobody is watching. A worker that hits a blocked action must report it to its
-   supervisor via `starfleetctl agent-bus tell` and continue other queued work.
+   supervisor via `starfleetctl comms tell` and continue other queued work.
 
 **Preferred: agents work in their own dedicated clones.** Create an agent-owned clone:
 

@@ -28,7 +28,7 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 
 | Subcommand | Purpose |
 |---|---|
-| `agent-bus <cmd>` | Status board + directive bus (status/board/tell/broadcast/ack/inbox) |
+| `comms <cmd>` | Status board + directive bus (status/board/tell/broadcast/ack/inbox) |
 | `dashboard <cmd>` | DASHBOARD.md read/write/commit cycle |
 | `github pr claim <cmd>` | Advisory PR-branch lock + work log |
 | `ws-commit -m <msg> <paths>` | Atomic commit+push under clone lock |
@@ -58,6 +58,6 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 
 ## Known limitations
 
-- `agent-bus monitor-loop`/`fleet-watch` known broken under Claude Code's `Monitor` tool (workaround: bash originals)
+- `comms monitor-loop`/`fleet-watch` known broken under Claude Code's `Monitor` tool (workaround: bash originals)
 - `github backport commit` path-remap uses project config (`.starfleet-ai/conf/project.yaml`) for prefix/behavior (default: `Xext/`, enabled for xserver)
 - `github pr make` marker-leak bug fixed 2026-07-07 (both Go and bash)
