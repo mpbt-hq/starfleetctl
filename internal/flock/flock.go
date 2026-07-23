@@ -50,6 +50,7 @@ func (h *Handle) Close() error {
 		return nil
 	}
 	_ = syscall.Flock(int(h.f.Fd()), syscall.LOCK_UN)
+	_ = h.f.Truncate(0)
 	err := h.f.Close()
 	h.f = nil
 	return err
