@@ -841,61 +841,6 @@ func (b *Bus) DoPrune() error {
 	return nil
 }
 
-// DoMigrate converts all legacy .tsv message files to .json format.
-// This is a one-time migration that can be run safely multiple times.
-func (b *Bus) DoMigrate() error {
-	lock, err := b.lockBus()
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-
-	migrated := 0
-	for _, id := range globSortedFiles(b.MsgDir, "m", ".tsv") {
-		tsvPath := filepath.Join(b.MsgDir, id+".tsv")
-		jsonPath := filepath.Join(b.MsgDir, id+".json")
-
-		// Skip if JSON already exists
-		if _, err := os.Stat(jsonPath); err == nil {
-			continue
-		}
-
-		// Parse TSV
-		msg, ok := parseMsgFileTSV(id, tsvPath)
-		if !ok {
-			fmt.Printf("agent-bus: warning: failed to parse %s, skipping\n", tsvPath)
-			continue
-		}
-
-		// Ensure type is set
-		if msg.Type == "" {
-			msg.Type = "ship"
-		}
-
-		// Write JSON
-		data, err := json.Marshal(msg)
-		if err != nil {
-			fmt.Printf("agent-bus: warning: failed to marshal %s: %v\n", id, err)
-			continue
-		}
-
-		if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
-			fmt.Printf("agent-bus: warning: failed to write %s: %v\n", id, err)
-			continue
-		}
-
-		migrated++
-	}
-
-	if migrated > 0 {
-		b.logEvent("migrate", fmt.Sprintf("migrated %d TSV message(s) to JSON", migrated))
-		fmt.Printf("agent-bus: migrated %d TSV message(s) to JSON format\n", migrated)
-	} else {
-		fmt.Println("agent-bus: no TSV messages to migrate")
-	}
-	return nil
-}
-
 // AskAndWait posts a question (tagged "[ask]") to the specified controller,
 // polls for the reply (tagged "[re <qid>]") addressed to us, acks it, and
 // returns the raw answer text.  This is the same logic as DoAsk but returns

@@ -228,39 +228,6 @@ func (b *Bus) allMsgRecords() []msgRecord {
 	return out
 }
 
-// MigrateTSVMessages converts all existing .tsv message files to .json format.
-// Returns the number of messages migrated and any error encountered.
-func (b *Bus) MigrateTSVMessages() (int, error) {
-	count := 0
-	for _, id := range globSortedFiles(b.MsgDir, "m", ".tsv") {
-		tsvPath := filepath.Join(b.MsgDir, id+".tsv")
-		jsonPath := filepath.Join(b.MsgDir, id+".json")
-		// Skip if JSON already exists
-		if _, err := os.Stat(jsonPath); err == nil {
-			continue
-		}
-		msg, ok := parseMsgFile(id, tsvPath)
-		if !ok {
-			continue
-		}
-		// Ensure Type is set for legacy messages
-		if msg.Type == "" {
-			msg.Type = "ship"
-		}
-		data, err := json.Marshal(msg)
-		if err != nil {
-			return count, err
-		}
-		if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
-			return count, err
-		}
-		// Optionally remove the old TSV file after successful migration
-		// os.Remove(tsvPath) // Keep TSV as backup for now
-		count++
-	}
-	return count, nil
-}
-
 func (b *Bus) inboxCount(agent string) int {
 	cnt := 0
 	for _, m := range b.allMsgRecords() {

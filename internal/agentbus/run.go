@@ -38,7 +38,6 @@ Control agent:
   msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
-  migrate                   convert legacy TSV messages to JSON format
   health [--json] [--loop]  fleet liveness watchdog (Go port of fleet-health)
   dispatch --stdin          JSON-RPC entry point for the opencode plugin
                             (reads dispatchRequest, returns dispatchResponse)
@@ -165,8 +164,6 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoEvents(n)
 	case "prune":
 		cmdErr = b.DoPrune()
-	case "migrate":
-		cmdErr = b.DoMigrate()
 	case "health":
 		if len(args) > 1 && args[1] == "update" {
 			cmdErr = b.DoHealthUpdate(args[2:])
