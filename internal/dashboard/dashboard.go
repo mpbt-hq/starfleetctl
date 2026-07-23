@@ -34,7 +34,7 @@ func New(root string) (*Dashboard, error) {
 	return &Dashboard{
 		Root:   root,
 		GitDir: strings.TrimSpace(out),
-		File:   filepath.Join(root, ".starfleet-ai", "DASHBOARD.md"),
+		File:   filepath.Join(root, ".starfleet-ai", "var", "DASHBOARD.md"),
 	}, nil
 }
 
