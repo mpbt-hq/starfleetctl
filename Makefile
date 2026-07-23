@@ -6,7 +6,7 @@ TOOL := starfleetctl
 
 .PHONY: all build test fmt vet clean
 
-all: build
+all: clean build vet fmt test
 
 build:
 	$(GO) build -o $(TOOL) ./cmd/starfleetctl
