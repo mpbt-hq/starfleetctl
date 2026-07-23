@@ -161,10 +161,12 @@ models by provider in the dropdown.
 ## Web Server Management
 
 ```sh
-starfleetctl web                 # start (foreground)
-starfleetctl web autostart       # start as daemon (if not running)
-starfleetctl web autostart stop  # stop daemon
-starfleetctl web autostart restart  # kill + restart daemon
+starfleetctl web                    # show help
+starfleetctl web start              # start in foreground
+starfleetctl web start --addr :9090 # custom listen address
+starfleetctl web autostart          # start as daemon (if not running)
+starfleetctl web stop               # stop daemon
+starfleetctl web restart            # stop + autostart (background)
 ```
 
 ## Design Principles

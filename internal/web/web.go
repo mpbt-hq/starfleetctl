@@ -808,57 +808,100 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // usage is the `web` subcommand help text.
-const usage = `web [--addr <host:port>] [--no-browser] [autostart|autostart stop]
-  Start the minimalist mobile-first fleet web console. Reuses the same
-  in-process agentbus / dashboard / task code as the CLI subcommands, so the
-  web UI and 'starfleetctl <cmd>' stay in lockstep. Defaults to
-  listening on 0.0.0.0:8080 (all interfaces, so it is reachable from other
-  devices — e.g. a phone on the LAN). The bus identity is taken from the environment
-  (STARFLEET_SHIP_ID etc.), exactly like ` + "`agent-bus`" + `.
+const usage = `web [start|stop|autostart|restart] [options]
+
+  Minimalist mobile-first fleet web console. Reuses the same in-process
+  agentbus / dashboard / task code as the CLI subcommands, so the web UI
+  and 'starfleetctl <cmd>' stay in lockstep. Defaults to listening on
+  0.0.0.0:8080 (all interfaces, so it is reachable from other devices —
+  e.g. a phone on the LAN).
 
   Subcommands:
-    autostart        Check if web server is running, start as daemon if not (for cron)
-    autostart stop   Stop the web server daemon
+    (none)           Show this help
+    start            Start the web server in the foreground
+    stop             Stop the web server daemon
+    autostart        Start as daemon if not already running (cron-friendly)
+    restart          Stop if running, then start as daemon
+
+  Options (for start):
+    --addr HOST:PORT Listen address (default: 0.0.0.0:8080)
+    --no-browser     Accepted for CLI parity (no effect)
 
   Examples:
-    starfleetctl web                 # http://:8080
-    starfleetctl web --addr 0.0.0.0:9090
-    starfleetctl web autostart       # check/start (cron-friendly)
-    starfleetctl web autostart stop  # stop daemon
+    starfleetctl web start              # foreground, http://:8080
+    starfleetctl web start --addr :9090
+    starfleetctl web autostart          # daemon, skip if running
+    starfleetctl web stop               # kill daemon
+    starfleetctl web restart            # stop + autostart
 `
 
 // Run dispatches a `web` invocation given the resolved workspace root.
 // Returns the process exit code.
 func Run(root string, args []string) int {
-	// Load config for default address
-	cfg, err := config.Load(root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "web: config:", err)
-		return 1
-	}
-	addr := cfg.Web.ListenAddr
-
-	if len(args) > 0 && args[0] == "autostart" {
-		return RunAutostart(root, args[1:])
+	// No args → show help
+	if len(args) == 0 {
+		fmt.Print(usage)
+		return 0
 	}
 
-	if len(args) > 0 && args[0] == "restart" {
+	// Subcommand dispatch
+	switch args[0] {
+	case "-h", "--help", "help":
+		fmt.Print(usage)
+		return 0
+
+	case "start":
+		return runStart(root, args[1:])
+
+	case "stop":
+		if err := Stop(root); err != nil {
+			fmt.Fprintln(os.Stderr, "web stop:", err)
+			return 1
+		}
+		fmt.Println("web server stopped")
+		return 0
+
+	case "autostart":
+		ok, err := Autostart(root)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "web autostart:", err)
+			return 1
+		}
+		if ok {
+			fmt.Println("web server running")
+		} else {
+			fmt.Println("web server start failed")
+		}
+		return 0
+
+	case "restart":
 		if err := Restart(root); err != nil {
 			fmt.Fprintln(os.Stderr, "web restart:", err)
 			return 1
 		}
 		fmt.Println("web server restarted")
 		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr, "web: unknown subcommand: %s\n\n%s", args[0], usage)
+		return 2
 	}
+}
+
+// runStart handles `web start [--addr …] [--no-browser]`.
+func runStart(root string, args []string) int {
+	cfg, err := config.Load(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "web start:", err)
+		return 1
+	}
+	addr := cfg.Web.ListenAddr
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "-h", "--help":
-			fmt.Print(usage)
-			return 0
 		case "--addr":
 			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "web: --addr needs a value")
+				fmt.Fprintln(os.Stderr, "web start: --addr needs a value")
 				return 2
 			}
 			i++
@@ -866,17 +909,18 @@ func Run(root string, args []string) int {
 		case "--no-browser":
 			// accepted for CLI parity; the server has no browser control
 		default:
-			fmt.Fprintf(os.Stderr, "web: unknown option: %s\n\n%s", args[i], usage)
+			fmt.Fprintf(os.Stderr, "web start: unknown option: %s\n\n%s", args[i], usage)
 			return 2
 		}
 	}
+
 	s, err := New(root, addr)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "web:", err)
+		fmt.Fprintln(os.Stderr, "web start:", err)
 		return 1
 	}
 	if err := s.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "web:", err)
+		fmt.Fprintln(os.Stderr, "web start:", err)
 		return 1
 	}
 	return 0

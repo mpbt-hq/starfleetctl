@@ -57,7 +57,7 @@ Fleet management:
   task              capture fleet tasks into the dashboard (+ optional ship commission)
   timer             fleet scheduling: one-time, interval, cron (with worker daemon)
   logs              scan ship logs + bus events, extract failures as tasks (feedback loop)
-  web               minimalist mobile-first fleet web console (status / tasks / bus / talk)
+  web               minimalist mobile-first fleet web console (start/stop/autostart/restart)
 
 Bootstrap & setup:
   genesis-init      bootstrap a workspace from nothing (writes starfleet-bootstrap + runs bootstrap --fix)

@@ -104,7 +104,7 @@ func Daemonize(root, addr, logFile string) (int, error) {
 		return 0, err
 	}
 
-	cmd := exec.Command(os.Args[0], "web", "--addr", addr)
+	cmd := exec.Command(os.Args[0], "web", "start", "--addr", addr)
 	cmd.Dir = root
 	cmd.Stdout = logF
 	cmd.Stderr = logF
@@ -295,38 +295,4 @@ func Restart(root string) error {
 	time.Sleep(500 * time.Millisecond)
 	_, err := Autostart(root)
 	return err
-}
-
-// RunAutostart is the CLI entry point for `starfleetctl web autostart`.
-func RunAutostart(root string, args []string) int {
-	if len(args) > 0 {
-		switch args[0] {
-		case "stop":
-			if err := Stop(root); err != nil {
-				fmt.Fprintln(os.Stderr, "web autostart stop:", err)
-				return 1
-			}
-			fmt.Println("web server stopped")
-			return 0
-		case "restart":
-			if err := Restart(root); err != nil {
-				fmt.Fprintln(os.Stderr, "web autostart restart:", err)
-				return 1
-			}
-			fmt.Println("web server restarted")
-			return 0
-		}
-	}
-
-	ok, err := Autostart(root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "web autostart:", err)
-		return 1
-	}
-	if ok {
-		fmt.Println("web server running")
-	} else {
-		fmt.Println("web server start failed")
-	}
-	return 0
 }
