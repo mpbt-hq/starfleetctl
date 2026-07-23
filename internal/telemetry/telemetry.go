@@ -44,9 +44,9 @@ type Event struct {
 // LogDir / LogFile live under the fleet-shared _WORK_ tree, deliberately
 // sharing the collection point with Pegasus's m0051 escalation reporting
 // (same directory; the Source field distinguishes passive hook capture
-// from active agent-bus tell capture).
+// from active comms tell capture).
 const (
-	logSubdir = "agent-bus" // relative to _WORK_
+	logSubdir = "comms" // relative to _WORK_
 	logDir    = "tooling-gaps"
 	logName   = "events.jsonl"
 )

@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package timer implements fleet-wide scheduling: one-time, interval, and
-// cron-based timers that fire agent-bus directives when they expire.
+// cron-based timers that fire comms directives when they expire.
 //
 // Timers come in two flavours:
 //
@@ -14,7 +14,7 @@
 //     Default for --cron schedules.
 //
 // A single worker daemon (timer worker) polls all timer directories every 2s,
-// resolves fleet targets at fire time, and sends agent-bus directives via
+// resolves fleet targets at fire time, and sends comms directives via
 // bus.DoPost(). The worker is a singleton per workspace (PID-file guarded).
 package timer
 

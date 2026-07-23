@@ -29,7 +29,7 @@ this index itself is regenerated with
 **Maintenance rule** (see ` + "`CLAUDE.md`" + ` "Working practices"): when you start,
 pause, or finish a topic, update its entry **in the same session**.
 Ephemeral live-status (who's online right now) stays in
-` + "`starfleetctl agent-bus board`" + ` / ` + "`starfleetctl pr-claim list`" + `.
+` + "`starfleetctl comms board`" + ` / ` + "`starfleetctl pr-claim list`" + `.
 
 ## Active Topics
 
@@ -47,7 +47,7 @@ Started/noticed, but (yet) not pursued further — a short note instead of losin
 
 *Not tracked here on purpose (already covered elsewhere, would just go stale):*
 individual open PRs (` + "`gh pr list`" + `), who's-online-now
-(` + "`starfleetctl agent-bus board`" + `), PR-branch locks
+(` + "`starfleetctl comms board`" + `), PR-branch locks
 (` + "`starfleetctl pr-claim list`" + `).
 `
 

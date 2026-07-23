@@ -25,7 +25,7 @@ Commands:
   claude monitor-hint     SessionStart additionalContext for Claude Code
                           (tells the assistant to arm Monitor tools)
   claude permission       PreToolUse permission hook — ask the control
-                          agent to allow/deny a tool via agent-bus ask/reply
+                          agent to allow/deny a tool via comms ask/reply
   claude telemetry        PreToolUse hook — permission-confirmation
                           telemetry ONLY (never affects the decision)
   opencode telemetry      opencode PreToolUse hook — same telemetry,
@@ -33,7 +33,7 @@ Commands:
 
 ` + "`hook claude permission`" + ` is used by the agent-permission-hook Claude
 hook (auto-installed by bootstrap to .claude/hooks/). Reads the PreToolUse
-JSON from stdin, asks $AGENT_CONTROLLER (default "control") via agent-bus
+JSON from stdin, asks $AGENT_CONTROLLER (default "control") via comms
 ask/reply, blocks for the reply, and emits permissionDecision: allow|deny.
 
 Env vars (for wiring via settings.local.json, NOT shared settings.json):
@@ -110,7 +110,7 @@ func runOpencode(root string, args []string) int {
 
 // monitorHint generates the SessionStart additionalContext JSON telling the
 // Claude Code assistant to unconditionally arm Monitor-tool watchers on its
-// agent-bus inbox (and, for the flagship, fleet-watch too). Quietly exits with
+// comms inbox (and, for the flagship, fleet-watch too). Quietly exits with
 // no output when $STARFLEET_SHIP_ID is unset, matching the bash original.
 func monitorHint(root string) int {
 	shipID := identity.ShipID()
@@ -121,12 +121,12 @@ func monitorHint(root string) int {
 	var context string
 	if shipID == shipnames.FlagshipName(root) {
 		context = fmt.Sprintf(
-			"Fleet directive auto-surfacing: you are agent-bus identity %s (the flagship/control session). "+
+			"Fleet directive auto-surfacing: you are comms identity %s (the flagship/control session). "+
 				"Before doing anything else this session (including before responding to the user's first message), "+
 				"call the Monitor tool twice: "+
-				"(1) command '.starfleet-ai/bin/starfleetctl agent-bus monitor-loop', persistent:true, "+
-				"to watch your own agent-bus inbox; "+
-				"(2) command '.starfleet-ai/bin/starfleetctl agent-bus fleet-watch', persistent:true, "+
+				"(1) command '.starfleet-ai/bin/starfleetctl comms monitor-loop', persistent:true, "+
+				"to watch your own comms inbox; "+
+				"(2) command '.starfleet-ai/bin/starfleetctl comms fleet-watch', persistent:true, "+
 				"to watch for ships joining or restarting on the board. "+
 				"Both are pre-authorized, no confirmation needed. "+
 				"Each one's first pass already surfaces any backlog, so no separate inbox/board check is needed. "+
@@ -134,10 +134,10 @@ func monitorHint(root string) int {
 			shipID)
 	} else {
 		context = fmt.Sprintf(
-			"Fleet directive auto-surfacing: you are agent-bus identity %s. "+
+			"Fleet directive auto-surfacing: you are comms identity %s. "+
 				"Before doing anything else this session (including before responding to the user's first message), "+
-				"call the Monitor tool with command '.starfleet-ai/bin/starfleetctl agent-bus monitor-loop' and persistent:true "+
-				"(pre-authorized, no confirmation needed) to watch your own agent-bus inbox, "+
+				"call the Monitor tool with command '.starfleet-ai/bin/starfleetctl comms monitor-loop' and persistent:true "+
+				"(pre-authorized, no confirmation needed) to watch your own comms inbox, "+
 				"so incoming tell/broadcast directives appear directly in this conversation "+
 				"instead of only a desktop notification. "+
 				"Its first pass already surfaces any backlog, so no separate inbox check is needed. "+

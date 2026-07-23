@@ -217,7 +217,7 @@ func runSet(root string, args []string) int {
 	// Resolve owner from bus identity.
 	bus, err := comms.New(root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "timer: agent-bus: %v\n", err)
+		fmt.Fprintf(os.Stderr, "timer: comms: %v\n", err)
 		return 1
 	}
 	rec.Owner = bus.ShipID
@@ -270,7 +270,7 @@ func runList(root string, args []string) int {
 
 	bus, err := comms.New(root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "timer: agent-bus: %v\n", err)
+		fmt.Fprintf(os.Stderr, "timer: comms: %v\n", err)
 		return 1
 	}
 	owner := bus.ShipID
@@ -362,7 +362,7 @@ func runCancel(root string, args []string) int {
 func runClear(root string, args []string) int {
 	bus, err := comms.New(root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "timer: agent-bus: %v\n", err)
+		fmt.Fprintf(os.Stderr, "timer: comms: %v\n", err)
 		return 1
 	}
 	owner := bus.ShipID

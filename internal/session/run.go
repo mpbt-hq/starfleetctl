@@ -24,7 +24,7 @@ Commands:
       to it (replaces scripts/agent-attach).  <id> may be a ship ID,
       a bus-handle, or a unique substring.
   attach --list
-      List running terminals and the agent-bus board.
+      List running terminals and the comms board.
   autoscale <command> [args...]
       On-demand fleet elasticity (status / need).  See 'session autoscale --help'.
   run <release> [flags...] [-- <args...>]
@@ -38,7 +38,7 @@ Commands:
       background (like run-opencode.ship, but a detachable termctl terminal).
       See 'session ship-run --help'.
   stop <id|session>
-      Kill a terminal, clear its agent-bus heartbeat, and release its
+      Kill a terminal, clear its comms heartbeat, and release its
       ship name (used by scripts/agent-run --stop).
 `
 
@@ -86,7 +86,7 @@ func runAttach(root string, args []string) int {
 			}
 		}
 		fmt.Println()
-		fmt.Println("== agent-bus board ==")
+		fmt.Println("== comms board ==")
 		records := ListBoard(root)
 		if len(records) == 0 {
 			fmt.Println("(no agents reporting)")
@@ -179,7 +179,7 @@ func resolvePipe(root, id string) (string, bool) {
 		return pipe, true
 	}
 
-	// 2. Check agent-bus board for matching agent/handle
+	// 2. Check comms board for matching agent/handle
 	bus, err := comms.New(root)
 	if err != nil {
 		return "", false

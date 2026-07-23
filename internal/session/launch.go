@@ -25,7 +25,7 @@ type LaunchVars struct {
 	ShellCmd    string // the full shell command to run in the terminal
 	Tier        string
 	Supervisor  string
-	// Launch metadata recorded in the initial agent-bus heartbeat so the
+	// Launch metadata recorded in the initial comms heartbeat so the
 	// board/web console can show the command hierarchy and provider/model.
 	LaunchType string // "terminal" | "background" | "auto"
 	Parent     string // ship this one was launched under ("" = flagship)
@@ -96,7 +96,7 @@ Args after -- are passed to the client.
 	fmt.Printf("agent-run: launched '%s' (%s%s) detached.\n", vars.ShipID, vars.Client, rel)
 	fmt.Printf("  pipe path    : %s\n", vars.PipePath)
 	fmt.Printf("  attach       : starfleetctl session attach %s\n", vars.ShipID)
-	fmt.Printf("  board        : starfleetctl agent-bus board\n")
+	fmt.Printf("  board        : starfleetctl comms board\n")
 	fmt.Printf("  stop         : starfleetctl session stop %s\n", vars.ShipID)
 	return 0
 }
@@ -388,7 +388,7 @@ Example:
 	}
 
 	fmt.Printf("agent-run: launched ship '%s' (opencode, role=ship) detached.\n", shipID)
-	fmt.Printf("  pipe path    : (see agent-bus board / session attach %s)\n", shipID)
+	fmt.Printf("  pipe path    : (see comms board / session attach %s)\n", shipID)
 	fmt.Printf("  attach       : starfleetctl session attach %s\n", shipID)
 	fmt.Printf("  stop         : starfleetctl session stop %s\n", shipID)
 	return 0
@@ -461,7 +461,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if launchType == "background" || launchType == "auto" {
 		shipPrompt += " You were launched in " + launchType + " mode (detached, no human at your " +
 			"console): never prompt for input on your console and never block waiting for stdin — " +
-			"communicate only via the agent bus (starfleetctl agent-bus tell/ask). Act autonomously " +
+			"communicate only via the agent bus (starfleetctl comms tell/ask). Act autonomously " +
 			"and report results back over the bus."
 	}
 	inner += " --prompt " + shellQuote(shipPrompt) + " "
@@ -529,7 +529,7 @@ func StopShip(root string, id string) error {
 }
 
 // spawnSession creates the termctl terminal for the given launch vars and posts
-// the initial agent-bus heartbeat. It spawns a child process that runs the
+// the initial comms heartbeat. It spawns a child process that runs the
 // terminal and blocks on h.Run(), so the terminal survives after this function
 // returns.
 func spawnSession(root string, vars *LaunchVars) error {

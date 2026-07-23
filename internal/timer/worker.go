@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Timer worker: background daemon that polls timer directories every 2s,
-// resolves fleet targets at fire time, and sends agent-bus directives.
+// resolves fleet targets at fire time, and sends comms directives.
 //
 // Signals:
 //

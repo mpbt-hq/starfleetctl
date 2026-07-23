@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/config"
 )
 
 // newScratchRoot builds a workspace root suitable for both comms (just
@@ -24,7 +26,7 @@ func newScratchRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	if err := os.MkdirAll(filepath.Join(root, ".starfleet-ai", "var", "agent-bus"), 0o755); err != nil {
+	if err := os.MkdirAll(config.BusDir(root), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

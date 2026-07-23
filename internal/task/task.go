@@ -77,7 +77,7 @@ Options:
   --desc  "<text>"     Free-form task description / acceptance criteria.
   --slug  "<slug>"     Override the auto-derived dashboard topic slug.
   --assign [<ship>]    Commission a ship. With no arg, pick the first idle,
-                       non-stale ship from the agent-bus board. With a ship
+                       non-stale ship from the comms board. With a ship
                        name, commission that specific ship.
   --no-push            Stage + commit locally but do not push to origin.
   -h, --help           this help.
@@ -165,7 +165,7 @@ func runCapture(root string, args []string) int {
 	// Commission the ship (after the dashboard state is durable).
 	if assignMode != "" && assign != "" {
 		msg := "Neue Aufgabe für dich erfasst: " + title +
-			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
+			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via comms melden."
 		b, berr := comms.New(root)
 		if berr != nil {
 			fmt.Fprintln(os.Stderr, "task capture:", berr)
@@ -325,9 +325,9 @@ func writeTopicContent(d *dashboard.Dashboard, slug, content string) error {
 const assignUsage = `task assign <slug> [<ship>] [--no-push]
 
 Assign an existing task to a ship. With no <ship>, commission the first idle,
-non-stale ship from the agent-bus board. Updates the topic's status +
+non-stale ship from the comms board. Updates the topic's status +
 assigned-to via the sanctioned dashboard path (no raw file access) and
-commissions the ship with an agent-bus directive.
+commissions the ship with an comms directive.
 
 Exit codes:
   0  task assigned + commissioned
@@ -382,10 +382,10 @@ func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
 	var msg string
 	if wasAssigned {
 		msg = "Dir wurde die Aufgabe neu zugewiesen: " + title +
-			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
+			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via comms melden."
 	} else {
 		msg = "Neue Aufgabe für dich erfasst: " + title +
-			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via agent-bus melden."
+			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via comms melden."
 	}
 	b, err := comms.New(root)
 	if err != nil {

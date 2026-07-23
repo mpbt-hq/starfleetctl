@@ -17,7 +17,7 @@ import (
 // permission implements `starfleetctl hook claude permission`.
 //
 // It is a Claude Code PreToolUse hook that routes tool-permission decisions
-// to the central control agent via agent-bus ask/reply, instead of prompting
+// to the central control agent via comms ask/reply, instead of prompting
 // the local session.  Reads the PreToolUse JSON from stdin, asks the
 // controller, BLOCKS for the answer, and emits a permissionDecision JSON to
 // stdout (allow/deny/ask).
@@ -81,7 +81,7 @@ func permission(root string) int {
 
 	bus, err := comms.New(root)
 	if err != nil {
-		emitPermission(onTimeout, fmt.Sprintf("agent-bus init: %v", err))
+		emitPermission(onTimeout, fmt.Sprintf("comms init: %v", err))
 		return 0
 	}
 

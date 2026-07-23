@@ -40,12 +40,12 @@ type Server struct {
 }
 
 // New builds a web Server rooted at the given workspace root, bound to addr
-// (e.g. ":8080" or "127.0.0.1:8080"). The agent-bus board identity is taken
+// (e.g. ":8080" or "127.0.0.1:8080"). The comms board identity is taken
 // from the environment exactly like `agent-bus` (STARFLEET_SHIP_ID etc.).
 func New(root, addr string) (*Server, error) {
 	b, err := comms.New(root)
 	if err != nil {
-		return nil, fmt.Errorf("web: agent-bus: %w", err)
+		return nil, fmt.Errorf("web: comms: %w", err)
 	}
 	// Allow the web frontend's bus identity to be configured via the web
 	// config file (web.ship_id / web.ship_handle) or the STARFLEET_WEB_SHIP_ID
@@ -177,7 +177,7 @@ func (s *Server) apiIdentity(w http.ResponseWriter, r *http.Request) {
 
 // apiTell POSTs a directive: {"target": "all"|"<ship>", "text": "..."}.
 // Delegates to comms.Tell / broadcast — the same code path as
-// `agent-bus tell` / `agent-bus broadcast`. Body via JSON or form.
+// `comms tell` / `comms broadcast`. Body via JSON or form.
 func (s *Server) apiTell(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, 405, "method not allowed")

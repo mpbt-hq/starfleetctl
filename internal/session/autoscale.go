@@ -45,7 +45,7 @@ Commands:
       Spawn up to <cap> minus the current non-stale fleet size, capped at
       what's needed after subtracting currently-idle ships.  Always prints
       a decision and appends it to the audit log; an actual spawn also
-      posts a loud agent-bus broadcast.
+      posts a loud comms broadcast.
 `)
 		return 0
 	case "status":

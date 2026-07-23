@@ -159,7 +159,7 @@ func Scan(files []string) []Finding {
 }
 
 // LogFiles returns the candidate input files: every var/ships/*.log plus the
-// agent-bus events.log. Missing files are silently skipped by Scan.
+// comms events.log. Missing files are silently skipped by Scan.
 func LogFiles(root string) []string {
 	var files []string
 	shipDir := filepath.Join(root, ".starfleet-ai", "var", "ships")

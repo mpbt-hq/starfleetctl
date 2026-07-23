@@ -19,7 +19,7 @@ import (
 
 const usage = `logs scan [--capture] [--min-count N] [--min-severity N] [--reset-seen]
 
-Scan ship logs + agent-bus events for recurring failures and extract them as
+Scan ship logs + comms events for recurring failures and extract them as
 findings. By default prints them (dry-run). With --capture, each NEW finding
 (not seen before) is captured as a dashboard task.
 
