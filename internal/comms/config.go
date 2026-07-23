@@ -10,7 +10,7 @@ import (
 	"github.com/metux/starfleetctl/internal/config"
 )
 
-// DoConfig implements `agent-bus config` — returns the plugin-relevant
+// DoConfig implements `comms config` — returns the plugin-relevant
 // configuration as JSON so the opencode plugin can read tuning knobs
 // (heartbeat interval, poll interval, etc.) instead of hardcoding them.
 func (b *Bus) DoConfig() error {

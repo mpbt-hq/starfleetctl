@@ -78,7 +78,7 @@ type inboxMsg struct {
 	Type string `json:"type,omitempty"`
 }
 
-// DoDispatch implements `agent-bus dispatch --stdin` — the single JSON-RPC
+// DoDispatch implements `comms dispatch --stdin` — the single JSON-RPC
 // entry point for the opencode plugin. Reads a JSON request from stdin,
 // dispatches to the appropriate Go function, and prints a JSON response.
 func (b *Bus) DoDispatch(args []string) error {
@@ -89,7 +89,7 @@ func (b *Bus) DoDispatch(args []string) error {
 		}
 	}
 	if !useStdin {
-		return usageErr("agent-bus dispatch: requires --stdin")
+		return usageErr("comms dispatch: requires --stdin")
 	}
 
 	data, err := io.ReadAll(os.Stdin)

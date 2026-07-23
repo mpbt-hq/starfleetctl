@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// JSON output variants (--json flag) for the list-shaped agent-bus
+// JSON output variants (--json flag) for the list-shaped comms
 // subcommands (board/inbox/msgs/asks), so agents consuming this output can
 // parse it directly instead of grep/awk/cut-ing the human-formatted table.
 // Field names/values mirror the text columns exactly (age as a computed
@@ -38,7 +38,7 @@ type boardEntryJSON struct {
 	Updated    string `json:"updated,omitempty"`
 }
 
-// BoardEntries returns the same board data that `agent-bus board --json`
+// BoardEntries returns the same board data that `comms board --json`
 // prints, as a slice — for programmatic callers (e.g. task capture's free-ship
 // picker) that need it without parsing stdout.
 func (b *Bus) BoardEntries() []boardEntryJSON {
@@ -91,7 +91,7 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 	return out
 }
 
-// DoBoardJSON implements `agent-bus board --json`.
+// DoBoardJSON implements `comms board --json`.
 func (b *Bus) DoBoardJSON() error {
 	return printJSON(b.BoardEntries())
 }
@@ -105,7 +105,7 @@ type inboxEntryJSON struct {
 	ReplyTo    string `json:"reply_to,omitempty"`
 }
 
-// DoInboxJSON implements `agent-bus inbox --json`.
+// DoInboxJSON implements `comms inbox --json`.
 func (b *Bus) DoInboxJSON() error {
 	var out []inboxEntryJSON
 	for _, m := range b.allMsgRecords() {
@@ -134,7 +134,7 @@ type msgEntryJSON struct {
 	ReplyTo    string `json:"reply_to,omitempty"`
 }
 
-// DoMsgsJSON implements `agent-bus msgs --json`.
+// DoMsgsJSON implements `comms msgs --json`.
 func (b *Bus) DoMsgsJSON() error {
 	msgs := b.allMsgRecords()
 	out := make([]msgEntryJSON, 0, len(msgs))
@@ -197,7 +197,7 @@ type askEntryJSON struct {
 	Question   string `json:"question"`
 }
 
-// DoAsksJSON implements `agent-bus asks --json`.
+// DoAsksJSON implements `comms asks --json`.
 func (b *Bus) DoAsksJSON() error {
 	var out []askEntryJSON
 	for _, m := range b.allMsgRecords() {

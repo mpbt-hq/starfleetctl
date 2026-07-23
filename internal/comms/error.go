@@ -14,7 +14,7 @@ import (
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
-// DoErrorClassify implements `agent-bus error classify <detail>` —
+// DoErrorClassify implements `comms error classify <detail>` —
 // classifies a model-API error detail string into a short tag.
 //
 // Tags:
@@ -33,7 +33,7 @@ func (b *Bus) DoErrorClassify(detail string) error {
 	return nil
 }
 
-// DoErrorIsAbort implements `agent-bus error is-abort <detail>` —
+// DoErrorIsAbort implements `comms error is-abort <detail>` —
 // prints "true" if the detail is a user-initiated abort, "false" otherwise.
 func (b *Bus) DoErrorIsAbort(detail string) error {
 	if IsUserAbort(detail) {
@@ -112,7 +112,7 @@ type errorHandlePayload struct {
 	PID    int    `json:"pid,omitempty"`
 }
 
-// DoErrorHandle implements `agent-bus error handle --stdin` — the single
+// DoErrorHandle implements `comms error handle --stdin` — the single
 // entry point for session.error handling. Reads a JSON payload from stdin,
 // then performs the full pipeline: abort check → classify → health update →
 // log → tell flagship. Designed so the plugin can delegate all error
@@ -125,17 +125,17 @@ func (b *Bus) DoErrorHandle(args []string) error {
 		}
 	}
 	if !useStdin {
-		return usageErr("agent-bus error handle: requires --stdin")
+		return usageErr("comms error handle: requires --stdin")
 	}
 
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return fmt.Errorf("agent-bus error handle: reading stdin: %w", err)
+		return fmt.Errorf("comms error handle: reading stdin: %w", err)
 	}
 
 	var payload errorHandlePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return fmt.Errorf("agent-bus error handle: invalid JSON: %w", err)
+		return fmt.Errorf("comms error handle: invalid JSON: %w", err)
 	}
 
 	detail := payload.Detail
@@ -198,25 +198,25 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	return nil
 }
 
-// DoErrorRun dispatches `agent-bus error <subcommand>`.
+// DoErrorRun dispatches `comms error <subcommand>`.
 func (b *Bus) DoErrorRun(args []string) error {
 	if len(args) == 0 {
-		return usageErr("agent-bus error: need <subcommand> (classify|is-abort|handle)")
+		return usageErr("comms error: need <subcommand> (classify|is-abort|handle)")
 	}
 	switch args[0] {
 	case "classify":
 		if len(args) < 2 {
-			return usageErr("agent-bus error classify needs <detail>")
+			return usageErr("comms error classify needs <detail>")
 		}
 		return b.DoErrorClassify(args[1])
 	case "is-abort":
 		if len(args) < 2 {
-			return usageErr("agent-bus error is-abort needs <detail>")
+			return usageErr("comms error is-abort needs <detail>")
 		}
 		return b.DoErrorIsAbort(args[1])
 	case "handle":
 		return b.DoErrorHandle(args[1:])
 	default:
-		return usageErr("agent-bus error: unknown subcommand: " + args[0])
+		return usageErr("comms error: unknown subcommand: " + args[0])
 	}
 }

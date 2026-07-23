@@ -20,7 +20,7 @@ const (
 	defaultStaleModel  = 300 // model_last_action older than this (while working) → STUCK
 )
 
-const healthUsage = `agent-bus health [flags]
+const healthUsage = `comms health [flags]
 
 Fleet liveness watchdog — reads per-ship status files and reports
 unresponsive ships.
@@ -59,7 +59,7 @@ func (b *Bus) readHealth(agent string) *StatusRecord {
 	return &rec
 }
 
-// DoHealth implements `agent-bus health` — the liveness watchdog.
+// DoHealth implements `comms health` — the liveness watchdog.
 func (b *Bus) DoHealth(args []string) error {
 	jsonOut := false
 	loop := false
@@ -99,7 +99,7 @@ func (b *Bus) DoHealth(args []string) error {
 			fmt.Print(healthUsage)
 			return nil
 		default:
-			return usageErr("agent-bus health: unknown option: " + args[i])
+			return usageErr("comms health: unknown option: " + args[i])
 		}
 	}
 
@@ -256,10 +256,10 @@ func modelTs(h healthEntry) string {
 	return fmt.Sprintf("%ds ago", h.ModelAgeS)
 }
 
-// DoHealthUpdate implements `agent-bus health update` — a structured
+// DoHealthUpdate implements `comms health update` — a structured
 // write to status/<ship>.json. Only supplied flags are merged into the
 // existing file (read-modify-write).
-const healthUpdateUsage = `agent-bus health update [flags]
+const healthUpdateUsage = `comms health update [flags]
 
 Write/merge per-ship status data to status/<ship>.json — the single source
 of truth. Only supplied flags are merged into the existing file
@@ -400,7 +400,7 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 			fmt.Print(healthUpdateUsage)
 			return nil
 		default:
-			return usageErr("agent-bus health update: unknown option: " + args[i])
+			return usageErr("comms health update: unknown option: " + args[i])
 		}
 	}
 

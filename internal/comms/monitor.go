@@ -15,7 +15,7 @@
 // against the real bus, disposable identity, ~16h continuous runtime) saw
 // 5/5 live `all`-broadcasts detected correctly with zero misses — whatever
 // the original bug was, it is gone. scripts/agent-bus-monitor-hint arms
-// `.starfleet-ai/bin/starfleetctl agent-bus monitor-loop` for new/restarted sessions,
+// `.starfleet-ai/bin/starfleetctl comms-monitor-loop` for new/restarted sessions,
 // and scripts/agent-bus-monitor-loop is now a thin bash wrapper exec'ing
 // that same Go backend (no separate bash fallback body remains).
 //
@@ -25,7 +25,7 @@
 // (real fleet activity plus a disposable synthetic test ship) detected
 // identically by both, including correct "New ship online" vs "Ship
 // update" labeling. scripts/agent-bus-monitor-hint's Enterprise branch now
-// arms `.starfleet-ai/bin/starfleetctl agent-bus fleet-watch`; scripts/agent-bus-
+// arms `.starfleet-ai/bin/starfleetctl comms fleet-watch`; scripts/agent-bus-
 // fleet-watch (bash) remains in place, untouched, as a fallback.
 //
 // DoWatch is a different execution model (setsid-detached background
@@ -54,7 +54,7 @@ const pollInterval = 2 * time.Second
 // stop it) — same shape as the bash `while true; do …; sleep 2; done`.
 func (b *Bus) DoMonitorLoop() error {
 	if !b.ShipIDSet {
-		return fmt.Errorf("agent-bus-monitor-loop: $STARFLEET_SHIP_ID is not set")
+		return fmt.Errorf("comms-monitor-loop: $STARFLEET_SHIP_ID is not set")
 	}
 
 	heartbeatInterval := int64(300) // HEARTBEAT_INTERVAL, same default as the bash original
@@ -207,9 +207,9 @@ func notify(logFile, popupOnceDir, agentID string, m msgRecord) {
 		fmt.Fprintf(f, "%s\t%s\tfrom %s\t%s\n", ts, m.ID, m.From, m.Text)
 		f.Close()
 	}
-	title := fmt.Sprintf("agent-bus: directive for %s", agentID)
+	title := fmt.Sprintf("comms: directive for %s", agentID)
 	if m.Target == "all" {
-		title = "agent-bus: broadcast"
+		title = "comms: broadcast"
 		// Atomic "first ship wins" gate, same as bash's mkdir race guard.
 		if err := os.Mkdir(filepath.Join(popupOnceDir, m.ID), 0o755); err != nil {
 			return

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const usage = `agent-bus <command> [args…]
+const usage = `comms <command> [args…]
 
 Worker session:
   status <state> ["note"]   report/refresh my heartbeat
@@ -20,7 +20,7 @@ Worker session:
   touch                     refresh my heartbeat's timestamp only (same
                             state/note as last posted; no-op if I never
                             posted one) — for a periodic auto-refresh loop,
-                            not interactive use; see agent-bus-monitor-loop
+                            not interactive use; see comms-monitor-loop
 
 Control agent:
   board [--json]            the whole board
@@ -44,9 +44,9 @@ Control agent:
 
 Large inline directives (>768 bytes, e.g. a full hard-reset broadcast) are
 auto-spilled into an attachment automatically: the inline text becomes a short
-"fetch: agent-bus get <id>" pointer and is marked [ATT] in inbox/msgs, so it
+"fetch: comms get <id>" pointer and is marked [ATT] in inbox/msgs, so it
 can never be truncated by a ship display. Retrieve the full payload with
-'agent-bus get <id>'.
+'comms get <id>'.
 
 --json on board/inbox/msgs/asks prints a JSON array instead of the
 human-formatted table — for scripts/ships, so no grep/awk/cut is needed.
@@ -64,13 +64,13 @@ func hasJSON(args []string) bool {
 	return false
 }
 
-// Run dispatches an `agent-bus` invocation exactly like the bash script's
+// Run dispatches a `comms` invocation exactly like the bash script's
 // final case statement, given the resolved workspace root. Returns the
 // process exit code.
 func Run(root string, args []string) int {
 	b, err := New(root)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "agent-bus:", err)
+		fmt.Fprintln(os.Stderr, "comms:", err)
 		return 1
 	}
 
@@ -107,7 +107,7 @@ func Run(root string, args []string) int {
 		}
 	case "tell":
 		if len(args) < 2 {
-			cmdErr = usageErr("agent-bus: tell needs <agent> [--stdin|--attach <file>|--reply <id>|<text…>]")
+			cmdErr = usageErr("comms: tell needs <agent> [--stdin|--attach <file>|--reply <id>|<text…>]")
 			break
 		}
 		target := args[1]
@@ -138,7 +138,7 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoAsk(args[1:])
 	case "reply":
 		if len(args) < 3 {
-			cmdErr = usageErr("agent-bus: reply needs <qid> <answer…>")
+			cmdErr = usageErr("comms: reply needs <qid> <answer…>")
 			break
 		}
 		cmdErr = b.DoReply(args[1], args[2:])
@@ -182,9 +182,9 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoWatch(arg(args, 1), arg(args, 1) == "--stop")
 	default:
 		if len(args[0]) > 1 && args[0][0] == '-' {
-			cmdErr = usageErr(fmt.Sprintf("agent-bus: unknown option: %s", args[0]))
+			cmdErr = usageErr(fmt.Sprintf("comms: unknown option: %s", args[0]))
 		} else {
-			cmdErr = usageErr(fmt.Sprintf("agent-bus: unknown command: %s (try --help)", args[0]))
+			cmdErr = usageErr(fmt.Sprintf("comms: unknown command: %s (try --help)", args[0]))
 		}
 	}
 	if cmdErr != nil {
@@ -234,7 +234,7 @@ func reportErr(err error) int {
 	return 1
 }
 
-// parseStatusArgs parses `agent-bus status` arguments into the legacy
+// parseStatusArgs parses `comms status` arguments into the legacy
 // (state, note) pair plus an optional structured detail patch. Forms accepted:
 //
 //	status <state> ["note"]                 # legacy; note is the 2nd positional

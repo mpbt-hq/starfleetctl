@@ -40,7 +40,7 @@ func (b *Bus) nextID() (string, error) {
 // fetch pointer inline. This keeps large directives (e.g. a full hard-reset
 // broadcast) from being silently truncated by an agent display that caps
 // inline text length — the agent fetches the full payload via
-// `agent-bus get <id>` instead.
+// `comms get <id>` instead.
 const attachThreshold = 768
 
 // attachPrefix marks the inline pointer that references an attachment file.
@@ -77,7 +77,7 @@ func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) 
 		if text == "" {
 			text = fmt.Sprintf("payload attached (%d bytes)", len(payload))
 		}
-		text += fmt.Sprintf(" — fetch: agent-bus get %s %s%s:%d:%s]]",
+		text += fmt.Sprintf(" — fetch: comms get %s %s%s:%d:%s]]",
 			id, attachPrefix, fsafe(basename), len(payload), shx)
 	}
 
@@ -115,14 +115,14 @@ func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) 
 // If the message has no attachment, it returns an error.
 func (b *Bus) DoGet(id, outPath string) error {
 	if id == "" {
-		return usageErr("agent-bus: get needs <id> [--out <path>]")
+		return usageErr("comms: get needs <id> [--out <path>]")
 	}
 	matches, err := filepath.Glob(filepath.Join(b.AttachDir, fsafe(id)+"__*"))
 	if err != nil {
 		return err
 	}
 	if len(matches) == 0 {
-		return fmt.Errorf("agent-bus: no attachment for %s", id)
+		return fmt.Errorf("comms: no attachment for %s", id)
 	}
 	data, err := os.ReadFile(matches[0])
 	if err != nil {
@@ -151,11 +151,11 @@ func dispText(m msgRecord) string {
 	return t
 }
 
-// DoStatus implements `agent-bus status <state> [note]` — writes the unified
+// DoStatus implements `comms status <state> [note]` — writes the unified
 // status/<ship>.json (single source of truth for heartbeat + health).
 func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if state == "" {
-		return usageErr("agent-bus: status needs a <state> (e.g. working|building|blocked|idle|done)")
+		return usageErr("comms: status needs a <state> (e.g. working|building|blocked|idle|done)")
 	}
 	b.warnID()
 	lock, err := b.lockBus()
@@ -254,11 +254,11 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if note != "" {
 		noteSuffix = " — " + note
 	}
-	fmt.Printf("agent-bus: '%s'%s → %s%s\n", b.ShipID, suffix, state, noteSuffix)
+	fmt.Printf("comms: '%s'%s → %s%s\n", b.ShipID, suffix, state, noteSuffix)
 	return nil
 }
 
-// DoTouch implements `agent-bus touch`: refresh MY OWN heartbeat's
+// DoTouch implements `comms touch`: refresh MY OWN heartbeat's
 // timestamp without changing state/note — for a periodic auto-refresh (see
 // agent-bus-monitor-loop) so a ship deep in a long task that never calls
 // DoStatus itself doesn't fall out of BusTTL and read as dead/pruned on the
@@ -296,7 +296,7 @@ func (b *Bus) DoTouch() error {
 	return os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644)
 }
 
-// DoClear implements `agent-bus clear`.
+// DoClear implements `comms clear`.
 func (b *Bus) DoClear() error {
 	lock, err := b.lockBus()
 	if err != nil {
@@ -305,7 +305,7 @@ func (b *Bus) DoClear() error {
 	defer lock.Close()
 	_ = os.Remove(b.sfile(b.ShipID))
 	b.logEvent("clear", "")
-	fmt.Printf("agent-bus: cleared heartbeat for '%s'\n", b.ShipID)
+	fmt.Printf("comms: cleared heartbeat for '%s'\n", b.ShipID)
 	return nil
 }
 
@@ -427,7 +427,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 	return acked, nil
 }
 
-// DoInbox implements `agent-bus inbox`.
+// DoInbox implements `comms inbox`.
 func (b *Bus) DoInbox() error {
 	found := false
 	for _, m := range b.allMsgRecords() {
@@ -450,10 +450,10 @@ func (b *Bus) DoInbox() error {
 	return nil
 }
 
-// DoAck implements `agent-bus ack <id> [note]`.
+// DoAck implements `comms ack <id> [note]`.
 func (b *Bus) DoAck(id, note string) error {
 	if id == "" {
-		return usageErr("agent-bus: ack needs <id> (see 'agent-bus inbox')")
+		return usageErr("comms: ack needs <id> (see 'comms inbox')")
 	}
 
 	// First, find the message to get its target
@@ -465,7 +465,7 @@ func (b *Bus) DoAck(id, note string) error {
 		}
 	}
 	if !found {
-		return usageErr(fmt.Sprintf("agent-bus: no such directive '%s'", id))
+		return usageErr(fmt.Sprintf("comms: no such directive '%s'", id))
 	}
 
 	lock, err := b.lockBus()
@@ -490,7 +490,7 @@ func (b *Bus) DoAck(id, note string) error {
 	} else if _, err := os.Stat(oldPath); err == nil {
 		srcPath = oldPath
 	} else {
-		return usageErr(fmt.Sprintf("agent-bus: no such directive '%s'", id))
+		return usageErr(fmt.Sprintf("comms: no such directive '%s'", id))
 	}
 
 	// Ensure seen dir exists
@@ -507,15 +507,15 @@ func (b *Bus) DoAck(id, note string) error {
 	if note != "" {
 		noteSuffix = " — " + note
 	}
-	fmt.Printf("agent-bus: '%s' acked %s%s\n", b.ShipID, id, noteSuffix)
+	fmt.Printf("comms: '%s' acked %s%s\n", b.ShipID, id, noteSuffix)
 	return nil
 }
 
-// DoBoard implements `agent-bus board`.
+// DoBoard implements `comms board`.
 func (b *Bus) DoBoard() error {
 	recs := b.AllStatusRecords()
 	if len(recs) == 0 {
-		fmt.Println("(no agents reporting — none have run 'agent-bus status' yet)")
+		fmt.Println("(no agents reporting — none have run 'comms status' yet)")
 		return nil
 	}
 	fmt.Printf("%-18s  %-12s  %-10s  %-6s  %-5s  %-22s  %s\n", "AGENT", "PROJECT", "STATE", "AGE", "INBOX", "ATTACH", "NOTE")
@@ -538,14 +538,14 @@ func (b *Bus) DoBoard() error {
 	return nil
 }
 
-// DoPost implements `agent-bus tell <agent> <text…>` / `broadcast <text…>`.
+// DoPost implements `comms tell <agent> <text…>` / `broadcast <text…>`.
 // When useStdin is true, words are ignored and the message body is read from
 // os.Stdin instead — this bypasses the OS ARG_MAX limit that constrains
 // command-line delivery of large directives (see the size-limit test,
 // 2026-07-09: tell works up to ~100KB via argv, fails at ~1MB with E2BIG;
 // the storage layer itself has no limit and handles 20MB+ fine).
 // Tell queues a directive for target with the given inline text — the
-// programmatic equivalent of `agent-bus tell <target> <text…>`, for callers
+// programmatic equivalent of `comms tell <target> <text…>`, for callers
 // (e.g. task capture's commission-a-ship step) that shouldn't shell out. It
 // takes the bus lock itself and auto-spills oversized bodies into an
 // attachment, exactly like DoPost.
@@ -559,14 +559,14 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 	if attachPath != "" {
 		data, err := os.ReadFile(attachPath)
 		if err != nil {
-			return fmt.Errorf("agent-bus: reading attachment: %w", err)
+			return fmt.Errorf("comms: reading attachment: %w", err)
 		}
 		payload = string(data)
 		basename = filepath.Base(attachPath)
 		if useStdin {
 			s, err := io.ReadAll(os.Stdin)
 			if err != nil {
-				return fmt.Errorf("agent-bus: reading stdin: %w", err)
+				return fmt.Errorf("comms: reading stdin: %w", err)
 			}
 			summary = clean(string(s))
 		} else {
@@ -577,7 +577,7 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 		if useStdin {
 			data, err := io.ReadAll(os.Stdin)
 			if err != nil {
-				return fmt.Errorf("agent-bus: reading stdin: %w", err)
+				return fmt.Errorf("comms: reading stdin: %w", err)
 			}
 			text = clean(string(data))
 		} else {
@@ -595,7 +595,7 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 	}
 
 	if summary == "" && payload == "" {
-		return usageErr("agent-bus: directive needs text (via args or stdin)")
+		return usageErr("comms: directive needs text (via args or stdin)")
 	}
 	b.warnID()
 	if msgType == "" {
@@ -608,11 +608,11 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 	// id goes to stdout (captureable, as before); the human description
 	// goes to stderr so it doesn't pollute the captured id.
 	if target == "all" {
-		fmt.Fprintf(os.Stderr, "agent-bus: broadcast %s from '%s' → ALL\n", id, b.ShipID)
+		fmt.Fprintf(os.Stderr, "comms: broadcast %s from '%s' → ALL\n", id, b.ShipID)
 	} else {
-		fmt.Fprintf(os.Stderr, "agent-bus: directive %s from '%s' → %s\n", id, b.ShipID, target)
+		fmt.Fprintf(os.Stderr, "comms: directive %s from '%s' → %s\n", id, b.ShipID, target)
 		if !b.shipExists(target) {
-			fmt.Fprintf(os.Stderr, "agent-bus: warning: ship '%s' has no heartbeat on the board\n", target)
+			fmt.Fprintf(os.Stderr, "comms: warning: ship '%s' has no heartbeat on the board\n", target)
 		}
 	}
 	fmt.Printf("%s\n", id)
@@ -631,10 +631,10 @@ func (b *Bus) Command(target, verb, args string) (string, error) {
 	return b.post(target, text, "", "cmd", "", "command")
 }
 
-// DoCommand implements `agent-bus cmd <target> <verb> [args...]`.
+// DoCommand implements `comms cmd <target> <verb> [args...]`.
 func (b *Bus) DoCommand(args []string) error {
 	if len(args) < 2 {
-		return usageErr("agent-bus: cmd needs <target> <verb> [args...]")
+		return usageErr("comms: cmd needs <target> <verb> [args...]")
 	}
 	target := args[0]
 	verb := args[1]
@@ -647,9 +647,9 @@ func (b *Bus) DoCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "agent-bus: command %s from '%s' → %s (%s)\n", id, b.ShipID, target, verb)
+	fmt.Fprintf(os.Stderr, "comms: command %s from '%s' → %s (%s)\n", id, b.ShipID, target, verb)
 	if !b.shipExists(target) {
-		fmt.Fprintf(os.Stderr, "agent-bus: warning: ship '%s' has no heartbeat on the board\n", target)
+		fmt.Fprintf(os.Stderr, "comms: warning: ship '%s' has no heartbeat on the board\n", target)
 	}
 	fmt.Printf("%s\n", id)
 	return nil
@@ -666,7 +666,7 @@ func Controller() string {
 	return defaultController
 }
 
-// DoAsk implements `agent-bus ask "<q>" [--to <ctrl>] [--timeout <secs>]`.
+// DoAsk implements `comms ask "<q>" [--to <ctrl>] [--timeout <secs>]`.
 func (b *Bus) DoAsk(args []string) error {
 	ctrl := Controller()
 	timeout := int64(600)
@@ -675,17 +675,17 @@ func (b *Bus) DoAsk(args []string) error {
 		switch args[i] {
 		case "--to":
 			if i+1 >= len(args) {
-				return usageErr("agent-bus: --to needs a value")
+				return usageErr("comms: --to needs a value")
 			}
 			ctrl = args[i+1]
 			i++
 		case "--timeout":
 			if i+1 >= len(args) {
-				return usageErr("agent-bus: --timeout needs a value")
+				return usageErr("comms: --timeout needs a value")
 			}
 			v, err := strconv.ParseInt(args[i+1], 10, 64)
 			if err != nil {
-				return usageErr("agent-bus: --timeout needs a number of seconds")
+				return usageErr("comms: --timeout needs a number of seconds")
 			}
 			timeout = v
 			i++
@@ -695,7 +695,7 @@ func (b *Bus) DoAsk(args []string) error {
 	}
 	q := clean(strings.Join(words, " "))
 	if q == "" {
-		return usageErr("agent-bus: ask needs a <question…>")
+		return usageErr("comms: ask needs a <question…>")
 	}
 	ans, err := b.AskAndWait(q, ctrl, timeout)
 	if err != nil {
@@ -706,19 +706,19 @@ func (b *Bus) DoAsk(args []string) error {
 	return nil
 }
 
-// DoReply implements `agent-bus reply <qid> <answer…>`.
+// DoReply implements `comms reply <qid> <answer…>`.
 func (b *Bus) DoReply(qid string, words []string) error {
 	ans := clean(strings.Join(words, " "))
 	if qid == "" || ans == "" {
-		return usageErr("agent-bus: reply needs <qid> <answer…>")
+		return usageErr("comms: reply needs <qid> <answer…>")
 	}
 	qpath, err := b.mfile(qid, "all")
 	if err != nil {
-		return usageErr(fmt.Sprintf("agent-bus: %v", err))
+		return usageErr(fmt.Sprintf("comms: %v", err))
 	}
 	qm, ok := parseMsgFile(qid, qpath)
 	if !ok {
-		return usageErr(fmt.Sprintf("agent-bus: no such question '%s'", qid))
+		return usageErr(fmt.Sprintf("comms: no such question '%s'", qid))
 	}
 	b.warnID()
 	rid, err := b.post(qm.From, fmt.Sprintf("[re %s] %s", qid, ans), "", "", qid, "ship")
@@ -735,11 +735,11 @@ func (b *Bus) DoReply(qid string, words []string) error {
 		_ = os.Rename(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(qid)+".json"), seenPath)
 	}
 	lock.Close()
-	fmt.Printf("agent-bus: replied to %s (asker '%s') via %s\n", qid, qm.From, rid)
+	fmt.Printf("comms: replied to %s (asker '%s') via %s\n", qid, qm.From, rid)
 	return nil
 }
 
-// DoAsks implements `agent-bus asks`.
+// DoAsks implements `comms asks`.
 func (b *Bus) DoAsks() error {
 	found := false
 	for _, m := range b.allMsgRecords() {
@@ -764,7 +764,7 @@ func (b *Bus) DoAsks() error {
 	return nil
 }
 
-// DoMsgs implements `agent-bus msgs`.
+// DoMsgs implements `comms msgs`.
 func (b *Bus) DoMsgs() error {
 	msgs := b.allMsgRecords()
 	if len(msgs) == 0 {
@@ -779,7 +779,7 @@ func (b *Bus) DoMsgs() error {
 	return nil
 }
 
-// DoEvents implements `agent-bus events [N]`.
+// DoEvents implements `comms events [N]`.
 func (b *Bus) DoEvents(n int) error {
 	data, err := os.ReadFile(b.Events)
 	if err != nil {
@@ -800,7 +800,7 @@ func (b *Bus) DoEvents(n int) error {
 	return nil
 }
 
-// DoPrune implements `agent-bus prune`.
+// DoPrune implements `comms prune`.
 func (b *Bus) DoPrune() error {
 	lock, err := b.lockBus()
 	if err != nil {
@@ -843,7 +843,7 @@ func (b *Bus) DoPrune() error {
 	}
 
 	b.logEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
-	fmt.Printf("agent-bus: pruned %d stale heartbeat(s), %d spent directive(s)\n", statusCnt, msgCnt)
+	fmt.Printf("comms: pruned %d stale heartbeat(s), %d spent directive(s)\n", statusCnt, msgCnt)
 	return nil
 }
 
@@ -858,7 +858,7 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error
 	if err != nil {
 		return "", fmt.Errorf("post: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "agent-bus: asked '%s' (%s) — waiting up to %ds for a reply…\n", ctrl, qid, timeoutSec)
+	fmt.Fprintf(os.Stderr, "comms: asked '%s' (%s) — waiting up to %ds for a reply…\n", ctrl, qid, timeoutSec)
 	prefix := "[re " + qid + "] "
 	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
 	for {

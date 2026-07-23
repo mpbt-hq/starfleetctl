@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Package comms is the Go port of scripts/agent-bus — the file-based
+// Package comms is the Go port of scripts/comms — the file-based
 // status + directive bus for coordinating many independent agent sessions.
-// It reads/writes the exact same .starfleet-ai/var/agent-bus/ file format as the
+// It reads/writes the exact same .starfleet-ai/var/comms/ file format as the
 // bash original, so a Go and bash session can interoperate on one bus
 // without either side knowing the other is a different implementation.
 package comms
@@ -23,7 +23,7 @@ import (
 )
 
 // Bus holds one invocation's resolved identity + storage locations, mirroring
-// the environment-derived globals at the top of scripts/agent-bus.
+// the environment-derived globals at the top of scripts/comms.
 type Bus struct {
 	Root      string // workspace root (parent of the script's own dir, in bash; here just $STARFLEET_BUS_DIR's parent's parent)
 	BusDir    string
