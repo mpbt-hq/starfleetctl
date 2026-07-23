@@ -38,7 +38,7 @@ func providerFromModel(model string) string {
 	return ""
 }
 
-// ListSessions returns the list of running terminals (ship IDs from agent-bus).
+// ListSessions returns the list of running terminals (ship IDs from comms).
 func ListSessions(root string) []string {
 	bus, err := comms.New(root)
 	if err != nil {

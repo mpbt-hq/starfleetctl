@@ -260,7 +260,7 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 
 // DoTouch implements `comms touch`: refresh MY OWN heartbeat's
 // timestamp without changing state/note — for a periodic auto-refresh (see
-// agent-bus-monitor-loop) so a ship deep in a long task that never calls
+// comms-monitor-loop) so a ship deep in a long task that never calls
 // DoStatus itself doesn't fall out of BusTTL and read as dead/pruned on the
 // board while the session is very much alive.
 //
@@ -309,7 +309,7 @@ func (b *Bus) DoClear() error {
 	return nil
 }
 
-// DoExit implements `agent-bus exit` — clean ship shutdown. Updates the
+// DoExit implements `comms exit` — clean ship shutdown. Updates the
 // health record to "offline" (intentional, not a crash), deletes the
 // heartbeat TSV, and logs the event. Single atomic operation for the
 // plugin's process.on('exit') handler.

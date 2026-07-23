@@ -18,7 +18,7 @@ starfleetctl provides a file-based coordination layer. All state lives in `.star
 ```
 workspace/
 ├── _WORK/
-│   ├── agent-bus/          # Status board + message bus
+│   ├── comms/          # Status board + message bus
 │   │   ├── .lock           # Exclusive flock for atomic operations
 │   │   ├── .seq            # Message ID counter
 │   │   ├── status/         # Per-agent heartbeat files
@@ -44,9 +44,9 @@ workspace/
 
 Each agent session is identified by a "ship name" (e.g., `Enterprise`, `Voyager`). The name is set via the `STARFLEET_SHIP_ID` environment variable. If unset, starfleetctl falls back to `user@hostname`.
 
-### Agent Bus
+### Comms Bus
 
-The agent bus is a publish-subscribe system built on files:
+The comms bus is a publish-subscribe system built on files:
 
 1. **Status heartbeats** — Each ship writes a TSV file with its current state (`working`, `idle`, `blocked`, etc.). Other ships read these to see who's active.
 
@@ -56,7 +56,7 @@ The agent bus is a publish-subscribe system built on files:
 
 ### File Locking
 
-All mutations go through `flock(2)` on `.starfleet-ai/var/agent-bus/.lock`. This ensures:
+All mutations go through `flock(2)` on `.starfleet-ai/var/comms/.lock`. This ensures:
 
 - Multiple processes can read concurrently
 - Only one process writes at a time
@@ -98,7 +98,7 @@ Enterprise                          Voyager
 
 ```
 1. ws-commit -m "fix: ..." src/foo.c
-2. Acquires flock on .starfleet-ai/var/agent-bus/.lock
+2. Acquires flock on .starfleet-ai/var/comms/.lock
 3. git add src/foo.c
 4. git commit -m "fix: ..."
 5. git push
@@ -117,7 +117,7 @@ Enterprise                          Voyager
 
 ## Interoperability
 
-The Go implementation reads and writes the exact same file formats as the original bash scripts (`scripts/agent-bus`, `scripts/pr-claim`). A workspace can have:
+The Go implementation reads and writes the exact same file formats as the original bash scripts (`scripts/comms`, `scripts/pr-claim`). A workspace can have:
 
 - Some agents using the Go binary
 - Others using the bash scripts

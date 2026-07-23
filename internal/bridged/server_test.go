@@ -19,7 +19,7 @@ import (
 )
 
 // newScratchRoot builds a workspace root suitable for both comms (just
-// needs _WORK_/agent-bus/ to exist under it) and dashboard (needs to be a
+// needs _WORK_/comms/ to exist under it) and dashboard (needs to be a
 // real git working tree with a DASHBOARD.md and an origin remote, since
 // pull/commit shell out to real git) — entirely local, no network.
 func newScratchRoot(t *testing.T) string {

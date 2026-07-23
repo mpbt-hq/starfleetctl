@@ -6,7 +6,7 @@ Current caveats and workarounds.
 
 **Broken under Claude Code's Monitor tool.** Both correctly detect a backlog match (message existing when started) but fail to notice messages arriving while running — only when spawned via `Monitor`. The same binary works fine backgrounded via plain `&`.
 
-**Workaround:** Use the bash originals (`scripts/agent-bus-monitor-loop`, `scripts/agent-bus-fleet-watch`), or use opencode's plugin-based polling instead.
+**Workaround:** Use Go commands (`starfleetctl comms monitor-loop`, `starfleetctl comms fleet-watch`), or use opencode's plugin-based polling instead.
 
 ### opencode plugin polling (agent-facing)
 
@@ -28,6 +28,6 @@ The old "rebase" mode leaked PR-number markers onto pushed upstream commits (PR 
 ## Bash Interoperability
 
 Go and bash implementations read/write the same file formats, but:
-- Both must use the same `flock` domain (`_WORK_/agent-bus/.lock`)
+- Both must use the same `flock` domain (`_WORK_/comms/.lock`)
 - Don't mix `STARFLEET_BUS_DIR` overrides between implementations
 - Test interoperability before relying on it in production

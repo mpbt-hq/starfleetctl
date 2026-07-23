@@ -12,7 +12,7 @@ const usage = `ship-names assign [flagship]  pick an unused name (flagship = Ent
 ship-names release <name>     free a reservation
 ship-names list [--json]      show all names and current status
 ship-names shell-env          output shell code to set up STARFLEET_SHIP_ID + PS1 + EXIT trap
-ship-names gc                 remove reservations with no live agent-bus entry
+ship-names gc                 remove reservations with no live comms entry
 ship-names flagship           print the flagship name (Enterprise)
 `
 

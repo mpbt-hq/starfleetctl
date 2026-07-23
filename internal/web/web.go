@@ -41,7 +41,7 @@ type Server struct {
 
 // New builds a web Server rooted at the given workspace root, bound to addr
 // (e.g. ":8080" or "127.0.0.1:8080"). The comms board identity is taken
-// from the environment exactly like `agent-bus` (STARFLEET_SHIP_ID etc.).
+// from the environment exactly like `comms` (STARFLEET_SHIP_ID etc.).
 func New(root, addr string) (*Server, error) {
 	b, err := comms.New(root)
 	if err != nil {

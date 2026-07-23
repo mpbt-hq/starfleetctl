@@ -14,7 +14,7 @@ import (
 // dependency — consistent with this codebase's stdlib-only convention).
 // Defense in depth on top of the socket file's 0600 mode: the same trust
 // boundary the file-based model already has today (anyone who can read/
-// write ../agent-bus/* has full access regardless), just enforced at
+// write ../comms/* has full access regardless), just enforced at
 // the connection layer too. SO_PEERCRED is Unix-socket/Linux-specific and
 // won't carry over to a future TCP transport — that gap needs its own
 // solution (e.g. a shared token) whenever cross-host support is actually

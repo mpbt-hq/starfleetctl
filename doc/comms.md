@@ -77,7 +77,7 @@ starfleetctl comms broadcast "roll call"
 | Variable | Default | Description |
 |---|---|---|
 | `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
-| `STARFLEET_BUS_DIR*...var/agent-bus` | Storage directory |
+| `STARFLEET_BUS_DIR` | `.starfleet-ai/var/comms` | Storage directory |
 | `STARFLEET_STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
 | `PROJECT` | — | Project label on the board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |

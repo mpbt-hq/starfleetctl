@@ -26,7 +26,7 @@ Safe to run multiple times. Verifies and repairs everything:
 
 | Component | Location | What it does |
 |---|---|---|
-| `./.starfleet-ai/var/...` dirs | `./.starfleet-ai/var/agent-bus`, `./.starfleet-ai/var/agent-claims/` | Bus storage, claim files |
+| `./.starfleet-ai/var/...` dirs | `./.starfleet-ai/var/comms`, `./.starfleet-ai/var/agent-claims/` | Bus storage, claim files |
 | Allowlist | `.claude/settings.json` | Permits `starfleetctl` commands without prompts |
 | Agent fragments | `.starfleet-ai/var/agents.d/` | Fleet coordination instructions |
 | Skills | `.claude/skills/` | On-demand reference docs (concurrency, starfleetctl, etc.) |

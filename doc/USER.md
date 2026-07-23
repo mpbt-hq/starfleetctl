@@ -62,14 +62,14 @@ Each AI agent session = one **ship** with a unique name:
 - `STARFLEET_SHIP_ID` — your ship name
 - `STARFLEET_ROLE` — `flagship` or `ship`
 - `STARFLEET_TARGET` — flagship to report to (unset for flagship)
-- `STARFLEET_BUS_DIR` — state directory (default: `.starfleet-ai/var/agent-bus`)
+- `STARFLEET_BUS_DIR` — state directory (default: `.starfleet-ai/var/comms`)
 
-### Agent Bus — Cross-Session Communication
+### Comms — Cross-Session Communication
 
-File-based pub/sub system in `.starfleet-ai/var/agent-bus/`:
+File-based pub/sub system in `.starfleet-ai/var/comms/`:
 
-- **Heartbeats** — each ship writes `status/<ship>.json` every few seconds
-- **Messages** — JSON files in `msgs/<target>/unseen/` (auto-moved to `seen/` on ack)
+- **Heartbeats** — each ship writes `status/<ship>.tsv` every few seconds
+- **Messages** — TSV files in `msgs/` (auto-moved to `seen/` on ack)
 - **Acknowledgments** — messages move from `unseen/` to `seen/<ship>/` on ack
 - **Locking** — all writes go through `flock(2)` on `.lock` (bash & Go interoperable)
 
@@ -373,7 +373,7 @@ ls -la .starfleet-ai/     # should exist
 
 ```sh
 # Check heartbeat directory
-ls -la .starfleet-ai/var/agent-bus/status/
+ls -la .starfleet-ai/var/comms/status/
 
 # Verify STARFLEET_BUS_DIR is consistent across sessions
 echo $STARFLEET_BUS_DIR
@@ -412,16 +412,16 @@ starfleetctl web stop                  # kill daemon
 
 ### 7.7 Go vs Bash Interoperability Issues
 
-- Both **must** use same `STARFLEET_BUS_DIR` (default `.starfleet-ai/var/agent-bus`)
+- Both **must** use same `STARFLEET_BUS_DIR` (default `.starfleet-ai/var/comms`)
 - Both use same `flock` on `.lock` — don't mix custom lock paths
 - Run `starfleetctl comms prune` periodically
 
-### 7.8 Agent Bus Monitor Loop Not Seeing New Messages
+### 7.8 Comms Monitor Loop Not Seeing New Messages
 
 **Known limitation:** The Go `monitor-loop`/`fleet-watch` commands don't detect messages arriving while running under Claude Code's `Monitor` tool.
 
 **Workarounds:**
-- Use bash originals: `scripts/agent-bus-monitor-loop`, `scripts/agent-bus-fleet-watch`
+- Use Go commands: `starfleetctl comms monitor-loop`, `starfleetctl comms fleet-watch`
 - Use opencode's plugin-based polling (auto-installed by bootstrap)
 
 ---
@@ -433,7 +433,7 @@ starfleetctl web stop                  # kill daemon
 | `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
 | `STARFLEET_ROLE` | — | `flagship` or `ship` |
 | `STARFLEET_TARGET` | — | Flagship ship ID (for ships) |
-| `STARFLEET_BUS_DIR` | `.starfleet-ai/var/agent-bus` | Agent bus state directory |
+| `STARFLEET_BUS_DIR` | `.starfleet-ai/var/comms` | Comms state directory |
 | `STARFLEET_STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat TTL in seconds |
 | `PROJECT` | — | Project label on board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
@@ -448,15 +448,14 @@ workspace/
 ├── starfleet-bootstrap          # ← commit this
 ├── .starfleet-ai/
 │   ├── var/
-│   │   ├── agent-bus/
+│   │   ├── comms/
 │   │   │   ├── .lock            # flock domain
 │   │   │   ├── .seq             # message counter
-│   │   │   ├── status/          # heartbeats (Enterprise.json, Voyager.json)
-│   │   │   ├── msgs/            # messages by target
-│   │   │   │   ├── Enterprise/unseen/  # incoming for Enterprise
-│   │   │   │   ├── Enterprise/seen/    # acked by Enterprise
-│   │   │   │   ├── Voyager/unseen/
-│   │   │   │   └── all/unseen/         # broadcast inbox
+│   │   │   ├── status/          # heartbeats (Enterprise.tsv, Voyager.tsv)
+│   │   │   ├── msgs/            # messages
+│   │   │   │   ├── m0001.tsv
+│   │   │   │   └── m0002.tsv
+│   │   │   ├── acks/            # acknowledgment markers
 │   │   │   ├── attachments/     # large payloads
 │   │   │   └── events.log       # audit trail
 │   │   ├── agent-claims/        # PR claims (pr-3162.tsv, ...)
@@ -482,7 +481,7 @@ workspace/
 |----------|-------------|
 | [README.md](README.md) | Project overview & quick reference |
 | [doc/architecture.md](doc/architecture.md) | Internal architecture & data flow |
-| [doc/comms.md](doc/agent-bus.md) | Comms command reference |
+| [doc/comms.md](doc/comms.md) | Comms command reference |
 | [doc/session.md](doc/session.md) | Session & worktree management |
 | [doc/pr-claim.md](doc/pr-claim.md) | PR locking details |
 | [doc/web-ui.md](doc/web-ui.md) | Web UI deep dive |

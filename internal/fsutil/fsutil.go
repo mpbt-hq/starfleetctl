@@ -3,7 +3,7 @@
 
 // Package fsutil holds filesystem-name safety helpers shared across the
 // packages that derive on-disk file names from user-supplied identifiers
-// (agent-bus message ids, pr-claim PR numbers, ship names). The helpers
+// (comms message ids, pr-claim PR numbers, ship names). The helpers
 // guarantee that the returned name can never escape its intended directory
 // via ".." or "/" — a class of path-traversal bug that previously let an
 // argument like "../../foo" write/read/delete an arbitrary file.

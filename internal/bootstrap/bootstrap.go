@@ -15,7 +15,7 @@
 // starfleetctl row, Phase 3 entry, for the full writeup — flagged as a
 // genuine design question for the praetor, not decided here): a plain
 // `git clone` of this repo checks out `master`, the GitHub default branch,
-// which is MISSING ./bootstrap, CLAUDE.md, DASHBOARD.md, scripts/agent-bus,
+// which is MISSING ./bootstrap, CLAUDE.md, DASHBOARD.md, scripts/comms,
 // .starfleet-ai/bin/starfleetctl, and every other piece of fleet tooling — all of it
 // lives only on `mtx/agent-config` (the maintainer's personal staging
 // branch, per CLAUDE.md's licensing-policy section: not auto-merged to

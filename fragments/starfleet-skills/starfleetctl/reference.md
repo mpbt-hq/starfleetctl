@@ -102,7 +102,7 @@ this README summarizes them, the `--help` output is authoritative.
 
 These share the on-disk file formats / lock files with the legacy bash implementations they
 replaced, so the comms on-disk state layout is stable and forward-compatible with any
-tooling that reads `.starfleet-ai/var/agent-bus/` directly.
+tooling that reads `.starfleet-ai/var/comms/` directly.
 
 | Subcommand | Purpose |
 |---|---|
@@ -169,8 +169,8 @@ separate decision gated on review, same as the read-only set was before it got t
   three independent from-scratch minimal Go reproductions of the same shape (a bare sleep-loop, a
   directory-poll loop, and that loop plus a held file handle) all worked fine under `Monitor` too.
   Directory-cache staleness, held-fd interference, and workspace-root resolution were all
-  specifically ruled out; the actual cause is not understood. Until it is, the bash originals
-  (`agent-bus-monitor-loop`, `agent-bus-fleet-watch`) remain the only
+  specifically ruled out; the actual cause is not understood. Until it is, the Go commands
+  (`starfleetctl comms monitor-loop`, `starfleetctl comms fleet-watch`) remain the only
   `Monitor`-tool-safe implementation. `comms watch` (a `setsid`-detached background daemon, a
   different execution model entirely) was not tested against this failure mode.
 - **`github backport commit`'s path-remap fallback uses project configuration.** The path remapping prefix and behavior are configured in `.starfleet-ai/conf/project.yaml` (default: `Xext/` prefix, enabled for xserver projects). The bash original used `sed` with a hardcoded `Xext/` prefix; this port uses `strings.ReplaceAll` with the configured prefix. Behaviourally identical for every real path in the source tree this targets (plain `word/word/word.c` names, no regex metacharacters) — flagged here as a disclosed, deliberate simplification rather than a silent behavior change.

@@ -177,7 +177,7 @@ func firstLine(s string) string {
 }
 
 // DoGC implements `ship-names gc`: remove reservations with no matching
-// live agent-bus status entry.
+// live comms status entry.
 func (r *Registry) DoGC() error {
 	entries, err := os.ReadDir(r.ShipsDir)
 	if err != nil {
@@ -227,7 +227,7 @@ func (r *Registry) DoFlagship() error {
 //
 // If STARFLEET_SHIP_ID is already set in the caller's environment, the
 // existing value is preserved (no reassignment) — matching the original
-// agent-bus-auto-id.sh "deliberately does NOT overwrite" semantics.
+// comms-auto-id.sh "deliberately does NOT overwrite" semantics.
 func (r *Registry) DoShellEnv() error {
 	shipID := os.Getenv("STARFLEET_SHIP_ID")
 	if shipID == "" {

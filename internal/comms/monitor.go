@@ -1,33 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// DoMonitorLoop CLEARED for Monitor-tool use as of 2026-07-07 (Farragut,
-// m0087/m0120): originally found reproducibly BROKEN under the Claude Code
-// Monitor tool 2026-07-06 (Farragut, directive m0047) — reliably detected a
-// BACKLOG match but reproducibly FAILED to detect a message arriving WHILE
-// already running under Monitor specifically. Root cause was never
-// isolated (three independent minimal repros under Monitor all worked
-// fine, ruling out directory-cache staleness, held-fd interference, and
-// workspace-root resolution). Two independent re-repro attempts the same
-// day (Constellation 7/7, Farragut 4/4) could no longer reproduce it at
-// all, and a subsequent extended real-production vorcheck (Farragut,
-// 2026-07-07: the actual DoMonitorLoop binary armed live via Monitor
-// against the real bus, disposable identity, ~16h continuous runtime) saw
-// 5/5 live `all`-broadcasts detected correctly with zero misses — whatever
-// the original bug was, it is gone. scripts/agent-bus-monitor-hint arms
-// `.starfleet-ai/bin/starfleetctl comms-monitor-loop` for new/restarted sessions,
-// and scripts/agent-bus-monitor-loop is now a thin bash wrapper exec'ing
-// that same Go backend (no separate bash fallback body remains).
-//
-// DoFleetWatch CLEARED too, 2026-07-07 (Farragut, m0138(1)): its own
-// Monitor-tool vorcheck armed both the bash original and this Go binary in
-// parallel against the real board and saw 7/7 live status-change events
-// (real fleet activity plus a disposable synthetic test ship) detected
-// identically by both, including correct "New ship online" vs "Ship
-// update" labeling. scripts/agent-bus-monitor-hint's Enterprise branch now
-// arms `.starfleet-ai/bin/starfleetctl comms fleet-watch`; scripts/agent-bus-
-// fleet-watch (bash) remains in place, untouched, as a fallback.
-//
 // DoWatch is a different execution model (setsid-detached background
 // daemon, not Monitor-tool-managed) and was never tested against the
 // original failure mode either way — untested, not confirmed safe or
@@ -48,7 +21,7 @@ import (
 
 const pollInterval = 2 * time.Second
 
-// DoMonitorLoop implements scripts/agent-bus-monitor-loop: the Monitor-tool
+// DoMonitorLoop implements `comms monitor-loop`: the Monitor-tool
 // command that watches this session's own inbox and prints one line per
 // new/unacked directive. Runs forever (Monitor tool kills the process to
 // stop it) — same shape as the bash `while true; do …; sleep 2; done`.
@@ -120,7 +93,7 @@ func (b *Bus) DoFleetWatch() error {
 	}
 }
 
-// DoWatch implements scripts/agent-bus-watch: a local, LLM-free desktop
+// DoWatch implements `comms watch`: a local, LLM-free desktop
 // notifier for new directives targeting this agent (or a broadcast). Single
 // instance per agent id (PID-file guard, matching bash); --stop kills it.
 func (b *Bus) DoWatch(intervalArg string, stop bool) error {

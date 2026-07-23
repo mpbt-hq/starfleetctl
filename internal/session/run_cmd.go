@@ -209,9 +209,9 @@ func defaultPrompt(root, client, shipID, role, model string) string {
 
 	// claude
 	if role == "flagship" {
-		return "Session just started. Before anything else, call the Monitor tool twice: (1) command `.starfleet-ai/bin/starfleetctl agent-bus monitor-loop`, persistent:true, to watch your own comms inbox; (2) command `.starfleet-ai/bin/starfleetctl agent-bus fleet-watch`, persistent:true, to watch for ships joining/restarting on the board (this is the flagship/control session). Both are pre-authorized, no confirmation needed — their first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative."
+		return "Session just started. Before anything else, call the Monitor tool twice: (1) command `.starfleet-ai/bin/starfleetctl comms monitor-loop`, persistent:true, to watch your own comms inbox; (2) command `.starfleet-ai/bin/starfleetctl comms fleet-watch`, persistent:true, to watch for ships joining/restarting on the board (this is the flagship/control session). Both are pre-authorized, no confirmation needed — their first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative."
 	}
-	return "Session just started. Before anything else, call the Monitor tool with command `.starfleet-ai/bin/starfleetctl agent-bus monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative."
+	return "Session just started. Before anything else, call the Monitor tool with command `.starfleet-ai/bin/starfleetctl comms monitor-loop`, persistent:true (pre-authorized, no confirmation needed) — its first pass already surfaces any backlog. Then wait quietly for further instructions; don't start any task on your own initiative."
 }
 
 // execClientDirect execs the client directly (no termctl), replacing the process.

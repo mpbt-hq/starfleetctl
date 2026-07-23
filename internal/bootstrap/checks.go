@@ -14,6 +14,7 @@ import (
 
 	starfleetctl "github.com/metux/starfleetctl"
 	"github.com/metux/starfleetctl/internal/agents"
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/projectconfig"
 	"github.com/metux/starfleetctl/internal/templates"
@@ -35,11 +36,11 @@ type Check struct {
 // all up in one pass (e.g. right after a fresh clone, before any subcommand
 // has run yet) instead of relying on each one's own first invocation.
 var requiredDirs = []string{
-	filepath.Join(".starfleet-ai", "var", "agent-bus", "status"),
-	filepath.Join(".starfleet-ai", "var", "agent-bus", "msgs"),
-	filepath.Join(".starfleet-ai", "var", "agent-bus", "acks"),
-	filepath.Join(".starfleet-ai", "var", "agent-bus", "ships"),
-	filepath.Join(".starfleet-ai", "var", "agent-bus", "notify", ".popup-once"),
+	filepath.Join(config.BusDir(""), "status"),
+	filepath.Join(config.BusDir(""), "msgs"),
+	filepath.Join(config.BusDir(""), "acks"),
+	filepath.Join(config.BusDir(""), "ships"),
+	filepath.Join(config.BusDir(""), "notify", ".popup-once"),
 	filepath.Join(".starfleet-ai", "var", "prclaims"),
 	filepath.Join(".starfleet-ai", "conf"),
 }
@@ -567,7 +568,7 @@ func fixOpencodePluginsDir(b *Bootstrap) error {
 // installed to .opencode/plugins/, byte-identical to what the current binary
 // would write, AND registered in .opencode/opencode.json's "plugin" array
 // (openblocks only auto-loads plugins from the array, not by file presence
-// alone — without registration the agent-bus polling/injection never runs).
+// alone — without registration the comms polling/injection never runs).
 func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir))
 	if err != nil {
@@ -675,7 +676,7 @@ func fixOpencodePlugins(b *Bootstrap) error {
 	// doesn't leave two copies loaded at once (duplicate inbox injection).
 	// Keep this list in sync with any fragment renames in
 	// fragments/opencode-plugins/.
-	for _, stale := range []string{"agent-bus-poller.ts"} {
+	for _, stale := range []string{"comms-poller.ts"} {
 		if err := os.Remove(filepath.Join(destDir, stale)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -711,7 +712,7 @@ func fixOpencodePlugins(b *Bootstrap) error {
 
 	// Register every embedded plugin in .opencode/opencode.json's "plugin"
 	// array. opencode only loads plugins that are listed there (file presence
-	// in .opencode/plugins/ is not enough), so without this the agent-bus
+	// in .opencode/plugins/ is not enough), so without this the comms
 	// polling/injection never starts. The write is idempotent: an already
 	// registered spec is left untouched, and any pre-existing config keys are
 	// preserved.
@@ -971,7 +972,7 @@ func fixClaudeHooks(b *Bootstrap) error {
 const gitignoreClaudeHooksEntry = "/.claude/hooks/"
 
 const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persisted to git)
-/agent-bus/
+/comms/
 /logs/
 /var/
 /term-pipes/

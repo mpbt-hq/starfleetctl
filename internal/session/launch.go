@@ -490,11 +490,11 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	return name, nil
 }
 
-// StopShip stops a running ship by ID, cleans up its termctl pipe, agent-bus
+// StopShip stops a running ship by ID, cleans up its termctl pipe, comms
 // heartbeat, and ship-name reservation. It is the in-process core of
 // `session stop`, also usable from the web console's "stop ship" action.
 func StopShip(root string, id string) error {
-	// Check agent-bus for a matching agent/handle to resolve the canonical ID
+	// Check comms for a matching agent/handle to resolve the canonical ID
 	bus, err := comms.New(root)
 	if err == nil {
 		for _, r := range bus.AllStatusRecords() {
@@ -638,7 +638,7 @@ func runStop(root string, args []string) int {
 	}
 	id := args[0]
 
-	// Check agent-bus for a matching agent/handle to resolve the canonical ID
+	// Check comms for a matching agent/handle to resolve the canonical ID
 	bus, err := comms.New(root)
 	if err == nil {
 		for _, r := range bus.AllStatusRecords() {

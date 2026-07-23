@@ -58,7 +58,7 @@ type Schedule struct {
 
 // TimerRecord is the on-disk representation of a single timer.
 // The ID field doubles as the unique name — the JSON file is named <id>.json.
-// Structure mirrors agent-bus messages: type determines how the text is handled.
+// Structure mirrors comms messages: type determines how the text is handled.
 type TimerRecord struct {
 	ID          string     `json:"id"`                    // unique key, also the filename
 	Description string     `json:"description,omitempty"` // human-readable description

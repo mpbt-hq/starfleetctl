@@ -40,7 +40,7 @@ const (
 func RunWorker(root string) error {
 	bus, err := comms.New(root)
 	if err != nil {
-		return fmt.Errorf("timer worker: agent-bus: %w", err)
+		return fmt.Errorf("timer worker: comms: %w", err)
 	}
 
 	pidFile := workerPath(root, workerPidFile)

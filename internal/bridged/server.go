@@ -104,7 +104,7 @@ func dispatch(root string, req Request) Response {
 // different bus directory entirely, a materially different (and unasked
 // for) feature from "each request carries its own identity". A request
 // naming any other key is a no-op — env overrides are an allowlist too,
-// same reasoning as the agent-bus subcommand allowlist above.
+// same reasoning as the comms subcommand allowlist above.
 var allowedEnvOverrides = map[string]bool{
 	"STARFLEET_SHIP_ID":      true,
 	"PROJECT":                true,
@@ -208,7 +208,7 @@ func checkNotAlreadyRunning(sockPath string) error {
 // path: struct sockaddr_un's sun_path is 108 bytes on Linux (less on some
 // BSDs), including the NUL terminator. Bind/connect fail with the cryptic
 // "invalid argument" past this limit — found by hitting it for real with a
-// deeply-nested test scratch path (_WORK_/agent-bus/bridged.sock itself is
+// deeply-nested test scratch path (_WORK_/comms/bridged.sock itself is
 // nowhere near this in normal use, but a worktree/scratch path easily can
 // be), so both the daemon and the client check it upfront with an actual
 // diagnostic instead of surfacing that raw syscall error.

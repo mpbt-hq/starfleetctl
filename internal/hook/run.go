@@ -4,7 +4,7 @@
 // Package hook generates client-specific hook output (SessionStart JSON,
 // prompt fragments, etc.) for LLM clients like Claude Code and opencode.
 // Each subcommand emits protocol-compliant output for its specific hook
-// event, keeping client-formatting logic out of the agent-bus core.
+// event, keeping client-formatting logic out of the comms core.
 package hook
 
 import (

@@ -54,10 +54,7 @@ session is doing and steer it. All parties read/write the same gitignored files,
 
 **Heartbeats are auto-reported** via session hooks or wrappers — details are workspace-specific.
 
-**Auto-surfacing directives via Claude Code's `Monitor` tool:** `agent-bus-monitor-loop` (a script
-shipped with starfleetctl) polls the inbox and lands new directives as in-context events inside a
-running Claude Code session. The assistant still reasons about each directive and goes through the
-normal tool-permission flow.
+**Auto-surfacing directives via Claude Code's `Monitor` tool:** `starfleetctl comms monitor-loop` (shipped with starfleetctl) polls the inbox and lands new directives as in-context events inside a running Claude Code session. The assistant still reasons about each directive and goes through the normal tool-permission flow.
 
 **Automated ships and the two-tier permission model:**
 

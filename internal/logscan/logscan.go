@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package logscan implements the automatic feedback loop: it scans the fleet's
-// ship logs (var/ships/*.log) and the agent-bus audit trail (events.log) for
+// ship logs (var/ships/*.log) and the comms audit trail (events.log) for
 // recurring failures and extracts them as structured "findings". Findings can
 // be dumped (--dry-run) or captured as dashboard tasks so a ship picks them up.
 //

@@ -1,16 +1,16 @@
 ---
-slug: starfleet/agent-bus-opencode-polling
-title: "Agent-bus opencode polling"
+slug: starfleet/comms-opencode-polling
+title: "Comms opencode polling"
 order: 215
 owner: "starfleetctl"
 ---
 
-<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/agent-bus-opencode-polling.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/comms-opencode-polling.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
 
-## Agent-bus opencode polling
+## Comms opencode polling
 
 opencode has no `Monitor` tool (Claude Code only), so the background
-`agent-bus-monitor-loop` cannot surface directives as in-context events.
+`comms-monitor-loop` cannot surface directives as in-context events.
 Instead, the `.opencode/plugins/starfleet-dispatch.ts` plugin handles
 incoming messages in two ways:
 
@@ -26,7 +26,7 @@ incoming messages in two ways:
 
 If new directives are shown, the assistant should handle them as it would
 if they had surfaced via a Monitor event — ack, act, or defer as
-appropriate. The plugin shares dedup state with `agent-bus-monitor-loop`
+appropriate. The plugin shares dedup state with `comms-monitor-loop`
 so the same message is only shown once regardless of which mechanism
 surfaced it first.
 
@@ -106,5 +106,5 @@ model after the next assistant turn.
   `setModel` directives bypass this guard).
 - The model name must match an entry in the configured model list.
 - The directive is fire-and-forget — no RPC response to the sender.
-  Check the tick log (`.starfleet-ai/var/agent-bus/poll/<SHIP>.tick`) or status
+  Check the tick log (`.starfleet-ai/var/comms/poll/<SHIP>.tick`) or status
   record to verify the switch succeeded.

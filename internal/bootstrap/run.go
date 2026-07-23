@@ -12,7 +12,7 @@ const usage = `starfleetctl bootstrap [--fix]
 
 Idempotent self-check (and, with --fix, self-repair) of the
 fleet-management-specific one-time setup this tool depends on:
-the agent-bus + agent-claims directory tree, and the
+the comms + agent-claims directory tree, and the
 starfleetctl-related .claude/settings.json allowlist entries.
 
 Without --fix: report-only, exits 1 if anything is missing.

@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package logs is the `starfleetctl logs` subcommand — the manual side of the
-// automatic feedback loop. `logs scan` walks the ship logs + agent-bus audit
+// automatic feedback loop. `logs scan` walks the ship logs + comms audit
 // trail, extracts recurring failures (see internal/logscan), and either prints
 // them (--dry-run, default) or captures each new finding as a dashboard task.
 package logs

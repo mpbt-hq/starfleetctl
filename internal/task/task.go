@@ -6,7 +6,7 @@
 // dashboard (as a dashboard/topics/*.md topic entry) via the sanctioned
 // dashboard package calls ONLY, never touching the topic files as raw
 // filesystem paths, and it NEVER executes the task itself. Optionally it
-// commissions a free (idle, non-stale) ship by sending it an agent-bus
+// commissions a free (idle, non-stale) ship by sending it a comms
 // directive. See scripts/task-capture (the bash original) for the full
 // rationale; this is the consolidated, in-process equivalent.
 package task
@@ -257,7 +257,7 @@ func deriveSlug(title string) string {
 	return "task-" + s
 }
 
-// pickFreeShip returns the first idle, non-stale ship from the agent-bus
+// pickFreeShip returns the first idle, non-stale ship from the comms
 // board, or "" if none is available. Mirrors scripts/task-capture's python
 // one-liner (cand[0] of idle+!stale).
 func pickFreeShip(root string) (string, error) {

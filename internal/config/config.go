@@ -37,7 +37,7 @@ type WebConfig struct {
 	LogFile          string `yaml:"log_file"`
 	// ShipID is the fleet identity (ship name) under which the web frontend
 	// appears on the agent bus. When empty, the bus identity is taken from the
-	// environment (STARFLEET_SHIP_ID) like `agent-bus` does.
+	// environment (STARFLEET_SHIP_ID) like `comms` does.
 	ShipID string `yaml:"ship_id"`
 	// ShipHandle is the optional human-readable handle shown alongside ShipID.
 	ShipHandle string `yaml:"ship_handle"`

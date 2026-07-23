@@ -3,7 +3,7 @@
 //
 // Package bridged is the first concrete step of the "Starbase" long-term
 // architecture vision (DASHBOARD.md): a Unix-domain-socket daemon offering
-// agent-bus and dashboard as a persistent, connection-based alternative to
+// comms and dashboard as a persistent, connection-based alternative to
 // today's one-shot-process-per-call file/flock model. Deliberately additive
 // — the file-based model is untouched and remains the sole thing any
 // existing caller (hooks, Monitor-loop scripts, direct CLI/file use) relies
@@ -46,7 +46,7 @@ type Request struct {
 
 // Response mirrors what a CLI invocation would have produced: its exit
 // code plus captured stdout/stderr. A request rejected by policy (e.g. a
-// disallowed agent-bus subcommand) or malformed comes back the same shape
+// disallowed comms subcommand) or malformed comes back the same shape
 // (ExitCode 2, an explanatory Stderr) rather than a separate error channel
 // — one schema for both "ran and failed" and "refused to run".
 type Response struct {
