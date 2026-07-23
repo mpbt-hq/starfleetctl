@@ -222,15 +222,12 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		}
 	}
 
-	// Check if already running via registry
-	reg := NewRegistry(root)
-	if _, exists := reg.Get(shipID); exists {
+	// Check if already running — pipe path is deterministic
+	pipePath := PipePath(root, shipID)
+	if _, err := os.Stat(pipePath); err == nil {
 		fmt.Fprintf(os.Stderr, "session run: session '%s' already running — attach with: starfleetctl session attach %s (or use --name for a second one)\n", shipID, shipID)
 		return nil, nil
 	}
-
-	// termctl control pipe path (caller-chosen, under .starfleet-ai)
-	pipePath := filepath.Join(root, ".starfleet-ai", "term-pipes", shipID+".pipe")
 
 	var clientPath string
 	switch client {
@@ -437,16 +434,14 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		}
 	}
 
-	// Refuse if a terminal with this ship ID is already registered.
-	reg := NewRegistry(root)
-	if _, exists := reg.Get(name); exists {
+	// Refuse if a terminal with this ship ID is already running.
+	pipePath := PipePath(root, name)
+	if _, err := os.Stat(pipePath); err == nil {
 		return "", fmt.Errorf("'%s' already running — stop it first (session stop %s)", name, name)
 	}
 
 	// State files under .starfleet-ai/var/ships/
-	stateDir := filepath.Join(root, ".starfleet-ai", "var", "ships")
-	pipePath := filepath.Join(stateDir, name+".pipe")
-	logPath := filepath.Join(stateDir, name+".log")
+	logPath := LogPath(root, name)
 
 	// Build the opencode ship command, mirroring run-opencode.ship.
 	const flagship = "Enterprise"
@@ -499,27 +494,20 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 // heartbeat, and ship-name reservation. It is the in-process core of
 // `session stop`, also usable from the web console's "stop ship" action.
 func StopShip(root string, id string) error {
-	reg := NewRegistry(root)
-	pipePath, ok := reg.Get(id)
-	if !ok {
-		// Fallback: check agent-bus status records
-		bus, err := agentbus.New(root)
-		if err == nil {
-			for _, r := range bus.AllStatusRecords() {
-				if r.Agent == id || r.Handle == id {
-					if p, found := reg.Get(r.Agent); found {
-						pipePath = p
-						id = r.Agent
-						ok = true
-						break
-					}
-				}
+	// Check agent-bus for a matching agent/handle to resolve the canonical ID
+	bus, err := agentbus.New(root)
+	if err == nil {
+		for _, r := range bus.AllStatusRecords() {
+			if r.Agent == id || r.Handle == id {
+				id = r.Agent
+				break
 			}
 		}
 	}
 
-	// Stop via termctl pipe (best effort)
-	if ok {
+	// Pipe path is deterministic
+	pipePath := PipePath(root, id)
+	if _, err := os.Stat(pipePath); err == nil {
 		if rem, err := termctl.OpenPipe(pipePath); err == nil {
 			_ = rem.Stop()
 		}
@@ -528,14 +516,13 @@ func StopShip(root string, id string) error {
 	// Heartbeat cleanup + ship name release
 	shipReg := shipnames.New(root)
 	_, nameReserved := shipReg.Lookup(id)
-	_ = reg.Delete(id)
 	_ = os.Setenv("STARFLEET_SHIP_ID", id)
 	if bus, err := agentbus.New(root); err == nil {
 		_ = bus.DoClear()
 	}
 	_ = shipReg.DoRelease(id)
 
-	if !ok && !nameReserved {
+	if _, err := os.Stat(pipePath); err != nil && !nameReserved {
 		return fmt.Errorf("no such session: %s", id)
 	}
 	return nil
@@ -550,16 +537,8 @@ func spawnSession(root string, vars *LaunchVars) error {
 }
 
 // spawnSessionAt is spawnSession with an explicit log path. An empty logPath
-// defaults to .starfleet-ai/logs/<shipID>.log (the shared location used by
-// `session run`); callers that group state under .starfleet-ai/var/ pass their
-// own path (e.g. ship-run uses var/ships/<id>.log).
+// defaults to .starfleet-ai/var/ships/<shipID>.log (the canonical location).
 func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
-	// Register pipe path before starting (so attach/stop can find it)
-	reg := NewRegistry(root)
-	if err := reg.Put(vars.ShipID, vars.PipePath); err != nil {
-		return fmt.Errorf("registry put: %w", err)
-	}
-
 	// Ensure pipe directory exists
 	if err := os.MkdirAll(filepath.Dir(vars.PipePath), 0o755); err != nil {
 		return fmt.Errorf("mkdir pipe dir: %w", err)
@@ -602,12 +581,10 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 	// stdio above and SIGHUP is ignored inside RunTermctl.
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
-		_ = reg.Delete(vars.ShipID)
 		return fmt.Errorf("spawn termctl-run: %w", err)
 	}
 
-	// Don't wait - the child process runs independently and cleans up
-	// registry on exit via its own OnExit callback.
+	// Don't wait - the child process runs independently.
 	// The log file will be closed when the child exits (we don't close it here).
 
 	// Post initial heartbeat
@@ -661,29 +638,20 @@ func runStop(root string, args []string) int {
 	}
 	id := args[0]
 
-	reg := NewRegistry(root)
-	pipePath, ok := reg.Get(id)
-	if !ok {
-		// Fallback: check agent-bus status records
-		bus, err := agentbus.New(root)
-		if err == nil {
-			for _, r := range bus.AllStatusRecords() {
-				if r.Agent == id || r.Handle == id {
-					if p, found := reg.Get(r.Agent); found {
-						pipePath = p
-						id = r.Agent
-						ok = true
-						break
-					}
-				}
+	// Check agent-bus for a matching agent/handle to resolve the canonical ID
+	bus, err := agentbus.New(root)
+	if err == nil {
+		for _, r := range bus.AllStatusRecords() {
+			if r.Agent == id || r.Handle == id {
+				id = r.Agent
+				break
 			}
 		}
 	}
 
-	// Stop via termctl pipe (best effort). If the terminal already exited,
-	// its control pipe is gone and OpenPipe fails — that's fine, we still
-	// clean up the registry, heartbeat and ship-name reservation below.
-	if ok {
+	// Pipe path is deterministic
+	pipePath := PipePath(root, id)
+	if _, err := os.Stat(pipePath); err == nil {
 		if rem, err := termctl.OpenPipe(pipePath); err == nil {
 			if err := rem.Stop(); err != nil {
 				fmt.Fprintf(os.Stderr, "agent-run: stop (pipe): %v\n", err)
@@ -692,19 +660,17 @@ func runStop(root string, args []string) int {
 	}
 
 	// Heartbeat cleanup + ship name release. A session may already be dead
-	// (pipe gone, registry entry cleared by the terminal's OnExit) while the
-	// ship-name reservation still lingers; treat that as "already stopped"
-	// and clean up rather than erroring.
+	// (pipe gone) while the ship-name reservation still lingers; treat that
+	// as "already stopped" and clean up rather than erroring.
 	shipReg := shipnames.New(root)
 	_, nameReserved := shipReg.Lookup(id)
-	_ = reg.Delete(id)
 	os.Setenv("STARFLEET_SHIP_ID", id)
 	if bus, err := agentbus.New(root); err == nil {
 		_ = bus.DoClear()
 	}
 	_ = shipReg.DoRelease(id)
 
-	if !ok && !nameReserved {
+	if _, err := os.Stat(pipePath); err != nil && !nameReserved {
 		fmt.Fprintf(os.Stderr, "agent-run: no such session: %s\n", id)
 		return 1
 	}
@@ -742,8 +708,6 @@ func RunTermctl(root string, args []string) int {
 		return 1
 	}
 
-	reg := NewRegistry(root)
-
 	// Build termctl handle
 	h, err := termctl.New(
 		termctl.WithName(shipID),
@@ -755,9 +719,7 @@ func RunTermctl(root string, args []string) int {
 			"STARFLEET_SHIP_ID=" + shipID,
 		}),
 		termctl.WithOnExit(func() {
-			// Cleanup registry on shell exit
 			fmt.Fprintf(os.Stderr, "termctl-run: OnExit callback for %s\n", shipID)
-			_ = reg.Delete(shipID)
 		}),
 	)
 	if err != nil {

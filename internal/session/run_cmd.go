@@ -260,8 +260,8 @@ func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model s
 	inner := buildInnerCommand(client, shipID, role, systemPrompt, prompt, model, args)
 
 	// Compute launch vars
-	pipePath := filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".pipe")
-	logPath := filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".log")
+	pipePath := PipePath(root, shipID)
+	logPath := LogPath(root, shipID)
 
 	vars := &LaunchVars{
 		ShipID:     shipID,

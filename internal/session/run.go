@@ -170,12 +170,12 @@ func attachPipe(pipePath, mode string) error {
 	return nil
 }
 
-// resolvePipe finds the termctl pipe path for a given ID. ID can be a ship ID
-// (registry key), a bus handle, or a substring.
+// resolvePipe finds the termctl pipe path for a given ID. ID can be a ship ID,
+// a bus handle, or a substring.
 func resolvePipe(root, id string) (string, bool) {
-	// 1. Direct registry lookup by ship ID
-	reg := NewRegistry(root)
-	if pipe, ok := reg.Get(id); ok {
+	// 1. Direct lookup by ship ID — pipe path is deterministic
+	pipe := PipePath(root, id)
+	if _, err := os.Stat(pipe); err == nil {
 		return pipe, true
 	}
 
@@ -186,8 +186,9 @@ func resolvePipe(root, id string) (string, bool) {
 	}
 	for _, r := range bus.AllStatusRecords() {
 		if r.Agent == id || r.Handle == id || strings.Contains(r.Agent, id) || strings.Contains(r.Handle, id) {
-			if pipe, ok := reg.Get(r.Agent); ok {
-				return pipe, true
+			p := PipePath(root, r.Agent)
+			if _, err := os.Stat(p); err == nil {
+				return p, true
 			}
 		}
 	}
