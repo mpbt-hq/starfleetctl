@@ -2,9 +2,8 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Timer store: file-based CRUD for timer records. Each timer is a single JSON
-// file (t001.json, t002.json, ...) in a timer directory. A .counter file
-// tracks the next ID. The store is NOT safe for concurrent use — the worker
-// daemon is the sole writer at any given time.
+// file (<name>.json) in a timer directory. The store is NOT safe for concurrent
+// use — the worker daemon is the sole writer at any given time.
 package timer
 
 import (
