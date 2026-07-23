@@ -126,7 +126,7 @@ func RunCmd(root string, args []string) int {
 	role := "ship"
 
 	if flagship {
-		shipID = shipnames.Flagship
+		shipID = shipnames.FlagshipName(root)
 		role = "flagship"
 	} else if shipID == "" {
 		reg := shipnames.New(root)
@@ -155,14 +155,14 @@ func RunCmd(root string, args []string) int {
 	// Build the prompt
 	prompt := customPrompt
 	if prompt == "" {
-		prompt = defaultPrompt(client, shipID, role, model)
+		prompt = defaultPrompt(root, client, shipID, role, model)
 	}
 
 	// Set env vars
 	os.Setenv("STARFLEET_SHIP_ID", shipID)
 	os.Setenv("STARFLEET_ROLE", role)
 	if role == "ship" {
-		os.Setenv("STARFLEET_TARGET", shipnames.Flagship)
+		os.Setenv("STARFLEET_TARGET", shipnames.FlagshipName(root))
 	} else {
 		os.Unsetenv("STARFLEET_TARGET")
 	}
@@ -172,7 +172,7 @@ func RunCmd(root string, args []string) int {
 		provider := providerFromModel(model)
 		_ = bus.DoStatus("idle", client+" session starting (run)", agentbus.StatusPatch{
 			LaunchType: "terminal",
-			Parent:     shipnames.Flagship,
+			Parent:     shipnames.FlagshipName(root),
 			Provider:   provider,
 			Model:      model,
 		})
@@ -184,7 +184,7 @@ func RunCmd(root string, args []string) int {
 		"STARFLEET_ROLE="+role,
 	)
 	if role == "ship" {
-		env = append(env, "STARFLEET_TARGET="+shipnames.Flagship)
+		env = append(env, "STARFLEET_TARGET="+shipnames.FlagshipName(root))
 	}
 
 	if useExec {
@@ -195,7 +195,7 @@ func RunCmd(root string, args []string) int {
 }
 
 // defaultPrompt returns the standard prompt for the given client/role combination.
-func defaultPrompt(client, shipID, role, model string) string {
+func defaultPrompt(root, client, shipID, role, model string) string {
 	if client == "opencode" {
 		configContent := fmt.Sprintf(`{"username":"%s","instructions":[".starfleet-ai/var/agents.d/index.md"]}`, shipID)
 		os.Setenv("OPENCODE_CONFIG_CONTENT", configContent)
@@ -203,7 +203,7 @@ func defaultPrompt(client, shipID, role, model string) string {
 		if role == "flagship" {
 			return "You are the flagship " + shipID + ". Fleet identity loaded via OPENCODE_CONFIG_CONTENT."
 		}
-		return "You are fleet ship " + shipID + ", report to flagship " + shipnames.Flagship +
+		return "You are fleet ship " + shipID + ", report to flagship " + shipnames.FlagshipName(root) +
 			". Fleet identity loaded via OPENCODE_CONFIG_CONTENT."
 	}
 
@@ -257,7 +257,7 @@ func execClientDirect(root, client, shipID, systemPrompt, prompt, model string, 
 // execClientTermctl launches the client in a termctl terminal (detached, attachable).
 func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model string, env []string, args []string) int {
 	// Build inner command for termctl
-	inner := buildInnerCommand(client, shipID, role, systemPrompt, prompt, model, args)
+	inner := buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model, args)
 
 	// Compute launch vars
 	pipePath := PipePath(root, shipID)
@@ -269,7 +269,7 @@ func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model s
 		Client:     client,
 		ShellCmd:   inner,
 		LaunchType: "terminal",
-		Parent:     shipnames.Flagship,
+		Parent:     shipnames.FlagshipName(root),
 		Model:      model,
 		Provider:   providerFromModel(model),
 	}
@@ -287,14 +287,14 @@ func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model s
 }
 
 // buildInnerCommand constructs the shell command string for termctl to execute.
-func buildInnerCommand(client, shipID, role, systemPrompt, prompt, model string, args []string) string {
+func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model string, args []string) string {
 	var parts []string
 
 	// Set env vars
 	parts = append(parts, "export STARFLEET_SHIP_ID="+shellQuote(shipID))
 	parts = append(parts, "export STARFLEET_ROLE="+shellQuote(role))
 	if role == "ship" {
-		parts = append(parts, "export STARFLEET_TARGET="+shellQuote(shipnames.Flagship))
+		parts = append(parts, "export STARFLEET_TARGET="+shellQuote(shipnames.FlagshipName(root)))
 	}
 
 	// Set OPENCODE_CONFIG_CONTENT for opencode

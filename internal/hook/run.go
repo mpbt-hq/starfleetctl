@@ -80,7 +80,7 @@ func runClaude(root string, args []string) int {
 		fmt.Print(usage)
 		return 0
 	case "monitor-hint":
-		return monitorHint()
+		return monitorHint(root)
 	case "permission":
 		return permission(root)
 	case "telemetry":
@@ -112,14 +112,14 @@ func runOpencode(root string, args []string) int {
 // Claude Code assistant to unconditionally arm Monitor-tool watchers on its
 // agent-bus inbox (and, for the flagship, fleet-watch too). Quietly exits with
 // no output when $STARFLEET_SHIP_ID is unset, matching the bash original.
-func monitorHint() int {
+func monitorHint(root string) int {
 	shipID := identity.ShipID()
 	if shipID == "" {
 		return 0
 	}
 
 	var context string
-	if shipID == shipnames.Flagship {
+	if shipID == shipnames.FlagshipName(root) {
 		context = fmt.Sprintf(
 			"Fleet directive auto-surfacing: you are agent-bus identity %s (the flagship/control session). "+
 				"Before doing anything else this session (including before responding to the user's first message), "+

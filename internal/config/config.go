@@ -16,6 +16,17 @@ import (
 type Config struct {
 	Web      WebConfig      `yaml:"web"`
 	AgentBus AgentBusConfig `yaml:"agent_bus"`
+	Fleet    FleetConfig    `yaml:"fleet"`
+}
+
+// FleetConfig holds fleet-wide identity settings.
+type FleetConfig struct {
+	// Flagship is the canonical name of the flagship/control session.
+	// Defaults to "Enterprise" when unset.
+	Flagship string `yaml:"flagship"`
+	// ShipNames is the worker ship-name pool. When empty, the compiled-in
+	// Star Trek ship roster is used. The flagship name is always excluded.
+	ShipNames []string `yaml:"ship_names"`
 }
 
 // WebConfig holds web server configuration.
@@ -96,6 +107,7 @@ func Load(root string) (*Config, error) {
 	}{
 		{"web.yaml", "web", &cfg.Web},
 		{"agent-bus.yaml", "agent_bus", &cfg.AgentBus},
+		{"fleet.yaml", "fleet", &cfg.Fleet},
 	} {
 		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)
 		data, err := os.ReadFile(path)

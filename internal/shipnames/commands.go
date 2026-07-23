@@ -18,17 +18,18 @@ func (r *Registry) DoAssignFlagship() error {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
 		return err
 	}
-	path, err := r.shipFile(Flagship)
+	name := FlagshipName(r.Root)
+	path, err := r.shipFile(name)
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("flagship (%s) already reserved", Flagship)
+		return fmt.Errorf("flagship (%s) already reserved", name)
 	}
 	if err := writeReservation(path); err != nil {
 		return err
 	}
-	fmt.Println(Flagship)
+	fmt.Println(name)
 	return nil
 }
 
@@ -130,15 +131,16 @@ func (r *Registry) DoList() error {
 	fmt.Printf("  %-22s  %s\n", "NAME", "STATUS")
 	fmt.Printf("  %-22s  %s\n", "----", "------")
 
-	flagPath, ferr := r.shipFile(Flagship)
+	flagship := FlagshipName(r.Root)
+	flagPath, ferr := r.shipFile(flagship)
 	if ferr == nil {
 		if _, err := os.Stat(flagPath); err == nil {
-			fmt.Printf("  %-22s  ACTIVE (flagship)\n", Flagship)
+			fmt.Printf("  %-22s  ACTIVE (flagship)\n", flagship)
 		} else {
-			fmt.Printf("  %-22s  free\n", Flagship)
+			fmt.Printf("  %-22s  free\n", flagship)
 		}
 	} else {
-		fmt.Printf("  %-22s  free\n", Flagship)
+		fmt.Printf("  %-22s  free\n", flagship)
 	}
 
 	names, err := r.readNames()
@@ -213,7 +215,7 @@ func (r *Registry) DoGC() error {
 
 // DoFlagship implements `ship-names flagship`.
 func (r *Registry) DoFlagship() error {
-	fmt.Println(Flagship)
+	fmt.Println(FlagshipName(r.Root))
 	return nil
 }
 

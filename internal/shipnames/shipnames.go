@@ -19,7 +19,17 @@ import (
 	"github.com/metux/starfleetctl/internal/fsutil"
 )
 
-const Flagship = "Enterprise"
+const DefaultFlagship = "Enterprise"
+
+// FlagshipName returns the configured flagship name, falling back to
+// DefaultFlagship ("Enterprise") when no override is set in project.yaml.
+func FlagshipName(root string) string {
+	cfg, err := config.Load(root)
+	if err == nil && cfg.Fleet.Flagship != "" {
+		return cfg.Fleet.Flagship
+	}
+	return DefaultFlagship
+}
 
 // defaultNames is the compiled-in ship-name pool. Order matters: AssignName
 // picks the first unused name, so more "important" ships come first.
@@ -70,28 +80,44 @@ func (r *Registry) shipFile(name string) (string, error) {
 }
 
 // readNames returns the candidate ship names: the compiled-in defaults,
-// optionally overridden by .starfleet-ai/conf/ship-names.yaml.
-// YAML format: a plain list of names (one per line) or a map with a "names" key.
-// The flagship name ("Enterprise") is always excluded from the pool.
+// optionally overridden by .starfleet-ai/conf/fleet.yaml (ship_names key)
+// or the legacy .starfleet-ai/conf/ship-names.yaml.
+// The configured flagship name is always excluded from the pool.
 func (r *Registry) readNames() ([]string, error) {
-	names, err := r.readNamesYAML()
-	if err != nil || len(names) == 0 {
-		// YAML unreadable, missing, or empty — fall back to compiled-in defaults
-		names = make([]string, len(defaultNames))
-		copy(names, defaultNames)
+	names := r.readNamesFromFleetYAML()
+	if len(names) == 0 {
+		// Fallback: legacy ship-names.yaml
+		var err error
+		names, err = r.readNamesYAML()
+		if err != nil || len(names) == 0 {
+			// YAML unreadable, missing, or empty — fall back to compiled-in defaults
+			names = make([]string, len(defaultNames))
+			copy(names, defaultNames)
+		}
 	}
-	// Filter out the flagship
+	// Filter out the configured flagship name from the worker pool
+	flagship := FlagshipName(r.Root)
 	var out []string
 	for _, n := range names {
-		if n != "" && n != Flagship {
+		if n != "" && n != flagship {
 			out = append(out, n)
 		}
 	}
 	return out, nil
 }
 
-// readNamesYAML tries to load .starfleet-ai/conf/ship-names.yaml.
-// Returns nil, nil if the file doesn't exist.
+// readNamesFromFleetYAML loads ship_names from .starfleet-ai/conf/fleet.yaml.
+// Returns nil if the file or key is absent.
+func (r *Registry) readNamesFromFleetYAML() []string {
+	cfg, err := config.Load(r.Root)
+	if err != nil || len(cfg.Fleet.ShipNames) == 0 {
+		return nil
+	}
+	return cfg.Fleet.ShipNames
+}
+
+// readNamesYAML loads the legacy .starfleet-ai/conf/ship-names.yaml.
+// Returns nil, nil if the file doesn't exist (backward compat).
 func (r *Registry) readNamesYAML() ([]string, error) {
 	path := filepath.Join(r.ConfDir, "ship-names.yaml")
 	data, err := os.ReadFile(path)

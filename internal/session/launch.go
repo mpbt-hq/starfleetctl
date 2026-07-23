@@ -444,7 +444,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	logPath := LogPath(root, name)
 
 	// Build the opencode ship command, mirroring run-opencode.ship.
-	const flagship = "Enterprise"
+	flagship := shipnames.FlagshipName(root)
 	inner := "export STARFLEET_SHIP_ID=" + shellQuote(name) + "; "
 	inner += "export STARFLEET_ROLE=" + shellQuote("ship") + "; "
 	inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
@@ -603,7 +603,7 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 		}
 		parent := vars.Parent
 		if parent == "" {
-			parent = shipnames.Flagship
+			parent = shipnames.FlagshipName(root)
 		}
 		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")", agentbus.StatusPatch{
 			LaunchType: launchType,

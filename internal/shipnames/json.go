@@ -22,7 +22,7 @@ type shipEntryJSON struct {
 func (r *Registry) DoListJSON() error {
 	var out []shipEntryJSON
 
-	out = append(out, entryFor(r, Flagship, true))
+	out = append(out, entryFor(r, FlagshipName(r.Root), true))
 
 	names, err := r.readNames()
 	if err != nil {

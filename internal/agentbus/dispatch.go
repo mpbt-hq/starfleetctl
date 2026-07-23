@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/metux/starfleetctl/internal/config"
+	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
 // dispatchRequest is the JSON the opencode plugin sends via stdin.
@@ -312,7 +313,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 	if req.Ship != "" {
 		shipID = req.Ship
 	}
-	_ = b.DoPost("Enterprise", []string{
+	_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, req.Detail),
 	}, false, "", "", "control")
 	return dispatchResponse{OK: true, Tag: tag}
@@ -349,7 +350,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 		label = " [" + tag + "]"
 	}
 	b.logEvent("plugin", fmt.Sprintf("error-handle%s: %s (source=%s)", label, detail, req.Source))
-	_ = b.DoPost("Enterprise", []string{
+	_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
 	}, false, "", "", "control")
 

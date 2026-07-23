@@ -10,6 +10,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
 // DoErrorClassify implements `agent-bus error classify <detail>` —
@@ -188,7 +190,7 @@ func (b *Bus) DoErrorHandle(args []string) error {
 
 	// Tell the CONTROL agent (flagship) only, never broadcast — a broadcast
 	// would land in the errored ship's own inbox and restart the self-loop.
-	_ = b.DoPost("Enterprise", []string{
+	_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
 		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
 	}, false, "", "", "control")
 
