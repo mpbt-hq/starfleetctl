@@ -106,9 +106,9 @@ func permission(root string) int {
 func emitPermission(decision, reason string) {
 	out := map[string]any{
 		"hookSpecificOutput": map[string]any{
-			"hookEventName":             "PreToolUse",
-			"permissionDecision":        decision,
-			"permissionDecisionReason":  reason,
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       decision,
+			"permissionDecisionReason": reason,
 		},
 	}
 	enc := json.NewEncoder(os.Stdout)

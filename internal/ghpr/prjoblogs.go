@@ -36,11 +36,11 @@ var failureMarkers = []string{
 	`ERROR: [A-Z]`,
 	// dep install
 	`emerge: there are no ebuilds`,
-	`!!! `,                                // portage error lines
-	`ERROR: unable to select packages`,    // apk (alpine)
-	`E: `,                                // apt (debian/ubuntu)
-	`error: target not found`,             // pacman (arch)
-	`No match for argument`,               // dnf (fedora)
+	`!!! `,                             // portage error lines
+	`ERROR: unable to select packages`, // apk (alpine)
+	`E: `,                              // apt (debian/ubuntu)
+	`error: target not found`,          // pacman (arch)
+	`No match for argument`,            // dnf (fedora)
 	// test phase
 	`Summary of Failures`,
 	`Fail:[[:space:]]+[1-9]`,

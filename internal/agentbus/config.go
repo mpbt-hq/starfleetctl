@@ -19,12 +19,12 @@ func (b *Bus) DoConfig() error {
 		return err
 	}
 	out := struct {
-		HeartbeatMS  int    `json:"heartbeat_ms"`
-		PollMS       int    `json:"poll_ms"`
+		HeartbeatMS   int    `json:"heartbeat_ms"`
+		PollMS        int    `json:"poll_ms"`
 		FallbackModel string `json:"fallback_model"`
 	}{
-		HeartbeatMS:  cfg.AgentBus.HeartbeatMS,
-		PollMS:       cfg.AgentBus.PollMS,
+		HeartbeatMS:   cfg.AgentBus.HeartbeatMS,
+		PollMS:        cfg.AgentBus.PollMS,
 		FallbackModel: cfg.AgentBus.FallbackModel,
 	}
 	data, err := json.Marshal(out)

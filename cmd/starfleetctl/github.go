@@ -261,7 +261,7 @@ const githubReleaseHelp = `github release — (not yet wired)
 No implementation yet. Tracked in DASHBOARD.md.
 `
 
-func printGithubHelp()        { fmt.Print(githubHelp) }
+func printGithubHelp()         { fmt.Print(githubHelp) }
 func printGithubPRHelp()       { fmt.Print(githubPRHelp) }
 func printGithubCIHelp()       { fmt.Print(githubCIHelp) }
 func printGithubBackportHelp() { fmt.Print(githubBackportHelp) }

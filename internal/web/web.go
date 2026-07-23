@@ -32,11 +32,11 @@ var indexFS embed.FS
 
 // Server holds the resolved workspace root + HTTP handler.
 type Server struct {
-	Root   string
-	Addr   string
-	bus    *agentbus.Bus
-	dash   *dashboard.Dashboard
-	mux    *http.ServeMux
+	Root string
+	Addr string
+	bus  *agentbus.Bus
+	dash *dashboard.Dashboard
+	mux  *http.ServeMux
 }
 
 // New builds a web Server rooted at the given workspace root, bound to addr
@@ -186,8 +186,8 @@ func (s *Server) apiTell(w http.ResponseWriter, r *http.Request) {
 	target, text, replyTo := "", "", ""
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		var p struct {
-			Target string `json:"target"`
-			Text   string `json:"text"`
+			Target  string `json:"target"`
+			Text    string `json:"text"`
 			ReplyTo string `json:"reply_to"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -217,10 +217,11 @@ func (s *Server) apiTell(w http.ResponseWriter, r *http.Request) {
 
 // apiTask captures or mutates a dashboard task via the sanctioned task
 // package — never touches topic files directly. Accepts:
-//   POST   {title, desc?, assign?, status?}  -> task capture
-//   POST   {slug, ship?}                     -> task assign
-//   POST   {slug}                            -> task unassign
-//   POST   {slug, status}                    -> task status
+//
+//	POST   {title, desc?, assign?, status?}  -> task capture
+//	POST   {slug, ship?}                     -> task assign
+//	POST   {slug}                            -> task unassign
+//	POST   {slug, status}                    -> task status
 func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, 405, "method not allowed")
@@ -231,7 +232,7 @@ func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
 		Desc     string `json:"desc"`
 		Slug     string `json:"slug"`
 		Ship     string `json:"ship"`
-		Assign   string `json:"assign"`   // "" | "auto"/"__auto__" | "<ship>"
+		Assign   string `json:"assign"` // "" | "auto"/"__auto__" | "<ship>"
 		Status   string `json:"status"`
 		Unassign bool   `json:"unassign"`
 	}
@@ -364,9 +365,9 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 		At           string `json:"at"`
 		Every        string `json:"every"`
 		Cron         string `json:"cron"`
-		Type         string `json:"type"`          // "ship" (directive) or "command"
-		Text         string `json:"text"`          // message body or command verb+args
-		TargetType   string `json:"target_type"`   // "ship"|"fleet"|"fleet-all"
+		Type         string `json:"type"`        // "ship" (directive) or "command"
+		Text         string `json:"text"`        // message body or command verb+args
+		TargetType   string `json:"target_type"` // "ship"|"fleet"|"fleet-all"
 		TargetValue  string `json:"target_value"`
 		Persistent   *bool  `json:"persistent"`
 	}
@@ -540,11 +541,13 @@ func webRestart(root string) error {
 
 // apiShipLaunch POSTs a new ship (the web console's "new ship" action).
 // Body: {"name":"", "model":"provider/model", "parent":""}.
-//   name   — optional; empty => next free ship name
-//   model  — optional opencode model id (provider derived from it)
-//   parent — optional ship to hang under; empty => flagship (Enterprise),
-//            since a web-GUI launch is treated as an auto-launch under the
-//            flagship. The launch_type is always "auto" for web launches.
+//
+//	name   — optional; empty => next free ship name
+//	model  — optional opencode model id (provider derived from it)
+//	parent — optional ship to hang under; empty => flagship (Enterprise),
+//	         since a web-GUI launch is treated as an auto-launch under the
+//	         flagship. The launch_type is always "auto" for web launches.
+//
 // Delegates to session.LaunchShip — the same code path as `session ship-run`,
 // so the detached termctl terminal, registry, and heartbeat are identical.
 func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
@@ -726,7 +729,7 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 			if cur.ID != "" {
 				models = append(models, cur)
 			}
-			cur = ModelEntry{ID: strings.Trim(strings.TrimPrefix(trimmed, "- id:"), " \"" )}
+			cur = ModelEntry{ID: strings.Trim(strings.TrimPrefix(trimmed, "- id:"), " \"")}
 		} else if strings.HasPrefix(trimmed, "provider:") {
 			cur.Provider = strings.Trim(strings.TrimPrefix(trimmed, "provider:"), " \"")
 		} else if strings.HasPrefix(trimmed, "label:") {

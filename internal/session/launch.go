@@ -376,11 +376,11 @@ Example:
 	}
 
 	shipID, err := LaunchShip(root, LaunchShipOpts{
-		Name:      name,
-		Model:     model,
-		Parent:    parent,
+		Name:       name,
+		Model:      model,
+		Parent:     parent,
 		LaunchType: launchType,
-		ExtraArgs: oaArgs,
+		ExtraArgs:  oaArgs,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "session ship-run:", err)

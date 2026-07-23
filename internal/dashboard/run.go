@@ -164,24 +164,60 @@ func runTopic(d *Dashboard, args []string) int {
 		for i := 2; i < len(args); i++ {
 			switch args[i] {
 			case "--status":
-				if i+1 < len(args) { m.Status = args[i+1]; changed = true; i++ }
+				if i+1 < len(args) {
+					m.Status = args[i+1]
+					changed = true
+					i++
+				}
 			case "--title":
-				if i+1 < len(args) { m.Title = args[i+1]; changed = true; i++ }
+				if i+1 < len(args) {
+					m.Title = args[i+1]
+					changed = true
+					i++
+				}
 			case "--category":
-				if i+1 < len(args) { m.Category = args[i+1]; changed = true; i++ }
+				if i+1 < len(args) {
+					m.Category = args[i+1]
+					changed = true
+					i++
+				}
 			case "--kind":
-				if i+1 < len(args) { m.Kind = args[i+1]; changed = true; i++ }
+				if i+1 < len(args) {
+					m.Kind = args[i+1]
+					changed = true
+					i++
+				}
 			case "--assigned-to":
-				if i+1 < len(args) { m.AssignedTo = args[i+1]; changed = true; i++ }
+				if i+1 < len(args) {
+					m.AssignedTo = args[i+1]
+					changed = true
+					i++
+				}
 			case "--doc-ref":
-				if i+1 < len(args) { m.DocRef = args[i+1]; changed = true; i++ }
+				if i+1 < len(args) {
+					m.DocRef = args[i+1]
+					changed = true
+					i++
+				}
 			case "--noted-by":
-				if i+1 < len(args) { m.NotedBy = args[i+1]; changed = true; i++ }
-		case "--since":
-			if i+1 < len(args) { m.Since = args[i+1]; changed = true; i++ }
-		case "--tags":
-			if i+1 < len(args) { m.Tags = args[i+1]; changed = true; i++ }
-		default:
+				if i+1 < len(args) {
+					m.NotedBy = args[i+1]
+					changed = true
+					i++
+				}
+			case "--since":
+				if i+1 < len(args) {
+					m.Since = args[i+1]
+					changed = true
+					i++
+				}
+			case "--tags":
+				if i+1 < len(args) {
+					m.Tags = args[i+1]
+					changed = true
+					i++
+				}
+			default:
 				fmt.Fprintf(os.Stderr, "dashboard topic update: unknown option: %s\n", args[i])
 				return 2
 			}

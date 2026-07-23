@@ -26,12 +26,12 @@ import (
 
 // Claims holds one invocation's resolved identity + storage locations.
 type Claims struct {
-	Root       string
-	ClaimDir   string
-	ClaimTTL   int64
-	ShipID     string
-	ShipIDSet  bool
-	Events     string
+	Root      string
+	ClaimDir  string
+	ClaimTTL  int64
+	ShipID    string
+	ShipIDSet bool
+	Events    string
 }
 
 // New resolves Claims from the environment, mirroring scripts/pr-claim's
@@ -54,12 +54,12 @@ func New(root string) (*Claims, error) {
 	}
 
 	c := &Claims{
-		Root:       root,
-		ClaimDir:   dir,
-		ClaimTTL:   ttl,
-		ShipID:     shipID,
-		ShipIDSet:  shipIDSet,
-		Events:     filepath.Join(config.LogDir(root), "events.log"),
+		Root:      root,
+		ClaimDir:  dir,
+		ClaimTTL:  ttl,
+		ShipID:    shipID,
+		ShipIDSet: shipIDSet,
+		Events:    filepath.Join(config.LogDir(root), "events.log"),
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err

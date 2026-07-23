@@ -29,25 +29,25 @@ import (
 
 // Finding is one extracted, de-duplicated failure signature.
 type Finding struct {
-	Category    string   `json:"category"`    // x11-error | panic | opencode-api | conn-closed
-	Signature   string   `json:"signature"`   // normalized, stable key for dedup
-	Title       string   `json:"title"`       // human-readable one-liner
-	Detail      string   `json:"detail"`      // sample context (first occurrence)
-	Count       int      `json:"count"`       // number of occurrences across all sources
-	Sources     []string `json:"sources"`     // ship names / "events" where seen
-	FirstSeen   string   `json:"first_seen"`  // ISO
-	LastSeen    string   `json:"last_seen"`   // ISO
-	Component   string   `json:"component"`   // go-x11proto | starfleetctl | opencode | ""
-	Severity    int      `json:"severity"`    // 1=low .. 3=high
+	Category  string   `json:"category"`   // x11-error | panic | opencode-api | conn-closed
+	Signature string   `json:"signature"`  // normalized, stable key for dedup
+	Title     string   `json:"title"`      // human-readable one-liner
+	Detail    string   `json:"detail"`     // sample context (first occurrence)
+	Count     int      `json:"count"`      // number of occurrences across all sources
+	Sources   []string `json:"sources"`    // ship names / "events" where seen
+	FirstSeen string   `json:"first_seen"` // ISO
+	LastSeen  string   `json:"last_seen"`  // ISO
+	Component string   `json:"component"`  // go-x11proto | starfleetctl | opencode | ""
+	Severity  int      `json:"severity"`   // 1=low .. 3=high
 }
 
 // patterns describe what we look for. Each captures a stable signature group.
 type pattern struct {
-	category  string
-	severity  int
-	re        *regexp.Regexp
+	category string
+	severity int
+	re       *regexp.Regexp
 	// sig extracts the dedup signature + title from a match.
-	sig      func(groups []string) (signature, title string)
+	sig       func(groups []string) (signature, title string)
 	component string
 }
 
@@ -218,8 +218,8 @@ func tsFromLine(line string) string {
 // repeated scan doesn't re-open the same task. Stored as a JSON set under
 // .starfleet-ai/var/logscan/seen.json (gitignored, like the ship logs).
 type SeenStore struct {
-	path    string
-	seen    map[string]bool
+	path string
+	seen map[string]bool
 }
 
 func LoadSeen(root string) *SeenStore {

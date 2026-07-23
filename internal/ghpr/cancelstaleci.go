@@ -21,15 +21,15 @@ env:
 `
 
 type actionRun struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	HeadBranch  string `json:"head_branch"`
-	HeadSHA     string `json:"head_sha"`
-	CreatedAt   string `json:"created_at"`
-	Event       string `json:"event"`
-	HTMLURL     string `json:"html_url"`
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	HeadBranch   string `json:"head_branch"`
+	HeadSHA      string `json:"head_sha"`
+	CreatedAt    string `json:"created_at"`
+	Event        string `json:"event"`
+	HTMLURL      string `json:"html_url"`
 	DisplayTitle string `json:"display_title"`
-	HeadRepo    struct {
+	HeadRepo     struct {
 		FullName string `json:"full_name"`
 	} `json:"head_repository"`
 }

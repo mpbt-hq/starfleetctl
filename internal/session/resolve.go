@@ -23,7 +23,7 @@ func LogPath(root, shipID string) string {
 }
 
 // shellQuote wraps s in single quotes, escaping embedded single quotes
-// with '\'' (the standard POSIX-safe quoting pattern for eval).
+// with '\” (the standard POSIX-safe quoting pattern for eval).
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

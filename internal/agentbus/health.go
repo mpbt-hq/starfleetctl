@@ -306,39 +306,90 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--state":
-			if i+1 < len(args) { state = args[i+1]; i++ }
+			if i+1 < len(args) {
+				state = args[i+1]
+				i++
+			}
 		case "--plugin-ts":
-			if i+1 < len(args) { pluginTS = args[i+1]; i++ }
+			if i+1 < len(args) {
+				pluginTS = args[i+1]
+				i++
+			}
 		case "--model-ts":
-			if i+1 < len(args) { modelTS = args[i+1]; i++ }
+			if i+1 < len(args) {
+				modelTS = args[i+1]
+				i++
+			}
 		case "--pid":
-			if i+1 < len(args) { pid, _ = strconv.Atoi(args[i+1]); i++ }
+			if i+1 < len(args) {
+				pid, _ = strconv.Atoi(args[i+1])
+				i++
+			}
 		case "--model":
-			if i+1 < len(args) { model = args[i+1]; i++ }
+			if i+1 < len(args) {
+				model = args[i+1]
+				i++
+			}
 		case "--server":
-			if i+1 < len(args) { server = args[i+1]; i++ }
+			if i+1 < len(args) {
+				server = args[i+1]
+				i++
+			}
 		case "--error-tag":
-			if i+1 < len(args) { errorTag = args[i+1]; i++ }
+			if i+1 < len(args) {
+				errorTag = args[i+1]
+				i++
+			}
 		case "--task":
-			if i+1 < len(args) { task = args[i+1]; i++ }
+			if i+1 < len(args) {
+				task = args[i+1]
+				i++
+			}
 		case "--progress":
-			if i+1 < len(args) { fmt.Sscanf(args[i+1], "%d", &progress); i++ }
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &progress)
+				i++
+			}
 		case "--blocker":
-			if i+1 < len(args) { blocker = args[i+1]; i++ }
+			if i+1 < len(args) {
+				blocker = args[i+1]
+				i++
+			}
 		case "--eta":
-			if i+1 < len(args) { eta = args[i+1]; i++ }
+			if i+1 < len(args) {
+				eta = args[i+1]
+				i++
+			}
 		case "--branch":
-			if i+1 < len(args) { branch = args[i+1]; i++ }
+			if i+1 < len(args) {
+				branch = args[i+1]
+				i++
+			}
 		case "--note":
-			if i+1 < len(args) { note = args[i+1]; i++ }
+			if i+1 < len(args) {
+				note = args[i+1]
+				i++
+			}
 		case "--launch-type":
-			if i+1 < len(args) { launchType = args[i+1]; i++ }
+			if i+1 < len(args) {
+				launchType = args[i+1]
+				i++
+			}
 		case "--parent":
-			if i+1 < len(args) { parent = args[i+1]; i++ }
+			if i+1 < len(args) {
+				parent = args[i+1]
+				i++
+			}
 		case "--provider":
-			if i+1 < len(args) { provider = args[i+1]; i++ }
+			if i+1 < len(args) {
+				provider = args[i+1]
+				i++
+			}
 		case "--updated":
-			if i+1 < len(args) { updated = args[i+1]; i++ }
+			if i+1 < len(args) {
+				updated = args[i+1]
+				i++
+			}
 		case "--delete":
 			deleteFile = true
 		case "--reset":

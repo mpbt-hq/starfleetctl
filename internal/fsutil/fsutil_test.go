@@ -7,9 +7,9 @@ import "testing"
 
 func TestSafe(t *testing.T) {
 	tests := []struct {
-		in      string
-		want    string
-		wantOK  bool
+		in     string
+		want   string
+		wantOK bool
 	}{
 		{"m0001", "m0001", true},
 		{"123", "123", true},

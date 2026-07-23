@@ -50,25 +50,25 @@ type dispatchRequest struct {
 
 // dispatchResponse is the JSON returned to the plugin.
 type dispatchResponse struct {
-	OK    bool     `json:"ok"`
-	Error string   `json:"error,omitempty"`
+	OK       bool       `json:"ok"`
+	Error    string     `json:"error,omitempty"`
 	Messages []inboxMsg `json:"messages,omitempty"`
 	Seen     []string   `json:"seen,omitempty"`
-	Tag      string   `json:"tag,omitempty"`
+	Tag      string     `json:"tag,omitempty"`
 
 	// config response
-	HeartbeatMS       int    `json:"heartbeat_ms,omitempty"`
-	PollMS            int    `json:"poll_ms,omitempty"`
-	FallbackModel     string `json:"fallback_model,omitempty"`
-	RetryPollMS       int    `json:"retry_poll_ms,omitempty"`
-	RetryCooldownMS   int    `json:"retry_cooldown_ms,omitempty"`
-	LogPollMS         int    `json:"log_poll_ms,omitempty"`
-	LogCooldownMS     int    `json:"log_cooldown_ms,omitempty"`
+	HeartbeatMS     int    `json:"heartbeat_ms,omitempty"`
+	PollMS          int    `json:"poll_ms,omitempty"`
+	FallbackModel   string `json:"fallback_model,omitempty"`
+	RetryPollMS     int    `json:"retry_poll_ms,omitempty"`
+	RetryCooldownMS int    `json:"retry_cooldown_ms,omitempty"`
+	LogPollMS       int    `json:"log_poll_ms,omitempty"`
+	LogCooldownMS   int    `json:"log_cooldown_ms,omitempty"`
 
 	// error-handle policy response
-	Action       string `json:"action,omitempty"`
-	TargetModel  string `json:"target_model,omitempty"`
-	Reason       string `json:"reason,omitempty"`
+	Action      string `json:"action,omitempty"`
+	TargetModel string `json:"target_model,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 type inboxMsg struct {
@@ -379,7 +379,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 
 // decideAction implements the error-handling policy.
 //
-//Transient errors → retry (just re-prompt, model is fine).
+// Transient errors → retry (just re-prompt, model is fine).
 // Hard errors → switch-model (need different provider/model).
 // Unknown → ignore (safe default).
 func decideAction(tag string, hasFallback bool, source string) (action, reason string) {

@@ -916,21 +916,21 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error
 				continue
 			}
 			if strings.HasPrefix(m.Text, prefix) {
-			lock, err := b.lockBus()
-			if err != nil {
-				return "", err
-			}
-			// Mark reply as seen (move to seen/)
-			seenPath := filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json")
-			if err := os.MkdirAll(filepath.Dir(seenPath), 0o755); err == nil {
-				if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json")); err == nil {
-					os.Rename(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json"), seenPath)
-				} else if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(m.ID)+".json")); err == nil {
-					os.Rename(filepath.Join(b.MsgDir, fsafe(m.ID)+".json"), filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json"))
+				lock, err := b.lockBus()
+				if err != nil {
+					return "", err
 				}
-			}
-			lock.Close()
-			return strings.TrimPrefix(m.Text, prefix), nil
+				// Mark reply as seen (move to seen/)
+				seenPath := filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json")
+				if err := os.MkdirAll(filepath.Dir(seenPath), 0o755); err == nil {
+					if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json")); err == nil {
+						os.Rename(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json"), seenPath)
+					} else if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(m.ID)+".json")); err == nil {
+						os.Rename(filepath.Join(b.MsgDir, fsafe(m.ID)+".json"), filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json"))
+					}
+				}
+				lock.Close()
+				return strings.TrimPrefix(m.Text, prefix), nil
 			}
 		}
 		if time.Now().After(deadline) {

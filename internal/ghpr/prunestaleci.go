@@ -127,10 +127,10 @@ func RunCIPrune(args []string) int {
 
 	// Resolve tips and classify
 	type branchInfo struct {
-		tip      string
-		stale    int
-		keep     int
-		gone     int
+		tip   string
+		stale int
+		keep  int
+		gone  int
 	}
 	branchData := map[string]*branchInfo{}
 	var delIDs, goneIDs []int

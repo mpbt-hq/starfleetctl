@@ -43,9 +43,9 @@ type TargetSpec struct {
 type TargetType string
 
 const (
-	TargetShip     TargetType = "ship"       // specific ship
-	TargetFleet    TargetType = "fleet"      // pick ONE idle ship
-	TargetFleetAll TargetType = "fleet-all"  // all idle ships
+	TargetShip     TargetType = "ship"      // specific ship
+	TargetFleet    TargetType = "fleet"     // pick ONE idle ship
+	TargetFleetAll TargetType = "fleet-all" // all idle ships
 )
 
 // Schedule holds the timing configuration for a timer.
@@ -60,12 +60,12 @@ type Schedule struct {
 // The ID field doubles as the unique name — the JSON file is named <id>.json.
 // Structure mirrors agent-bus messages: type determines how the text is handled.
 type TimerRecord struct {
-	ID          string     `json:"id"`                  // unique key, also the filename
+	ID          string     `json:"id"`                    // unique key, also the filename
 	Description string     `json:"description,omitempty"` // human-readable description
 	Owner       string     `json:"owner"`
 	Target      TargetSpec `json:"target"`
-	Type        string     `json:"type"`                // "ship" (directive), "command" (executed)
-	Text        string     `json:"text"`                // message body or command verb+args
+	Type        string     `json:"type"` // "ship" (directive), "command" (executed)
+	Text        string     `json:"text"` // message body or command verb+args
 	Schedule    Schedule   `json:"schedule"`
 	Timezone    string     `json:"timezone,omitempty"`
 	Persistent  bool       `json:"persistent"`

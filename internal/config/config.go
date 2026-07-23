@@ -31,10 +31,10 @@ type FleetConfig struct {
 
 // WebConfig holds web server configuration.
 type WebConfig struct {
-	ListenAddr      string `yaml:"listen_addr"`
+	ListenAddr       string `yaml:"listen_addr"`
 	AutostartEnabled bool   `yaml:"autostart_enabled"`
-	PIDFile         string `yaml:"pid_file"`
-	LogFile         string `yaml:"log_file"`
+	PIDFile          string `yaml:"pid_file"`
+	LogFile          string `yaml:"log_file"`
 	// ShipID is the fleet identity (ship name) under which the web frontend
 	// appears on the agent bus. When empty, the bus identity is taken from the
 	// environment (STARFLEET_SHIP_ID) like `agent-bus` does.
@@ -45,23 +45,23 @@ type WebConfig struct {
 
 // AgentBusConfig holds agent-bus / opencode plugin tuning knobs.
 type AgentBusConfig struct {
-	HeartbeatMS       int    `yaml:"heartbeat_ms"`
-	PollMS            int    `yaml:"poll_ms"`
-	FallbackModel     string `yaml:"fallback_model"`
-	RetryPollMS       int    `yaml:"retry_poll_ms"`
-	RetryCooldownMS   int    `yaml:"retry_cooldown_ms"`
-	LogPollMS         int    `yaml:"log_poll_ms"`
-	LogCooldownMS     int    `yaml:"log_cooldown_ms"`
+	HeartbeatMS     int    `yaml:"heartbeat_ms"`
+	PollMS          int    `yaml:"poll_ms"`
+	FallbackModel   string `yaml:"fallback_model"`
+	RetryPollMS     int    `yaml:"retry_poll_ms"`
+	RetryCooldownMS int    `yaml:"retry_cooldown_ms"`
+	LogPollMS       int    `yaml:"log_poll_ms"`
+	LogCooldownMS   int    `yaml:"log_cooldown_ms"`
 }
 
 // DefaultConfig returns defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		Web: WebConfig{
-			ListenAddr:      "0.0.0.0:8080",
+			ListenAddr:       "0.0.0.0:8080",
 			AutostartEnabled: false,
-			PIDFile:         ".starfleet-ai/var/web.pid",
-			LogFile:         ".starfleet-ai/var/log/web.log",
+			PIDFile:          ".starfleet-ai/var/web.pid",
+			LogFile:          ".starfleet-ai/var/log/web.log",
 		},
 		AgentBus: AgentBusConfig{
 			HeartbeatMS:     300_000,

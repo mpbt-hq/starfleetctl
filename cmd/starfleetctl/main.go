@@ -30,9 +30,9 @@ import (
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/task"
+	"github.com/metux/starfleetctl/internal/telemetry"
 	"github.com/metux/starfleetctl/internal/timer"
 	"github.com/metux/starfleetctl/internal/web"
-	"github.com/metux/starfleetctl/internal/telemetry"
 	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/worktree"
 	"github.com/metux/starfleetctl/internal/wscommit"
@@ -142,8 +142,8 @@ func main() {
 	}
 
 	// termctl-run runs a termctl terminal in the foreground (blocking on h.Run()).
-// This is meant to be spawned as a child process by `session run`.
-// It gets workspace root from MPBT_WORKSPACE_ROOT env var.
+	// This is meant to be spawned as a child process by `session run`.
+	// It gets workspace root from MPBT_WORKSPACE_ROOT env var.
 	if os.Args[1] == "termctl-run" {
 		os.Exit(session.RunTermctl("", os.Args[2:]))
 	}
@@ -231,7 +231,7 @@ func main() {
 		os.Exit(session.Run(root, os.Args[2:]))
 	case "run":
 		os.Exit(session.RunCmd(root, os.Args[2:]))
-  case "worktree":
+	case "worktree":
 		os.Exit(worktree.Run(root, os.Args[2:]))
 	case "task":
 		os.Exit(task.Run(root, os.Args[2:]))

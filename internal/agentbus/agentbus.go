@@ -25,13 +25,13 @@ import (
 // Bus holds one invocation's resolved identity + storage locations, mirroring
 // the environment-derived globals at the top of scripts/agent-bus.
 type Bus struct {
-	Root       string // workspace root (parent of the script's own dir, in bash; here just $STARFLEET_BUS_DIR's parent's parent)
-	BusDir     string
-	BusTTL     int64
-	ShipID     string
-	ShipIDSet  bool
-	Project    string
-	Handle     string
+	Root      string // workspace root (parent of the script's own dir, in bash; here just $STARFLEET_BUS_DIR's parent's parent)
+	BusDir    string
+	BusTTL    int64
+	ShipID    string
+	ShipIDSet bool
+	Project   string
+	Handle    string
 
 	StatusDir string
 	MsgDir    string
@@ -62,17 +62,17 @@ func New(root string) (*Bus, error) {
 	handle := os.Getenv("STARFLEET_AGENT_HANDLE")
 
 	b := &Bus{
-		Root:       root,
-		BusDir:     busDir,
-		BusTTL:     ttl,
+		Root:      root,
+		BusDir:    busDir,
+		BusTTL:    ttl,
 		ShipID:    shipID,
 		ShipIDSet: shipIDSet,
-		Project:    project,
-		Handle:     handle,
-		StatusDir:  filepath.Join(busDir, "status"),
-		MsgDir:     filepath.Join(busDir, "msgs"),
-		AttachDir:  filepath.Join(busDir, "attachments"),
-		Events:     filepath.Join(config.LogDir(root), "events.log"),
+		Project:   project,
+		Handle:    handle,
+		StatusDir: filepath.Join(busDir, "status"),
+		MsgDir:    filepath.Join(busDir, "msgs"),
+		AttachDir: filepath.Join(busDir, "attachments"),
+		Events:    filepath.Join(config.LogDir(root), "events.log"),
 	}
 	for _, d := range []string{b.StatusDir, b.MsgDir, b.AttachDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -309,7 +309,7 @@ func (b *Bus) findMsgFile(id string) (string, string, bool) {
 	if !ok {
 		return "", "", false
 	}
-	
+
 	// First check old flat location (migration compat)
 	oldPath := filepath.Join(b.MsgDir, safe+".json")
 	if _, err := os.Stat(oldPath); err == nil {
@@ -319,7 +319,7 @@ func (b *Bus) findMsgFile(id string) (string, string, bool) {
 		}
 		return oldPath, "", true
 	}
-	
+
 	// Search in target subdirectories
 	entries, err := os.ReadDir(b.MsgDir)
 	if err != nil {

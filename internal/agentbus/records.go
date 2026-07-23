@@ -72,7 +72,7 @@ type msgRecord struct {
 	Target  string `json:"target"`
 	Text    string `json:"text"`
 	ReplyTo string `json:"reply_to,omitempty"`
-	Type    string `json:"type,omitempty"` // "ship", "user", "control"
+	Type    string `json:"type,omitempty"`   // "ship", "user", "control"
 	Attach  string `json:"attach,omitempty"` // attachment filename if present
 }
 

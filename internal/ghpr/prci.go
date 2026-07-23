@@ -90,7 +90,7 @@ type prCIView struct {
 
 var prURLRe = regexp.MustCompile(`^https?://[^/]+/([^/]+/[^/]+)/pull/(\d+)`)
 
-var 	knownFlakeRe = regexp.MustCompile(`(?i)dragonfly|solaris|netbsd|openbsd|freebsd|xephyr-glamor|go-xts`)
+var knownFlakeRe = regexp.MustCompile(`(?i)dragonfly|solaris|netbsd|openbsd|freebsd|xephyr-glamor|go-xts`)
 
 // RunPRCi implements `starfleetctl pr-ci <pr#|URL> [--json]`.
 func RunPRCi(args []string) int {

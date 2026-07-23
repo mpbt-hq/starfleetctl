@@ -106,8 +106,8 @@ func dispatch(root string, req Request) Response {
 // naming any other key is a no-op — env overrides are an allowlist too,
 // same reasoning as the agent-bus subcommand allowlist above.
 var allowedEnvOverrides = map[string]bool{
-	"STARFLEET_SHIP_ID":    true,
-	"PROJECT":              true,
+	"STARFLEET_SHIP_ID":      true,
+	"PROJECT":                true,
 	"STARFLEET_AGENT_HANDLE": true,
 }
 

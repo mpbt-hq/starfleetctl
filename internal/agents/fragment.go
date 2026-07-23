@@ -14,11 +14,11 @@ import (
 
 // FragmentMeta is one agents.d/<slug>.md file's frontmatter.
 type FragmentMeta struct {
-	Slug     string
-	Title    string
-	Order    int    // controls .starfleet-ai/agents.d/index.md's import order
-	Owner    string // optional: which tool/component maintains this fragment
-	IsStarfleet bool // true if fragment lives under .starfleet-ai/agents.d/starfleet/
+	Slug        string
+	Title       string
+	Order       int    // controls .starfleet-ai/agents.d/index.md's import order
+	Owner       string // optional: which tool/component maintains this fragment
+	IsStarfleet bool   // true if fragment lives under .starfleet-ai/agents.d/starfleet/
 }
 
 // unquoteYAML/quoteYAML: same minimal hand-rolled scheme as
@@ -114,8 +114,8 @@ func (a *Agents) loadAllFragments() ([]FragmentMeta, error) {
 	var metas []FragmentMeta
 
 	dirs := []struct {
-		dir        string
-		prefix     string // added to slug (e.g. "starfleet/")
+		dir         string
+		prefix      string // added to slug (e.g. "starfleet/")
 		isStarfleet bool
 	}{
 		{a.FragmentsDir(), "", false},
