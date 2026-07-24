@@ -62,10 +62,24 @@ function checkLogForErrors(): string | null {
     ).toString()
     // Match "stream error" lines with error details
     const streamErrRe = /level=ERROR.*stream error.*error\.error="([^"]+)"/g
+    // Also match generic "Streaming response failed" or similar stream disconnects
+    // First try with the error.error="..." format
+    const streamingFailedRe = /level=ERROR.*(?:Streaming response failed|stream interrupted|response stream|connection closed|broken pipe|unexpected eof|stream closed).*error\.error="([^"]+)"/gi
+    // Fallback: match the message even without error.error="..."
+    const streamingFailedSimpleRe = /level=ERROR.*(?:Streaming response failed|stream interrupted|response stream|connection closed|broken pipe|unexpected eof|stream closed)/gi
     let match: RegExpExecArray | null
     let latest = ''
     while ((match = streamErrRe.exec(out)) !== null) {
       latest = match[1]
+    }
+    if (!latest) {
+      while ((match = streamingFailedRe.exec(out)) !== null) {
+        latest = match[1]
+      }
+    }
+    if (!latest && streamingFailedSimpleRe.test(out)) {
+      // No detailed error captured, but we know the error type
+      latest = 'Streaming response failed'
     }
     if (latest && latest !== lastLogErrorSeen) {
       lastLogErrorSeen = latest
