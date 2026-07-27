@@ -63,6 +63,11 @@ cleared:
    always send a reply via `starfleetctl comms tell <sender> <reply>` — never only process
    it internally without answering. The sender expects a bus response; silence means the message
    was lost. Ack the message (`comms ack <id>`) after responding.
+- **Comms questions: answer via comms AND console.** When a question arrives via comms (an `ask`
+   or a `tell` that requests information or a decision), always answer in two places:
+   (1) via `starfleetctl comms tell <sender> <answer>` so the sender gets the reply on the bus,
+   and (2) output the answer to the local console as well, so the human at the terminal can see
+   it. This ensures both the fleet and the operator stay informed.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
