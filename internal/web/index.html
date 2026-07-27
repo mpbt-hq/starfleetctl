@@ -96,6 +96,16 @@
   .terminal-controls { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
   .terminal-controls .pill { cursor: pointer; }
   .terminal-controls .pill.active { background: var(--acc); color: #04121f; }
+  .file-entry { display: flex; align-items: center; gap: 8px; padding: 8px 0;
+    border-bottom: 1px solid var(--line); cursor: pointer; }
+  .file-entry:hover { color: var(--acc); }
+  .file-entry:last-child { border-bottom: none; }
+  .file-icon { width: 20px; text-align: center; flex-shrink: 0; }
+  .file-name { flex: 1; font-size: 14px; }
+  .file-meta { font-size: 12px; color: var(--dim); flex-shrink: 0; }
+  .crumb { display: inline-block; color: var(--acc); cursor: pointer; font-size: 13px; }
+  .crumb:hover { text-decoration: underline; }
+  .crumb-sep { color: var(--dim); margin: 0 4px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -112,6 +122,7 @@
   <div class="tab" data-p="talk" onclick="show('talk', true)">Funk</div>
   <div class="tab" data-p="log" onclick="show('log', true)">Log</div>
   <div class="tab" data-p="timers" onclick="show('timers', true)">Timer</div>
+  <div class="tab" data-p="files" onclick="show('files', true)">Files</div>
 </div>
 
 <main>
@@ -230,6 +241,27 @@
     </div>
     <div class="card" id="timerlist"></div>
   </section>
+
+  <section class="page" id="files">
+    <div class="card">
+      <div class="row" style="align-items:center">
+        <b>Dateien</b>
+        <span class="muted" id="files_path"></span>
+      </div>
+      <div id="files_breadcrumb" style="margin-top:8px"></div>
+    </div>
+    <div class="card" id="files_list"></div>
+    <div class="card" id="files_viewer" style="display:none">
+      <div class="row" style="align-items:center;margin-bottom:8px">
+        <b id="files_viewer_name"></b>
+        <span class="muted" id="files_viewer_size"></span>
+        <span style="flex:1"></span>
+        <button class="sec" onclick="fileDownload()" style="width:auto;padding:6px 12px">Download</button>
+        <button class="sec" onclick="fileCloseViewer()" style="width:auto;padding:6px 12px">×</button>
+      </div>
+      <pre id="files_viewer_content" style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow-y:auto;font:13px/1.4 ui-monospace,monospace;background:var(--chip);padding:10px;border-radius:8px;border:1px solid var(--line)"></pre>
+    </div>
+  </section>
 </main>
 
 <div class="toast" id="toast"></div>
@@ -307,6 +339,113 @@ async function refresh(){
   else if (cur==='log') await loadEvents();
   else if (cur==='talk') { await loadTargets(); await loadTalk(); }
   else if (cur==='timers') await loadTimers();
+  else if (cur==='files') await loadFiles();
+}
+
+// --- Files tab ---
+let filesCurrentPath = '.';
+let filesViewingPath = null; // path of file being viewed
+
+async function loadFiles(path) {
+  if (path !== undefined) filesCurrentPath = path;
+  const el = document.getElementById('files_list');
+  const pathEl = document.getElementById('files_path');
+  try {
+    const data = await api('/api/files?path=' + encodeURIComponent(filesCurrentPath));
+    filesCurrentPath = data.path;
+    pathEl.textContent = '/' + data.path;
+    renderBreadcrumb(data.path);
+    if (!data.entries.length) {
+      el.innerHTML = '<div class="empty">leeres Verzeichnis</div>';
+      return;
+    }
+    // Sort: dirs first, then alphabetical
+    const sorted = data.entries.sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    el.innerHTML = sorted.map(e => {
+      const icon = e.is_dir ? '📁' : fileIcon(e.name);
+      const click = e.is_dir
+        ? `fileOpenDir('${esc(e.name)}')`
+        : `fileOpenFile('${esc(data.path)}', '${esc(e.name)}', ${e.size})`;
+      const meta = e.is_dir ? '' : formatSize(e.size);
+      return `<div class="file-entry" onclick="${click}">
+        <span class="file-icon">${icon}</span>
+        <span class="file-name">${esc(e.name)}</span>
+        <span class="file-meta">${meta}</span>
+      </div>`;
+    }).join('');
+    fileCloseViewer();
+  } catch (e) {
+    el.innerHTML = '<div class="empty">Fehler: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderBreadcrumb(path) {
+  const el = document.getElementById('files_breadcrumb');
+  const parts = path === '.' ? [] : path.split('/');
+  let html = '<span class="crumb" onclick="loadFiles(\'/\')">/</span>';
+  let accumulated = '';
+  for (const p of parts) {
+    accumulated += (accumulated ? '/' : '') + p;
+    const fullPath = accumulated;
+    html += `<span class="crumb-sep">›</span><span class="crumb" onclick="loadFiles('${esc(fullPath)}')">${esc(p)}</span>`;
+  }
+  el.innerHTML = html;
+}
+
+function fileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = {
+    md: '📄', txt: '📄', log: '📄', csv: '📄',
+    go: '🔧', c: '🔧', h: '🔧', py: '🔧', sh: '🔧', js: '🔧', ts: '🔧',
+    json: '📋', yaml: '📋', yml: '📋', toml: '📋',
+    png: '🖼', jpg: '🖼', jpeg: '🖼', gif: '🖼', svg: '🖼',
+    zip: '📦', tar: '📦', gz: '📦',
+    html: '🌐', css: '🌐',
+  };
+  return map[ext] || '📄';
+}
+
+function formatSize(bytes) {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function fileOpenDir(name) {
+  const newpath = filesCurrentPath === '.' ? name : filesCurrentPath + '/' + name;
+  loadFiles(newpath);
+}
+
+function fileOpenFile(dirpath, name, size) {
+  const fullpath = dirpath === '.' ? name : dirpath + '/' + name;
+  filesViewingPath = fullpath;
+  document.getElementById('files_viewer').style.display = '';
+  document.getElementById('files_viewer_name').textContent = name;
+  document.getElementById('files_viewer_size').textContent = formatSize(size);
+  const contentEl = document.getElementById('files_viewer_content');
+  if (size > 2 * 1024 * 1024) {
+    contentEl.textContent = 'Datei zu groß für Inline-Anzeige (' + formatSize(size) + '). Nutze Download.';
+    return;
+  }
+  contentEl.textContent = 'Lade...';
+  fetch('/api/files/raw?path=' + encodeURIComponent(fullpath))
+    .then(r => { if (!r.ok) throw new Error(r.status + ' ' + r.statusText); return r.text(); })
+    .then(text => { contentEl.textContent = text; })
+    .catch(e => { contentEl.textContent = 'Fehler: ' + e.message; });
+}
+
+function fileCloseViewer() {
+  filesViewingPath = null;
+  document.getElementById('files_viewer').style.display = 'none';
+}
+
+function fileDownload() {
+  if (!filesViewingPath) return;
+  window.open('/api/files/raw?path=' + encodeURIComponent(filesViewingPath) + '&download=1', '_blank');
 }
 
 async function loadIdentity(){
@@ -880,7 +1019,7 @@ loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
-  if (c==='status'||c==='log'||c==='bus'||c==='talk'||c==='timers') refresh();
+  if (c==='status'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='files') refresh();
   if (shipCurrent) {
     loadShipChat(shipCurrent);
     // Refresh terminal if screen tab is active and auto-update is on

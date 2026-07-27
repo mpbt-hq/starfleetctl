@@ -14,8 +14,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -100,6 +102,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/ship", s.apiShipLaunch)
 	s.mux.HandleFunc("/api/ship/", s.apiShipDispatch)
 	s.mux.HandleFunc("/api/ships", s.apiShips)
+	s.mux.HandleFunc("/api/files", s.apiFileList)
+	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -691,6 +695,100 @@ func (s *Server) apiShipScreen(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	writeJSON(w, map[string]any{"ship_id": id, "lines": lines, "type": "screen"})
+}
+
+// apiFileList returns the contents of a directory within the workspace.
+// GET /api/files?path=<relpath>  — relpath defaults to "." (workspace root).
+// Returns JSON array of {name, is_dir, size, mod_time}.
+func (s *Server) apiFileList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	rel := strings.TrimSpace(r.URL.Query().Get("path"))
+	if rel == "" {
+		rel = "."
+	}
+	abs := filepath.Join(s.Root, filepath.Clean(rel))
+	// Ensure the resolved path stays inside the workspace root.
+	if !strings.HasPrefix(abs, filepath.Clean(s.Root)+string(filepath.Separator)) && abs != filepath.Clean(s.Root) {
+		writeErr(w, 403, "path escapes workspace root")
+		return
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	type fileEntry struct {
+		Name    string `json:"name"`
+		IsDir   bool   `json:"is_dir"`
+		Size    int64  `json:"size,omitempty"`
+		ModTime int64  `json:"mod_time"`
+	}
+	var files []fileEntry
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileEntry{
+			Name:    e.Name(),
+			IsDir:   e.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().Unix(),
+		})
+	}
+	if files == nil {
+		files = []fileEntry{}
+	}
+	writeJSON(w, map[string]any{"path": rel, "entries": files})
+}
+
+// apiFileRaw serves a single file's content for viewing or downloading.
+// GET /api/files/raw?path=<relpath>&download=1
+// For text files the content is served inline; for binary files or when
+// download=1 is set, Content-Disposition: attachment is used.
+func (s *Server) apiFileRaw(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	rel := strings.TrimSpace(r.URL.Query().Get("path"))
+	if rel == "" {
+		writeErr(w, 400, "path required")
+		return
+	}
+	abs := filepath.Join(s.Root, filepath.Clean(rel))
+	if !strings.HasPrefix(abs, filepath.Clean(s.Root)+string(filepath.Separator)) {
+		writeErr(w, 403, "path escapes workspace root")
+		return
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	if info.IsDir() {
+		writeErr(w, 400, "path is a directory — use /api/files to list")
+		return
+	}
+	// Limit to 2 MB for inline viewing.
+	const maxSize = 2 * 1024 * 1024
+	if info.Size() > maxSize && r.URL.Query().Get("download") != "1" {
+		writeErr(w, 413, fmt.Sprintf("file too large (%d bytes) — use ?download=1", info.Size()))
+		return
+	}
+	ext := filepath.Ext(abs)
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mimeType)
+	if r.URL.Query().Get("download") == "1" {
+		w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(abs))
+	}
+	http.ServeFile(w, r, abs)
 }
 
 // apiModels returns the list of available models from models.yaml.
