@@ -152,7 +152,7 @@ tooling that reads `.starfleet-ai/var/comms/` directly.
 | `self-install` | Clone/pull starfleetctl source, build, and symlink into `.starfleet-ai/bin/`. For updating an already-installed starfleetctl. |
 | `agents install-starfleet [<subdir>]` | Install all embedded starfleet agent fragments from the binary into `agents.d/starfleet/`, then reindex. |
 | `agents install-starfleet-skills` | Install embedded starfleet skills from the binary into `.claude/skills/`. |
-| `agents reindex [--inline]` | Regenerate `agents.d/index.md` from all fragment files. |
+| `agents reindex` | Regenerate `agents.d/index.md` from all fragment files (inlines bodies, strips frontmatter). |
 | `bootstrap [--fix]` | Idempotent workspace self-check (and, with `--fix`, self-repair) of fleet-management setup: comms dirs, allowlist entries, fragments. |
 | `web start/stop/restart/autostart` | Minimalist mobile-first fleet web console (default: `0.0.0.0:8080`). `restart` kills any existing instance, waits for the port, then daemonizes a fresh one. `autostart` only starts if not already running (cron-friendly). |
 | `bridged run/status` | Opt-in bridged ship access via a Unix socket (`.starfleet-ai/var/comms/bridged.sock`). Not yet wired into any hook — new additive access path. |

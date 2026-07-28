@@ -41,7 +41,7 @@ func (a *Agents) DoInstallSelf(order int) error {
 	legacyPath := filepath.Join(a.FragmentsDir(), SelfSlug+".md")
 	if _, err := os.Stat(legacyPath); err == nil {
 		os.Remove(legacyPath)
-		return a.DoReindex(a.Inline())
+		return a.DoReindex()
 	}
 	return nil
 }
@@ -105,7 +105,7 @@ func (a *Agents) DoInstallStarfleet(subdir string) error {
 			return err
 		}
 	}
-	return a.DoReindex(a.Inline())
+	return a.DoReindex()
 }
 
 // StarfleetSkillsSubdir is the subdirectory inside fragments/ that holds

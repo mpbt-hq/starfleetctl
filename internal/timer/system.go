@@ -40,7 +40,7 @@ func runReindex(root string) error {
 	if err != nil {
 		return fmt.Errorf("reindex agents: %w", err)
 	}
-	if err := a.DoReindex(a.Inline()); err != nil {
+	if err := a.DoReindex(); err != nil {
 		return fmt.Errorf("reindex agents: %w", err)
 	}
 	d, err := dashboard.New(root)

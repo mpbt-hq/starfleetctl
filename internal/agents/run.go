@@ -16,9 +16,8 @@ const usage = `agents <command> [args…]
   write <slug> <file|->                      replace one fragment file (no commit), then reindex
   new <slug> --title "<t>" [--order <n>] [--owner "<tool>"]
                                               scaffold a new fragment file
-  reindex [--inline|--no-inline]              regenerate agents.d/index.md from agents.d/**/*.md
-                                              (--inline also writes a self-contained CLAUDE.md with no
-                                              @-imports, for agents that don't resolve @, e.g. opencode)
+  reindex                                  regenerate agents.d/index.md from agents.d/**/*.md
+                                           (inlines all fragment bodies, strips frontmatter)
   commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) CLAUDE.md+index.md
   install-self [--order <n>]                 write/refresh agents.d/starfleet/starfleetctl.md from this
                                               binary's own embedded README.md (always overwrites —
@@ -84,20 +83,7 @@ func Run(root string, args []string) int {
 		}
 		cmdErr = a.DoNew(slug, title, order, owner)
 	case "reindex":
-		inline := a.Inline()
-		for _, arg := range args[1:] {
-			switch arg {
-			case "--inline":
-				inline = true
-			case "--no-inline":
-				inline = false
-			}
-		}
-		if err := a.SetInline(inline); err != nil {
-			cmdErr = err
-			break
-		}
-		cmdErr = a.DoReindex(inline)
+		cmdErr = a.DoReindex()
 	case "install-self":
 		order := 900 // default: near the end, after project-specific fragments
 		for i := 1; i < len(args); i++ {
