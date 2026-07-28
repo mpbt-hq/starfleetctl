@@ -159,6 +159,28 @@ func processTimers(stores []*Store, bus *comms.Bus, logFile *os.File, persistent
 			if !t.IsDue(now) {
 				continue
 			}
+
+			// System commands: execute directly in worker (goroutine to stay responsive).
+			if t.Type == "system" || t.Target.Type == TargetSystem {
+				cmd := t.Cmd
+				if len(cmd) == 0 {
+					logf(logFile, "%s: system timer with empty cmd — skipping", t.ID)
+					advanceOrDelete(store, t, persistentVarDir)
+					continue
+				}
+				go func(id string, c []string) {
+					if err := runSystemCommand(stores[0].dir, c); err != nil {
+						logf(logFile, "%s: system cmd %v failed: %v", id, c, err)
+					} else {
+						logf(logFile, "%s: system cmd %v done", id, c)
+					}
+				}(t.ID, cmd)
+				logf(logFile, "%s: system cmd %v dispatched", t.ID, cmd)
+				advanceOrDelete(store, t, persistentVarDir)
+				continue
+			}
+
+			// Ship/command timers: resolve targets and dispatch via comms bus.
 			targets := resolveTargets(bus, t)
 			if len(targets) == 0 {
 				logf(logFile, "%s: no eligible targets — skipping fire", t.ID)

@@ -27,12 +27,16 @@ Usage:
   timer set --every 10m --type ship --text "check status" recurring directive
   timer set --cron "0 4 * * *" --type ship --text "morning"       cron directive
   timer set --every 5m --type command --text "model gpt-4o"       command timer
+  timer set --cron "0 */6 * * *" --type system --cmd reindex       system command
+  timer set --every 5m --type system --cmd web                     system command
+  timer set --every 5m --type system --cmd "web restart"           system command (force)
 
 Flags for set:
   --name <key>                      unique timer key (auto-generated if omitted)
   --desc <text>                     human-readable description
-  --type <ship|command>             message type (default: ship)
-  --text <text>                     message body or command verb+args
+  --type <ship|command|system>      message type (default: ship)
+  --text <text>                     message body or command verb+args (ship/command)
+  --cmd <args...>                   command line for system timers (system only)
   --target <ship|fleet|fleet-all>   where to send (default: ship = self)
   --tz <timezone>                   display timezone (default: UTC)
   --persistent                      store in .starfleet-ai/ (survive reset)
@@ -51,6 +55,11 @@ Timer worker subcommands:
   timer worker stop                stop the daemon
   timer worker autostart           start daemon if not running
   timer worker restart             stop + autostart (background)
+
+System commands (type=system, executed directly in worker):
+  reindex                          refresh agent instructions + dashboard index
+  web                              start web server (idempotent — skips if running)
+  web restart                      force web server restart
 `
 
 // Run dispatches a `timer` invocation given the resolved workspace root.
@@ -92,6 +101,7 @@ func runSet(root string, args []string) int {
 		description  string
 		msgType      = "ship"
 		msgText      string
+		cmdArgs      []string
 		targetType   = TargetShip
 		targetValue  string
 		tz           string
@@ -121,11 +131,20 @@ func runSet(root string, args []string) int {
 		case "--type":
 			if i+1 < len(args) {
 				msgType = args[i+1]
+				if msgType == "system" {
+					targetType = TargetSystem
+				}
 				i++
 			}
 		case "--text":
 			if i+1 < len(args) {
 				msgText = args[i+1]
+				i++
+			}
+		case "--cmd":
+			// Collect all remaining args as the command line.
+			for i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				cmdArgs = append(cmdArgs, args[i+1])
 				i++
 			}
 		case "--name":
@@ -146,6 +165,8 @@ func runSet(root string, args []string) int {
 					targetType = TargetFleet
 				case "fleet-all":
 					targetType = TargetFleetAll
+				case "system":
+					targetType = TargetSystem
 				default:
 					targetType = TargetShip
 					targetValue = t
@@ -175,9 +196,21 @@ func runSet(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "timer: need --at, --every, or --cron")
 		return 2
 	}
-	if msgText == "" {
-		fmt.Fprintln(os.Stderr, "timer: need --text")
-		return 2
+
+	// System timers need --cmd, others need --text.
+	isSystem := msgType == "system" || targetType == TargetSystem
+	if isSystem {
+		if len(cmdArgs) == 0 {
+			fmt.Fprintln(os.Stderr, "timer: system type needs --cmd <args...>")
+			return 2
+		}
+		msgType = "system"
+		targetType = TargetSystem
+	} else {
+		if msgText == "" {
+			fmt.Fprintln(os.Stderr, "timer: need --text")
+			return 2
+		}
 	}
 
 	// Auto-generate name if not given.
@@ -206,6 +239,7 @@ func runSet(root string, args []string) int {
 		Target:      TargetSpec{Type: targetType, Value: targetValue},
 		Type:        msgType,
 		Text:        msgText,
+		Cmd:         cmdArgs,
 		Schedule:    scheduleFromFlags(scheduleType, cronExpr, everyStr, atStr),
 		Timezone:    tz,
 		Persistent:  *persistent,

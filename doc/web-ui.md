@@ -93,6 +93,37 @@ Send a message to any agent or broadcast to the entire fleet.
 
 Live event feed from the comms audit log. Shows the last N events (default 20, configurable via `?n=`). Auto-refreshes every 15 seconds.
 
+### Timer
+
+Fleet scheduling with three timer types:
+
+| Type | Purpose |
+|---|---|
+| **ship** | Send a directive to a specific agent or fleet |
+| **command** | Send a structured command (e.g. `setModel`) to an agent |
+| **system** | Execute workspace-level commands directly in the worker |
+
+System commands (executed directly in the timer worker, no agent needed):
+
+| Command | Description |
+|---|---|
+| `reindex` | Refresh agent instructions index + dashboard index |
+| `web` | Start web server (idempotent — skips if already running) |
+| `web restart` | Force web server restart |
+
+The Timer tab also provides quick access to:
+- **Timer Worker** status (start/stop)
+- **Web Server** restart button
+
+### Files
+
+Workspace file browser for viewing and downloading files.
+
+- Navigate directories with breadcrumb trail
+- View text files inline (up to 2 MB)
+- Download any file
+- Path traversal protection (stays within workspace root)
+
 ## API Endpoints
 
 All endpoints return JSON. The web UI consumes these, but they're also usable from scripts/CI.
@@ -110,6 +141,15 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 | `/api/identity` | GET | Viewing ship's identity (`{ship_id, handle, project}`) |
 | `/api/models` | GET | Available models for ship launch (from `models.yaml`) |
 | `/api/ship` | POST | Launch a new ship (JSON body: `{name, model, provider, parent}`) |
+| `/api/timers` | GET | List all timers. Optional `?all=1` for all ships |
+| `/api/timer` | POST | Create a timer (JSON body: `{schedule_type, target_type, text/cmd, ...}`) |
+| `/api/timer/{id}` | DELETE | Delete a timer |
+| `/api/timer/{id}/pause` | POST | Pause a timer |
+| `/api/timer/{id}/resume` | POST | Resume a timer |
+| `/api/timer/worker` | GET/POST | Timer worker status / start/stop/restart |
+| `/api/files?path=<path>` | GET | List directory contents (JSON: `{path, entries}`) |
+| `/api/files/raw?path=<path>` | GET | Serve raw file content. Optional `?download=1` for attachment |
+| `/api/web/restart` | POST | Restart the web server daemon |
 
 ## Auto-Refresh
 
@@ -131,6 +171,9 @@ Browser  ──HTTP──▶  starfleetctl web start
                        ├── /api/tell      ──▶ comms tell/broadcast
                        ├── /api/models    ──▶ models.yaml
                        ├── /api/ship      ──▶ session.LaunchShip()
+                       ├── /api/timers    ──▶ timer.Store.List()
+                       ├── /api/files     ──▶ os.ReadDir()
+                       ├── /api/files/raw ──▶ http.ServeFile()
                        └── /              ──▶ index.html (embedded)
 ```
 

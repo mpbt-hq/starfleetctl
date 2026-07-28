@@ -219,10 +219,11 @@
           <option value="interval">Intervall (--every)</option>
           <option value="cron">Cron (--cron)</option>
         </select>
-        <select id="tf_target">
+        <select id="tf_target" onchange="timerTargetUpdate()">
           <option value="fleet">Fleet (einen freien)</option>
           <option value="fleet-all">Fleet-alle (alle freien)</option>
           <option value="ship">Eigenes Schiff</option>
+          <option value="system">System (direkt)</option>
         </select>
       </div>
       <div id="tf_at_row" class="grid2" style="margin-top:8px">
@@ -233,6 +234,13 @@
       </div>
       <div id="tf_cron_row" class="grid2" style="margin-top:8px;display:none">
         <input id="tf_cron" placeholder="z.B. 0 4 * * *">
+      </div>
+      <div id="tf_cmd_row" style="margin-top:8px;display:none">
+        <select id="tf_cmd">
+          <option value="reindex">reindex — Agent- und Dashboard-Indices aktualisieren</option>
+          <option value="web">web — Webserver starten (idempotent)</option>
+          <option value="web restart">web restart — Webserver neustarten (erzwungen)</option>
+        </select>
       </div>
       <input id="tf_msg" placeholder="Nachricht…" style="margin-top:8px">
       <div class="actions">
@@ -913,6 +921,14 @@ function timerFormUpdate(){
   document.getElementById('tf_cron_row').style.display = t==='cron'?'':'none';
 }
 
+function timerTargetUpdate(){
+  const tgt = document.getElementById('tf_target').value;
+  const isSystem = tgt === 'system';
+  document.getElementById('tf_cmd_row').style.display = isSystem ? '' : 'none';
+  document.getElementById('tf_msg').style.display = isSystem ? 'none' : '';
+  document.getElementById('tf_msg').placeholder = isSystem ? '' : 'Nachricht…';
+}
+
 async function loadTimers(){
   try {
     // Worker status
@@ -930,13 +946,20 @@ async function loadTimers(){
       const cls = t.enabled ? 'ok' : 'dim';
       const kind = t.schedule.type;
       const nf = t.next_fire ? new Date(t.next_fire*1000).toISOString().slice(0,16).replace('T',' ')+' UTC' : '—';
-      const tgt = t.target.type==='fleet'?'fleet':t.target.type==='fleet-all'?'fleet-all':t.target.value;
+      const isSys = t.type === 'system' || (t.target && t.target.type === 'system');
+      let tgt;
+      if (isSys) {
+        tgt = '⚙ ' + (t.cmd ? t.cmd.join(' ') : 'system');
+      } else {
+        tgt = t.target.type==='fleet'?'fleet':t.target.type==='fleet-all'?'fleet-all':t.target.value;
+      }
+      const desc = isSys ? (t.description || t.cmd?.join(' ') || '') : (t.text || t.description || '');
       return `<div class="card">
         <div class="row"><span class="agent grow">${esc(t.id)}</span>
           <span class="pill dim">${esc(kind)}</span>
           <span class="pill ${cls}">${t.enabled?'aktiv':'pausiert'}</span></div>
         <div class="muted" style="margin-top:4px">${esc(nf)} · ${esc(tgt)} · ${esc(t.persistent?'persistent':'ephemeral')}</div>
-        <div style="margin-top:4px">${esc(t.message)}</div>
+        ${desc?`<div style="margin-top:4px">${esc(desc)}</div>`:''}
         <div class="actions">
           ${t.enabled
             ?`<button class="sec" onclick="timerPause('${esc(t.id)}')">Pause</button>`
@@ -951,9 +974,17 @@ async function loadTimers(){
 async function timerCreate(){
   const type = document.getElementById('tf_type').value;
   const target = document.getElementById('tf_target').value;
-  const msg = document.getElementById('tf_msg').value.trim();
-  if (!msg){ toast('Nachricht fehlt', true); return; }
-  const body = {schedule_type:type, message:msg, target_type:target};
+  const isSystem = target === 'system';
+  const body = {schedule_type:type, target_type:target};
+  if (isSystem) {
+    const cmdStr = document.getElementById('tf_cmd').value.trim();
+    if (!cmdStr){ toast('Command fehlt', true); return; }
+    body.cmd = cmdStr.split(/\s+/);
+  } else {
+    const msg = document.getElementById('tf_msg').value.trim();
+    if (!msg){ toast('Nachricht fehlt', true); return; }
+    body.text = msg;
+  }
   if (type==='once') body.at = document.getElementById('tf_at').value.trim();
   if (type==='interval') body.every = document.getElementById('tf_every').value.trim();
   if (type==='cron') body.cron = document.getElementById('tf_cron').value.trim();
@@ -961,7 +992,7 @@ async function timerCreate(){
     const r = await api('/api/timer', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(body)});
     toast('Timer '+r.id+' erstellt');
-    document.getElementById('tf_msg').value='';
+    if (!isSystem) document.getElementById('tf_msg').value='';
     loadTimers();
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }

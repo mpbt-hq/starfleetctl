@@ -363,32 +363,44 @@ func (s *Server) apiTimerDispatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 	var p struct {
-		ID           string `json:"id"`            // unique key (auto-generated if empty)
-		Description  string `json:"description"`   // human-readable description
-		ScheduleType string `json:"schedule_type"` // "once"|"interval"|"cron"
-		At           string `json:"at"`
-		Every        string `json:"every"`
-		Cron         string `json:"cron"`
-		Type         string `json:"type"`        // "ship" (directive) or "command"
-		Text         string `json:"text"`        // message body or command verb+args
-		TargetType   string `json:"target_type"` // "ship"|"fleet"|"fleet-all"
-		TargetValue  string `json:"target_value"`
-		Persistent   *bool  `json:"persistent"`
+		ID           string   `json:"id"`            // unique key (auto-generated if empty)
+		Description  string   `json:"description"`   // human-readable description
+		ScheduleType string   `json:"schedule_type"` // "once"|"interval"|"cron"
+		At           string   `json:"at"`
+		Every        string   `json:"every"`
+		Cron         string   `json:"cron"`
+		Type         string   `json:"type"`        // "ship" (directive), "command", or "system"
+		Text         string   `json:"text"`        // message body or command verb+args
+		Cmd          []string `json:"cmd"`         // command line (system only)
+		TargetType   string   `json:"target_type"` // "ship"|"fleet"|"fleet-all"|"system"
+		TargetValue  string   `json:"target_value"`
+		Persistent   *bool    `json:"persistent"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
-		return
-	}
-	if p.Text == "" {
-		writeErr(w, 400, "text required")
 		return
 	}
 	if p.ScheduleType == "" {
 		writeErr(w, 400, "schedule_type required")
 		return
 	}
-	if p.Type == "" {
-		p.Type = "ship"
+
+	// System timers use cmd[] instead of text.
+	isSystem := p.TargetType == "system" || p.Type == "system"
+	if isSystem {
+		if len(p.Cmd) == 0 {
+			writeErr(w, 400, "cmd required for system timers")
+			return
+		}
+		p.Type = "system"
+	} else {
+		if p.Text == "" {
+			writeErr(w, 400, "text required")
+			return
+		}
+		if p.Type == "" {
+			p.Type = "ship"
+		}
 	}
 
 	// Auto-generate ID if not given.
@@ -403,6 +415,8 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 		tt = timer.TargetFleet
 	case "fleet-all":
 		tt = timer.TargetFleetAll
+	case "system":
+		tt = timer.TargetSystem
 	}
 	tgtVal := p.TargetValue
 	if tt == timer.TargetShip && tgtVal == "" {
@@ -455,6 +469,7 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 		Target:      timer.TargetSpec{Type: tt, Value: tgtVal},
 		Type:        p.Type,
 		Text:        p.Text,
+		Cmd:         p.Cmd,
 		Schedule:    sched,
 		Persistent:  persistent,
 		Enabled:     true,

@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package timer implements fleet-wide scheduling: one-time, interval, and
-// cron-based timers that fire comms directives when they expire.
+// cron-based timers that fire comms directives or system commands when they expire.
 //
 // Timers come in two flavours:
 //
@@ -13,9 +13,16 @@
 //     .starfleet-ai/var/timers/ (runtime state) — survive workspace resets.
 //     Default for --cron schedules.
 //
+// Timer types:
+//
+//   - "ship" / "command": fire comms directives to agents via bus.DoPost().
+//   - "system": execute workspace-level commands (reindex, web, …) directly
+//     in the worker process — no agent involvement needed.
+//
 // A single worker daemon (timer worker) polls all timer directories every 2s,
 // resolves fleet targets at fire time, and sends comms directives via
-// bus.DoPost(). The worker is a singleton per workspace (PID-file guarded).
+// bus.DoPost(). System commands run in a goroutine to keep the worker responsive.
+// The worker is a singleton per workspace (PID-file guarded).
 package timer
 
 import (
@@ -46,6 +53,7 @@ const (
 	TargetShip     TargetType = "ship"      // specific ship
 	TargetFleet    TargetType = "fleet"     // pick ONE idle ship
 	TargetFleetAll TargetType = "fleet-all" // all idle ships
+	TargetSystem   TargetType = "system"    // execute directly in worker (no ship)
 )
 
 // Schedule holds the timing configuration for a timer.
@@ -58,14 +66,16 @@ type Schedule struct {
 
 // TimerRecord is the on-disk representation of a single timer.
 // The ID field doubles as the unique name — the JSON file is named <id>.json.
-// Structure mirrors comms messages: type determines how the text is handled.
+// For type="ship"/"command", the target+text fields control dispatch.
+// For type="system", the cmd field holds the command line (target/text unused).
 type TimerRecord struct {
 	ID          string     `json:"id"`                    // unique key, also the filename
 	Description string     `json:"description,omitempty"` // human-readable description
 	Owner       string     `json:"owner"`
-	Target      TargetSpec `json:"target"`
-	Type        string     `json:"type"` // "ship" (directive), "command" (executed)
-	Text        string     `json:"text"` // message body or command verb+args
+	Target      TargetSpec `json:"target,omitempty"` // used by ship/command timers
+	Type        string     `json:"type"`             // "ship", "command", or "system"
+	Text        string     `json:"text,omitempty"`   // message body (ship/command)
+	Cmd         []string   `json:"cmd,omitempty"`    // command line (system only)
 	Schedule    Schedule   `json:"schedule"`
 	Timezone    string     `json:"timezone,omitempty"`
 	Persistent  bool       `json:"persistent"`
