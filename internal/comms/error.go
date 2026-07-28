@@ -189,11 +189,22 @@ func (b *Bus) DoErrorHandle(args []string) error {
 		}
 	}
 
-	// Tell the CONTROL agent (flagship) only, never broadcast — a broadcast
-	// would land in the errored ship's own inbox and restart the self-loop.
-	_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
-		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
-	}, false, "", "", "control")
+	// Transient model errors that auto-restart: do NOT notify the flagship.
+	// The ship will simply resume its last prompt; the flagship only needs
+	// to know about non-transient errors or those requiring manual action.
+	notifyFlagship := true
+	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
+		notifyFlagship = false
+		b.logEvent("plugin", fmt.Sprintf("error: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
+	}
+
+	if notifyFlagship {
+		// Tell the CONTROL agent (flagship) only, never broadcast — a broadcast
+		// would land in the errored ship's own inbox and restart the self-loop.
+		_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
+			fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
+		}, false, "", "", "control")
+	}
 
 	return nil
 }

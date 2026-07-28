@@ -313,9 +313,21 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 	if req.Ship != "" {
 		shipID = req.Ship
 	}
-	_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
-		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, req.Detail),
-	}, false, "", "", "control")
+
+	// Transient model errors that auto-restart: do NOT notify the flagship.
+	// The ship will simply resume its last prompt; the flagship only needs
+	// to know about non-transient errors or those requiring manual action.
+	notifyFlagship := true
+	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
+		notifyFlagship = false
+		b.logEvent("plugin", fmt.Sprintf("error: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
+	}
+
+	if notifyFlagship {
+		_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
+			fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, req.Detail),
+		}, false, "", "", "control")
+	}
 	return dispatchResponse{OK: true, Tag: tag}
 }
 
@@ -350,9 +362,21 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 		label = " [" + tag + "]"
 	}
 	b.logEvent("plugin", fmt.Sprintf("error-handle%s: %s (source=%s)", label, detail, req.Source))
-	_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
-		fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
-	}, false, "", "", "control")
+
+	// Transient model errors that auto-restart: do NOT notify the flagship.
+	// The ship will simply resume its last prompt; the flagship only needs
+	// to know about non-transient errors or those requiring manual action.
+	notifyFlagship := true
+	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
+		notifyFlagship = false
+		b.logEvent("plugin", fmt.Sprintf("error-handle: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
+	}
+
+	if notifyFlagship {
+		_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
+			fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
+		}, false, "", "", "control")
+	}
 
 	// 4. Policy decision.
 	action, reason := decideAction(tag, req.HasFallback, req.Source)
