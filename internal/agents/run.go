@@ -19,16 +19,16 @@ const usage = `agents <command> [args…]
   reindex                                  regenerate agents.d/index.md from agents.d/**/*.md
                                            (inlines all fragment bodies, strips frontmatter)
   commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) CLAUDE.md+index.md
-  install-self [--order <n>]                 write/refresh agents.d/starfleet/starfleetctl.md from this
-                                              binary's own embedded README.md (always overwrites —
-                                              tool-owned, re-run after a starfleetctl update)
+  install-self [--order <n>]                 install/refresh the consolidated starfleet skill and
+                                               clean up legacy agent fragments
   install-starfleet [<subdir>]               install all embedded starfleet fragments from the binary
-                                              (default subdir: "starfleet") — writes to
-                                              agents.d/<slug>.md for each, always overwrites, then
-                                              reindexes
-  install-starfleet-skills                   install embedded starfleet skills from the binary
-                                              (fragments/starfleet-skills/) — writes to
-                                              .claude/skills/<name>/ for each, always overwrites
+                                               (default subdir: "starfleet-instructions") — writes to
+                                               agents.d/<slug>.md for each, always overwrites, then
+                                               reindexes
+  install-starfleet-skills                   install the consolidated starfleet skill from the binary
+                                               (fragments/starfleet-skills/starfleet/) — writes to
+                                               .claude/skills/starfleet/, always overwrites, cleans
+                                               up legacy skill directories
 `
 
 // Run dispatches an `agents` invocation, given the resolved workspace root.

@@ -46,10 +46,11 @@ func (a *Agents) FragmentsDir() string {
 	return filepath.Join(a.Root, "agents.d")
 }
 
-// StarfleetFragmentsDir returns the path to auto-rolled starfleet fragments
-// (.starfleet-ai/var/agents.d/starfleet/). These are tool-owned and gitignored.
+// StarfleetFragmentsDir returns the path to auto-rolled starfleet instruction
+// fragments (.starfleet-ai/var/agents.d/starfleet-instructions/). These are
+// tool-owned and gitignored.
 func (a *Agents) StarfleetFragmentsDir() string {
-	return filepath.Join(a.Root, ".starfleet-ai", "var", "agents.d", "starfleet")
+	return filepath.Join(a.Root, ".starfleet-ai", "var", "agents.d", "starfleet-instructions")
 }
 
 // IndexFile returns the path to the auto-generated fragment index
@@ -59,8 +60,8 @@ func (a *Agents) IndexFile() string {
 }
 
 func (a *Agents) fragmentPath(slug string) string {
-	// Starfleet-owned fragments live under .starfleet-ai/var/agents.d/starfleet/
-	if strings.HasPrefix(slug, "starfleet/") {
+	// Starfleet-owned instruction fragments live under .starfleet-ai/var/agents.d/starfleet-instructions/
+	if strings.HasPrefix(slug, "starfleet-instructions/") {
 		return filepath.Join(a.Root, ".starfleet-ai", "var", "agents.d", slug+".md")
 	}
 	return filepath.Join(a.FragmentsDir(), slug+".md")

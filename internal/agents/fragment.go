@@ -18,7 +18,7 @@ type FragmentMeta struct {
 	Title       string
 	Order       int    // controls .starfleet-ai/agents.d/index.md's import order
 	Owner       string // optional: which tool/component maintains this fragment
-	IsStarfleet bool   // true if fragment lives under .starfleet-ai/agents.d/starfleet/
+	IsStarfleet bool   // true if fragment lives under .starfleet-ai/agents.d/starfleet-instructions/
 }
 
 // unquoteYAML/quoteYAML: same minimal hand-rolled scheme as
@@ -115,11 +115,11 @@ func (a *Agents) loadAllFragments() ([]FragmentMeta, error) {
 
 	dirs := []struct {
 		dir         string
-		prefix      string // added to slug (e.g. "starfleet/")
+		prefix      string // added to slug (e.g. "starfleet-instructions/")
 		isStarfleet bool
 	}{
 		{a.FragmentsDir(), "", false},
-		{a.StarfleetFragmentsDir(), "starfleet/", true},
+		{a.StarfleetFragmentsDir(), "starfleet-instructions/", true},
 	}
 
 	for _, d := range dirs {
@@ -128,8 +128,8 @@ func (a *Agents) loadAllFragments() ([]FragmentMeta, error) {
 				return err
 			}
 			if info.IsDir() {
-				// Skip agents.d/starfleet/ — those fragments are now managed
-				// by starfleetctl under .starfleet-ai/agents.d/starfleet/
+				// Skip agents.d/starfleet/ — legacy directory, auto-installed
+				// fragments now live under .starfleet-ai/agents.d/starfleet-instructions/
 				if d.dir == a.FragmentsDir() && info.Name() == "starfleet" {
 					return filepath.SkipDir
 				}

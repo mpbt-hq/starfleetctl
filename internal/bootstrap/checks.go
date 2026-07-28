@@ -470,51 +470,41 @@ func fixStarfleetFragments(b *Bootstrap) error {
 	return a.DoInstallStarfleet(agents.StarfleetSubdir)
 }
 
-// verifyStarfleetSkills checks that every skill directory embedded under
-// fragments/starfleet-skills/ is installed to .claude/skills/<name>/ and
-// byte-identical to what the current binary would write.
+// verifyStarfleetSkills checks that the consolidated starfleet skill
+// (fragments/starfleet-skills/starfleet/) is installed to
+// .claude/skills/starfleet/ and byte-identical to what the current
+// binary would write.
 func verifyStarfleetSkills(b *Bootstrap) (bool, string) {
 	a, err := agents.New(b.Root)
 	if err != nil {
 		return false, err.Error()
 	}
-	skillsDir := filepath.Join(starfleetctl.FragmentsRoot, agents.StarfleetSkillsSubdir)
-	entries, err := fs.ReadDir(starfleetctl.Fragments, skillsDir)
+	skillDir := filepath.Join(starfleetctl.FragmentsRoot, agents.StarfleetSkillsSubdir, "starfleet")
+	skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
 	if err != nil {
-		return true, "no embedded starfleet skills"
+		return true, "no embedded starfleet skill"
 	}
 	var missing, stale []string
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, f := range skillEntries {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
 			continue
 		}
-		skillName := e.Name()
-		skillDir := filepath.Join(skillsDir, skillName)
-		skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
+		current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
 		if err != nil {
 			return false, err.Error()
 		}
-		for _, f := range skillEntries {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
-				continue
-			}
-			current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
-			if err != nil {
-				return false, err.Error()
-			}
-			installedPath := filepath.Join(a.SkillsDir(), skillName, f.Name())
-			data, err := os.ReadFile(installedPath)
-			if err != nil {
-				missing = append(missing, skillName+"/"+f.Name())
-				continue
-			}
-			if string(data) != string(current) {
-				stale = append(stale, skillName+"/"+f.Name())
-			}
+		installedPath := filepath.Join(a.SkillsDir(), "starfleet", f.Name())
+		data, err := os.ReadFile(installedPath)
+		if err != nil {
+			missing = append(missing, "starfleet/"+f.Name())
+			continue
+		}
+		if string(data) != string(current) {
+			stale = append(stale, "starfleet/"+f.Name())
 		}
 	}
 	if len(missing) == 0 && len(stale) == 0 {
-		return true, fmt.Sprintf("%d skill dirs present, up to date", len(entries))
+		return true, "starfleet skill present, up to date"
 	}
 	var parts []string
 	if len(missing) > 0 {

@@ -8,10 +8,8 @@
 // hand-duplicate and separately maintain a copy of them. See the root
 // package doc comment (doc.go) for the embedding mechanism.
 //
-// Since the skills restructuring, install-self installs the starfleetctl
-// skill to .claude/skills/starfleetctl/ (via DoInstallStarfleetSkills)
-// instead of writing an always-loaded fragment to agents.d/. This keeps
-// the base context lean — the skill is loaded on-demand when needed.
+// The consolidated starfleet skill lives at .claude/skills/starfleet/
+// and is installed via DoInstallStarfleetSkills.
 package agents
 
 import (
@@ -28,10 +26,9 @@ import (
 // Kept for backward-compatible cleanup (removing stale agents.d files).
 const SelfSlug = "starfleet/starfleetctl"
 
-// DoInstallSelf installs the starfleetctl skill to .claude/skills/starfleetctl/
-// and cleans up the legacy agents.d/starfleet/starfleetctl.md fragment if present.
-// This is now equivalent to DoInstallStarfleetSkills — kept as a separate entry
-// point for backward compatibility with existing bootstrap scripts and CLI usage.
+// DoInstallSelf installs the consolidated starfleet skill to
+// .claude/skills/starfleet/ (via DoInstallStarfleetSkills) and cleans up
+// the legacy agents.d/starfleet/starfleetctl.md fragment if present.
 func (a *Agents) DoInstallSelf(order int) error {
 	// Install skills (the new home for starfleetctl instructions)
 	if err := a.DoInstallStarfleetSkills(); err != nil {
@@ -47,8 +44,8 @@ func (a *Agents) DoInstallSelf(order int) error {
 }
 
 // StarfleetSubdir is the subdirectory inside fragments/ that holds the
-// generic starfleet-wide fragment files.
-const StarfleetSubdir = "starfleet"
+// generic starfleet-wide instruction fragments (always-loaded).
+const StarfleetSubdir = "starfleet-instructions"
 
 // ParseEmbeddedFragment reads a single embedded fragment file from the
 // starfleetctl binary's embedded FS, parses its frontmatter, and returns
@@ -109,7 +106,7 @@ func (a *Agents) DoInstallStarfleet(subdir string) error {
 }
 
 // StarfleetSkillsSubdir is the subdirectory inside fragments/ that holds
-// the starfleet-wide skill files (SKILL.md + reference.md per skill).
+// the starfleet skill files (SKILL.md + reference.md).
 const StarfleetSkillsSubdir = "starfleet-skills"
 
 // SkillsDir returns the absolute path to .claude/skills/ in the workspace.
@@ -117,43 +114,42 @@ func (a *Agents) SkillsDir() string {
 	return filepath.Join(a.Root, ".claude", "skills")
 }
 
-// DoInstallStarfleetSkills installs every subdirectory under the embedded
-// fragments/starfleet-skills/ as a skill in .claude/skills/<name>/,
-// always overwriting (tool-owned). Each subdirectory must contain at
-// least a SKILL.md; reference.md is optional.
+// oldStarfleetSkillDirs lists legacy skill directory names that should be
+// cleaned up when installing the consolidated starfleet skill.
+var oldStarfleetSkillDirs = []string{"concurrency", "starfleetctl", "task-capture"}
+
+// DoInstallStarfleetSkills installs the single starfleet skill from the
+// embedded fragments/starfleet-skills/starfleet/ to .claude/skills/starfleet/,
+// always overwriting (tool-owned). Also cleans up legacy skill directories.
 func (a *Agents) DoInstallStarfleetSkills() error {
-	skillsDir := filepath.Join(starfleetctl.FragmentsRoot, StarfleetSkillsSubdir)
-	entries, err := fs.ReadDir(starfleetctl.Fragments, skillsDir)
+	skillName := "starfleet"
+	skillDir := filepath.Join(starfleetctl.FragmentsRoot, StarfleetSkillsSubdir, skillName)
+	skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
+	destDir := filepath.Join(a.SkillsDir(), skillName)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	for _, f := range skillEntries {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
 			continue
 		}
-		skillName := e.Name()
-		skillDir := filepath.Join(skillsDir, skillName)
-		skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
+		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
 		if err != nil {
 			return err
 		}
-		destDir := filepath.Join(a.SkillsDir(), skillName)
-		if err := os.MkdirAll(destDir, 0o755); err != nil {
+		destPath := filepath.Join(destDir, f.Name())
+		if err := os.WriteFile(destPath, data, 0o644); err != nil {
 			return err
 		}
-		for _, f := range skillEntries {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
-				continue
-			}
-			data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
-			if err != nil {
-				return err
-			}
-			destPath := filepath.Join(destDir, f.Name())
-			if err := os.WriteFile(destPath, data, 0o644); err != nil {
-				return err
-			}
-		}
 	}
+
+	// Clean up legacy skill directories (concurrency, starfleetctl, task-capture)
+	for _, old := range oldStarfleetSkillDirs {
+		os.RemoveAll(filepath.Join(a.SkillsDir(), old))
+	}
+
 	return nil
 }
