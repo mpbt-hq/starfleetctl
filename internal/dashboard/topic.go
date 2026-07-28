@@ -28,6 +28,7 @@ import (
 )
 
 // TopicMeta is one topic file's frontmatter.
+// Slug is derived from the filename and NOT stored in the frontmatter.
 type TopicMeta struct {
 	Slug         string
 	Title        string
@@ -99,8 +100,6 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 		key := strings.TrimSpace(kv[0])
 		val := unquoteYAML(strings.TrimSpace(kv[1]))
 		switch key {
-		case "slug":
-			m.Slug = val
 		case "title":
 			m.Title = val
 		case "category":
@@ -135,7 +134,6 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 func writeTopicFile(path string, m TopicMeta, body string) error {
 	var b strings.Builder
 	b.WriteString("---\n")
-	fmt.Fprintf(&b, "slug: %s\n", m.Slug)
 	fmt.Fprintf(&b, "title: %s\n", quoteYAML(m.Title))
 	fmt.Fprintf(&b, "category: %s\n", m.Category)
 	if m.Category == "parked" {
@@ -176,7 +174,7 @@ func writeTopicFile(path string, m TopicMeta, body string) error {
 //	topics/foo.md              → slug = "foo"
 //	topics/project/x86emu.md   → slug = "project/x86emu"
 //
-// An explicit slug: field in frontmatter overrides the derived slug.
+// The slug is NOT stored in the frontmatter; it's derived from the filename.
 func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
 	topicsDir := d.TopicsDir()
 	if _, err := os.Stat(topicsDir); os.IsNotExist(err) {
@@ -201,13 +199,11 @@ func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
-		if m.Slug == "" {
-			rel, err := filepath.Rel(topicsDir, path)
-			if err != nil {
-				return err
-			}
-			m.Slug = strings.TrimSuffix(rel, ".md")
+		rel, err := filepath.Rel(topicsDir, path)
+		if err != nil {
+			return err
 		}
+		m.Slug = strings.TrimSuffix(rel, ".md")
 		metas = append(metas, m)
 		return nil
 	})
@@ -269,7 +265,12 @@ func (d *Dashboard) DoTopicLoad(slug string) (TopicMeta, string, error) {
 	if err != nil {
 		return TopicMeta{}, "", err
 	}
-	return parseTopicFile(data)
+	m, body, err := parseTopicFile(data)
+	if err != nil {
+		return TopicMeta{}, "", err
+	}
+	m.Slug = slug
+	return m, body, nil
 }
 
 // DoTopicUpdate rewrites an existing topic file with the given frontmatter

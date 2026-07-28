@@ -35,7 +35,6 @@ func newTestDashboard(t *testing.T) *Dashboard {
 }
 
 const roundTripSrc = `---
-slug: task-round-trip
 title: "Round Trip Task"
 category: active
 kind: task
