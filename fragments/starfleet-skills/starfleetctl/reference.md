@@ -112,6 +112,8 @@ tooling that reads `.starfleet-ai/var/comms/` directly.
 | `ws-commit` | `ws-commit -m "<msg>" <path> [<path>...]` (or `-a` for all tracked changes, `--no-push` to skip the push) — commit+push under the shared clone lock, so concurrent sessions don't race the same working tree's index/HEAD. |
 | `ship-names <cmd>` | Star-Trek-topicd per-session identity registry: `assign [flagship]`, `release <name>`, `list [--json]`, `gc`, `flagship`, `shell-env` (outputs eval-able shell code to set `STARFLEET_SHIP_ID`, PS1 prefix, and EXIT trap — usage: `eval "$(starfleetctl ship-names shell-env)"`). |
 | `with-clone-lock [cmd...]` | Generic "serialize mutating work in this git working tree" primitive everything above is built on — acquires `<gitdir>/mpbt-clone.lock`, then execs the given command (or an interactive shell with none given) with the lock held. Works in *any* git working tree, not just an `mpbt-workspace` checkout. |
+| `worktree add/list/remove/prune` | Git worktree management: `worktree add <repo-path> [name] [--from <ref>] [--branch <existing-branch>]`, `worktree list [repo-path]`, `worktree remove <repo-path> <name> [--force] [--keep-branch]`, `worktree prune [repo-path]`. |
+| `run [--flagship\|--name <id>] [--client claude\|opencode] [--model <m>] [--exec]` | Start an AI ship session (replaces `run-opencode.flagship`, `run-opencode.ship`, `run-claude.flagship`, `run-claude.ship`). `--flagship` starts as Enterprise; `--name <id>` assigns a specific ship. `--exec` runs the client directly without termctl terminal (default is termctl for detach/attach support). |
 | `hook claude monitor-hint` | Claude Code `SessionStart` hook helper: emits `hookSpecificOutput.additionalContext` JSON telling the assistant to unconditionally arm Monitor-tool watchers on its comms inbox (and, for `Enterprise`, fleet-watch too). Wired as a `SessionStart` hook in `.claude/settings.json`. Quiet no-op when `$STARFLEET_SHIP_ID` is unset. |
 | `hook claude permission` | Claude Code `PreToolUse` hook helper: reads the tool-invocation JSON from stdin, asks the control agent (`$AGENT_CONTROLLER`) via comms `ask`/`reply` for an allow/deny decision, blocks up to `$AGENT_PERM_TIMEOUT` (default 60s), and emits a `permissionDecision` JSON. Fail-closed (deny on timeout unless `$AGENT_PERM_TIMEOUT_DECISION=ask`). Used by the `agent-permission-hook` PreToolUse hook (`.claude/hooks/agent-permission-hook`). |
 | `session attach <id> [--read-only] [--independent]` | Resolve an agent ID / handle / session name / unique substring to a running detached session and attach the caller's terminal to it (shared rw / read-only / independent grouped window). Replaces the legacy `agent-attach` helper. |
@@ -120,6 +122,48 @@ tooling that reads `.starfleet-ai/var/comms/` directly.
 | `session stop <id\|session>` | Kill a detached session, clear its comms heartbeat, and release its ship name (replaces the legacy `agent-run --stop` invocation). |
 | `session autoscale status [--max <cap>]` | Show current non-stale fleet size, idle count, and configured cap. |
 | `session autoscale need <N> --reason "<text>" [--release <rel>] [--client claude\|opencode] [--max <cap>] [--supervisor <name>] [--permission-mode <mode>] [--dry-run]` | On-demand fleet elasticity: spawn up to `<cap>` minus current fleet size, capped at what's needed after subtracting idle ships. Prints decision + audit log; real spawn also posts an comms broadcast (`session autoscale` delegates here). |
+
+### Task management
+
+| Subcommand | Purpose |
+|---|---|
+| `task capture --title "<t>" --desc "<what>" [--assign <ship>]` | Capture a task into the dashboard as a `dashboard/topics/<slug>.md` topic file and optionally commission a free ship to work it. Never executes the task itself. Prints `task-captured: slug=…`. |
+| `task assign <slug> [<ship>]` | Assign an existing task to a specific ship (or the first idle non-stale ship). Updates `status:` + `assigned-to:` via the sanctioned dashboard path and commissions the ship. |
+| `task unassign <slug>` | Clear a task's assignment (status → `open`, assigned-to → `—`). |
+| `task status <slug> <status>` | Set an existing task's `status:` field. |
+
+### Scheduling and monitoring
+
+| Subcommand | Purpose |
+|---|---|
+| `timer set --at "17:30" --type ship --text "status?"` | One-time directive timer |
+| `timer set --every 10m --type ship --text "check status"` | Recurring directive timer |
+| `timer set --cron "0 4 * * *" --type ship --text "morning"` | Cron-based timer |
+| `timer set --every 5m --type command --text "model gpt-4o"` | Command timer (runs a starfleetctl subcommand) |
+| `timer list [--all] [--json]` | List active timers |
+| `timer cancel <id>` | Cancel a timer by key |
+| `logs scan [--capture] [--min-count N] [--min-severity N]` | Scan ship logs + comms events for recurring failures. Without `--capture`: dry-run prints findings. With `--capture`: each new (unseen) finding is captured as a dashboard task. |
+
+### Setup and web console
+
+| Subcommand | Purpose |
+|---|---|
+| `genesis-init [dir]` | Bootstrap a workspace from nothing — writes `starfleet-bootstrap`, runs `bootstrap --fix`. For fresh clones only. |
+| `self-install` | Clone/pull starfleetctl source, build, and symlink into `.starfleet-ai/bin/`. For updating an already-installed starfleetctl. |
+| `agents install-starfleet [<subdir>]` | Install all embedded starfleet agent fragments from the binary into `agents.d/starfleet/`, then reindex. |
+| `agents install-starfleet-skills` | Install embedded starfleet skills from the binary into `.claude/skills/`. |
+| `agents reindex [--inline]` | Regenerate `agents.d/index.md` from all fragment files. |
+| `bootstrap [--fix]` | Idempotent workspace self-check (and, with `--fix`, self-repair) of fleet-management setup: comms dirs, allowlist entries, fragments. |
+| `web start/stop/restart/autostart` | Minimalist mobile-first fleet web console (default: `0.0.0.0:8080`). `restart` kills any existing instance, waits for the port, then daemonizes a fresh one. `autostart` only starts if not already running (cron-friendly). |
+| `bridged run/status` | Opt-in bridged ship access via a Unix socket (`.starfleet-ai/var/comms/bridged.sock`). Not yet wired into any hook — new additive access path. |
+
+### Utilities
+
+| Subcommand | Purpose |
+|---|---|
+| `json validate <file>...` | Parse each file; non-zero exit + message on invalid JSON |
+| `json pretty [file]` | Pretty-print (indent=2) a JSON file or stdin |
+| `json get <expr> [file]` | Evaluate a Go expression against the parsed JSON (bound to `data` as `interface{}`), print result |
 
 ### GitHub interaction — read-only
 
