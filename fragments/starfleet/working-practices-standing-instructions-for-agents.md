@@ -27,12 +27,9 @@ cleared:
   dashboard` subcommands) for every read and write — never edit the index file directly.
 
 - **Dashboard files: CLI-only, no exceptions.** NEVER use `Read`/`Edit`/`Write`/`Glob`/`Grep`
-  directly on `.starfleet-ai/dashboard/topics/*.md` or `.starfleet-ai/DASHBOARD.md`. All access
-  goes through `starfleetctl dashboard topic show|write|new|commit` and `starfleetctl dashboard
-  reindex|commit`. This is not optional — agents have been caught hand-editing topic files,
-  which breaks the encapsulation needed for future multi-host operation. The pattern is:
-  `topic show <slug> > /tmp/t.md` → edit `/tmp/t.md` → `topic write <slug> /tmp/t.md` →
-  `topic commit <slug> -m "<msg>"`. For new topics: `topic new --title "…" --kind bug`.
+  directly on dashboard topic files or `DASHBOARD.md`. All access goes through
+  `starfleetctl dashboard` subcommands (see `starfleetctl` skill). This is not optional —
+  agents have been caught hand-editing topic files, which breaks encapsulation.
 - **Notice something worth a look while doing unrelated work → park it immediately.** A suspicious
    code path, a possible follow-up cleanup, an untriaged idea — add a dashboard Parked entry
    right away rather than just mentioning it in the response and moving on.
