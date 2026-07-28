@@ -129,6 +129,21 @@ Claims are **cooperative** — they don't block git at filesystem level, but all
 
 Markdown-based topic tracking in `.starfleet-ai/var/DASHBOARD.md` + `.starfleet-ai/var/dashboard/topics/*.md`. Managed via `starfleetctl dashboard topic <cmd>`.
 
+### Agent Instruction Fragments
+
+Per-topic Markdown files that become the agent's system prompt. Two sources:
+user-maintained (`agents.d/`) and auto-installed starfleet-owned
+(`.starfleet-ai/var/agents.d/starfleet-instructions/`). At reindex time,
+all fragment bodies are inlined into `CLAUDE.md` and `index.md`.
+
+```sh
+starfleetctl agents new project/my-topic --title "My Topic"    # create
+starfleetctl agents list                                        # list all
+starctl agents reindex                                          # regenerate derived files
+```
+
+See [doc/agents.md](doc/agents.md) for the full guide.
+
 ---
 
 ## 3. Quick Start
@@ -327,6 +342,7 @@ starfleetctl worktree remove <branch>
 | `bootstrap` | Verify/fix workspace structure |
 | `genesis-init` | Bootstrap from nothing |
 | `self-install` | Clone/build/install updates |
+| `agents` | Manage instruction fragments ([docs](doc/agents.md)) |
 | `json` | JSON validate/pretty/get |
 | `web` | Fleet web UI (start/stop/autostart/restart) |
 
@@ -484,6 +500,7 @@ workspace/
 | [doc/comms.md](doc/comms.md) | Comms command reference |
 | [doc/session.md](doc/session.md) | Session & worktree management |
 | [doc/pr-claim.md](doc/pr-claim.md) | PR locking details |
+| [doc/agents.md](doc/agents.md) | Instruction fragment system (creating, editing, reindex) |
 | [doc/web-ui.md](doc/web-ui.md) | Web UI deep dive |
 | [doc/known-limitations.md](doc/known-limitations.md) | Current caveats |
 

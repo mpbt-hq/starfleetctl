@@ -44,6 +44,7 @@ starfleetctl genesis-init .
 | [Session](doc/session.md) | Agent session management (termctl) |
 | [GitHub](doc/github.md) | PR viewing, commenting, labeling |
 | [Hooks](doc/hooks.md) | Claude Code / opencode integration |
+| [Agent Fragments](doc/agents.md) | Instruction fragment system (creating, editing, reindex) |
 | [Web UI](doc/web-ui.md) | Browser-based fleet dashboard |
 | [Known Limitations](doc/known-limitations.md) | Current caveats and workarounds |
 
