@@ -206,6 +206,30 @@ async function executeAction(
     return
   }
   if (action === 'retry') {
+    // For transient stream/resource errors, clear the session first to
+    // properly restart it. Just re-prompting doesn't fix broken streams.
+    const isStreamError =
+      detail.includes('ResourceExhausted') ||
+      detail.includes('Streaming response failed') ||
+      detail.includes('stream interrupted') ||
+      detail.includes('response stream') ||
+      detail.includes('connection closed') ||
+      detail.includes('broken pipe') ||
+      detail.includes('unexpected eof') ||
+      detail.includes('stream closed')
+
+    if (isStreamError) {
+      tickLog(`ERROR-HANDLE ${src}: clearing session for stream error (detail: ${detail})`)
+      try {
+        await client.session.clear({ path: { id: sessionID } })
+        tickLog(`ERROR-HANDLE ${src}: session cleared, will re-prompt`)
+        // Small delay to let session reset
+        await new Promise(r => setTimeout(r, 500))
+      } catch (e) {
+        tickLog(`ERROR-HANDLE ${src}: session.clear failed: ${String(e).slice(0, 120)}`)
+      }
+    }
+
     tickLog(`ERROR-HANDLE ${src}: re-prompting (detail: ${detail})`)
     try {
       await client.session.promptAsync({
