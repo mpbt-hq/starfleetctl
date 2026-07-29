@@ -85,4 +85,4 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 
 - `comms monitor-loop`/`fleet-watch` known broken under Claude Code's `Monitor` tool (workaround: bash originals)
 - `github backport commit` path-remap uses project config for prefix/behavior
-- `github pr make` marker-leak bug fixed 2026-07-07 (both Go and bash)
+- `github pr make` marker-leak bug fixed 2026-07-07

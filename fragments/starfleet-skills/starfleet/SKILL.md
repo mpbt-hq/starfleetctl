@@ -51,11 +51,13 @@ use `starfleetctl github pr claim` before mutating a PR.
 ### Quick reference
 
 ```bash
-starfleetctl github pr mk-agent-clone <branch> [name]  # agent-owned clone
-starfleetctl github pr claim <pr#> "what you're doing"  # claim PR branch
-starfleetctl github pr claim --release <pr#>            # release claim
-.starfleet-ai/bin/starfleetctl worktree add <repo> [name]  # per-task worktree
-starfleetctl with-clone-lock <cmd...>                   # serialize mutating work
+starfleetctl github pr make <commit> [<commit> ...]   # submit PR from incubator
+starfleetctl github pr mk-agent-clone <branch> [name] # agent-owned clone
+starfleetctl github pr claim <pr#> "what"              # claim PR branch
+starfleetctl github pr claim --release <pr#>           # release claim
+starfleetctl github backport commit <release> <commit> # one-shot backport
+.starfleet-ai/bin/starfleetctl worktree add <repo> [name] # per-task worktree
+starfleetctl with-clone-lock <cmd...>                  # serialize mutating work
 ```
 
 ## Task capture
