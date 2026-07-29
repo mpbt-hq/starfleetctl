@@ -177,7 +177,7 @@ func resolveJobIDs(repo, pr string, wantAll bool) ([]string, error) {
 		// Extract job ID from the details URL: .../runs/<r>/job/<id>
 		for _, f := range fields {
 			if idx := strings.LastIndex(f, "/job/"); idx >= 0 {
-				id := f[idx+5:]
+				id := strings.TrimSpace(f[idx+5:])
 				if id != "" && !seen[id] {
 					seen[id] = true
 					ids = append(ids, id)
@@ -190,7 +190,7 @@ func resolveJobIDs(repo, pr string, wantAll bool) ([]string, error) {
 
 // fetchJobLog downloads a job's log via the GitHub REST API.
 func fetchJobLog(repo, jobID, outpath string) error {
-	raw, err := runGH("api", "repos/"+repo+"/actions/jobs/"+jobID+"/logs")
+	raw, err := runGH("api", "--follow-redirects", "repos/"+repo+"/actions/jobs/"+jobID+"/logs")
 	if err != nil {
 		return fmt.Errorf("API error: %v", err)
 	}
