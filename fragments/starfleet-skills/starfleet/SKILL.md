@@ -86,6 +86,8 @@ starfleetctl task capture --title "<title>" \
 starfleetctl task assign <slug> [<ship>] [--no-push]   # re-assign
 starfleetctl task unassign <slug> [--no-push]          # clear assignment
 starfleetctl task status <slug> <status> [--no-push]   # set status
+starfleetctl task rm <slug> [--no-push]                # delete a task topic
+starfleetctl task purge [--no-push]                    # delete ALL done tasks
 ```
 
 ## Dashboard
@@ -113,9 +115,9 @@ Full reference: **`reference.md`** in this skill's directory.
 |---|---|
 | **Fleet** | `comms`, `dashboard`, `ws-commit`, `ship-names`, `with-clone-lock`, `worktree` |
 | **Session** | `run`, `session list/attach/stop` |
-| **Task** | `task capture/assign/unassign/status` |
+| **Task** | `task capture/assign/unassign/status/rm/purge` |
 | **Timer** | `timer set/list/cancel` |
 | **Web** | `web start/stop/restart/autostart` |
 | **Setup** | `genesis-init`, `self-install`, `agents install-starfleet` |
-| **GitHub (read)** | `github pr view/ci/show-branch-file`, `github backport applies` |
+| **GitHub (read)** | `github pr view/ci/file-on-branch/wait-green/show-branch-file`, `github backport applies` |
 | **GitHub (write)** | `github pr comment/label/set-body/checkout/amend-push/make`, `github backport commit` |

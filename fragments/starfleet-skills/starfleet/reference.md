@@ -47,6 +47,8 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 | `task assign <slug> [<ship>]` | Assign a task to a ship |
 | `task unassign <slug>` | Clear a task assignment |
 | `task status <slug> <status>` | Set a task's status |
+| `task rm <slug>` | Delete a task topic from the dashboard |
+| `task purge [--no-push]` | Delete ALL tasks with status "done" |
 | `timer set --at/--every/--cron ...` | Fleet scheduling (one-time, interval, cron) |
 | `timer list/cancel` | List or cancel timers |
 | `logs scan [--capture]` | Scan ship logs for recurring failures, extract as tasks |
@@ -66,7 +68,10 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 |---|---|
 | `github pr view <pr#>` | PR metadata via gh |
 | `github pr ci <pr#\|URL>` | CI status classified by conclusion |
-| `github pr show-branch-file <ref> <path>` | Print file at any ref via GitHub API |
+| `github pr file-on-branch <branch> <path>` | Fetch a file from any branch/tag/commit |
+| `github pr wait-green <pr#>` | Poll CI checks until all pass/fail/timeout |
+| `github pr job-logs <pr#>` | Download CI job logs for failure analysis |
+| `github pr show-branch-file <ref> <path>` | Print file at any ref via GitHub API (deprecated, use file-on-branch) |
 | `github backport applies <path> <grep-ERE> [release...]` | Check applicability across release lines |
 
 ## GitHub interaction (mutating)
