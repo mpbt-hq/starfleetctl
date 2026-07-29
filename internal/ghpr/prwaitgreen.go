@@ -20,10 +20,10 @@ type checkRun struct {
 }
 
 type statusRollup struct {
-	Conclusion string      `json:"conclusion"`
-	Status     string      `json:"status"`
-	Context    string      `json:"context"`
-	CheckRun   *checkRun   `json:"checkRun"`
+	Conclusion string    `json:"conclusion"`
+	Status     string    `json:"status"`
+	Context    string    `json:"context"`
+	CheckRun   *checkRun `json:"checkRun"`
 }
 
 type prStatusData struct {

@@ -13,12 +13,12 @@ import (
 )
 
 type contentsResponse struct {
-	Type        string `json:"type"`
-	Content     string `json:"content"`
-	Encoding    string `json:"encoding"`
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	Size        int    `json:"size"`
+	Type     string `json:"type"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Size     int    `json:"size"`
 }
 
 const prFileOnBranchUsage = `usage: starfleetctl pr file-on-branch <branch> <path>
