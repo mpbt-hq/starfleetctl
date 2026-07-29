@@ -24,6 +24,7 @@ import (
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/filestore"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/task"
 	"github.com/metux/starfleetctl/internal/timer"
@@ -102,6 +103,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/ship", s.apiShipLaunch)
 	s.mux.HandleFunc("/api/ship/", s.apiShipDispatch)
 	s.mux.HandleFunc("/api/ships", s.apiShips)
+	s.mux.HandleFunc("/api/store/", s.apiStoreFile)
 	s.mux.HandleFunc("/api/files", s.apiFileList)
 	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
 	s.mux.HandleFunc("/", s.serveIndex)
@@ -710,6 +712,33 @@ func (s *Server) apiShipScreen(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	writeJSON(w, map[string]any{"ship_id": id, "lines": lines, "type": "screen"})
+}
+
+// apiStoreFile serves files from the agent file store.
+// GET /api/store/<name>  — serves the file with infered Content-Type.
+func (s *Server) apiStoreFile(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/store/")
+	if name == "" || strings.Contains(name, "/") {
+		writeErr(w, 400, "invalid file name")
+		return
+	}
+	store, err := filestore.New(s.Root)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if !store.Exists(name) {
+		writeErr(w, 404, "file not found or expired")
+		return
+	}
+	path := store.Path(name)
+	mime.AddExtensionType(filepath.Ext(name), "")
+	ctype := mime.TypeByExtension(filepath.Ext(name))
+	if ctype == "" {
+		ctype = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ctype)
+	http.ServeFile(w, r, path)
 }
 
 // apiFileList returns the contents of a directory within the workspace.

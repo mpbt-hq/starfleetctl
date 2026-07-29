@@ -21,6 +21,7 @@ import (
 	"github.com/metux/starfleetctl/internal/bridged"
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/filestore"
 	"github.com/metux/starfleetctl/internal/genesis"
 	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/jsonutil"
@@ -58,6 +59,7 @@ Fleet management:
   timer             fleet scheduling: one-time, interval, cron (with worker daemon)
   logs              scan ship logs + bus events, extract failures as tasks (feedback loop)
   web               minimalist mobile-first fleet web console (start/stop/autostart/restart)
+  file              temporary file store for agents (put/list/rm/prune)
 
 Bootstrap & setup:
   genesis-init      bootstrap a workspace from nothing (writes starfleet-bootstrap + runs bootstrap --fix)
@@ -243,6 +245,8 @@ func main() {
 		os.Exit(timer.Run(root, os.Args[2:]))
 	case "web":
 		os.Exit(web.Run(root, os.Args[2:]))
+	case "file":
+		os.Exit(filestore.Run(root, os.Args[2:]))
 	case "logs":
 		os.Exit(logs.Run(root, os.Args[2:]))
 	case "models":
