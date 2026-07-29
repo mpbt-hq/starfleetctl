@@ -204,6 +204,8 @@ func main() {
 		os.Exit(RunGithub(append([]string{"pr", "mk-agent-clone"}, os.Args[2:]...)))
 	case "pr-wait-green":
 		os.Exit(RunGithub(append([]string{"pr", "wait-green"}, os.Args[2:]...)))
+	case "pr-file-on-branch":
+		os.Exit(RunGithub(append([]string{"pr", "file-on-branch"}, os.Args[2:]...)))
 	}
 
 	root, err := workspaceRoot()
