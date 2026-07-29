@@ -45,15 +45,24 @@ func validPR(pr string) (string, error) {
 	return strings.TrimPrefix(pr, "#"), nil
 }
 
-// Repo resolves the GitHub repo slug from $STARFLEET_GITHUB_REPO or (deprecated) $REPO.
-// Returns an error if neither is set, so callers can choose a fallback (e.g. URL
-// override) before giving up.
+// Repo resolves the GitHub repo slug from $STARFLEET_GITHUB_REPO, (deprecated) $REPO,
+// or auto-detects via `gh repo view --json nameWithOwner` as fallback.
 func Repo() (string, error) {
 	if r := os.Getenv("STARFLEET_GITHUB_REPO"); r != "" {
 		return r, nil
 	}
 	if r := os.Getenv("REPO"); r != "" {
 		return r, nil
+	}
+	// Auto-detect via gh CLI
+	out, err := runGHQuiet("repo", "view", "--json", "nameWithOwner")
+	if err == nil {
+		var result struct {
+			NameWithOwner string `json:"nameWithOwner"`
+		}
+		if json.Unmarshal(out, &result) == nil && result.NameWithOwner != "" {
+			return result.NameWithOwner, nil
+		}
 	}
 	return "", fmt.Errorf("no GitHub repo: set $STARFLEET_GITHUB_REPO or (deprecated) $REPO")
 }
