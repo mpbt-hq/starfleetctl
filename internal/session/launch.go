@@ -719,7 +719,17 @@ func RunTermctl(root string, args []string) int {
 			"STARFLEET_SHIP_ID=" + shipID,
 		}),
 		termctl.WithOnExit(func() {
-			fmt.Fprintf(os.Stderr, "termctl-run: OnExit callback for %s\n", shipID)
+			fmt.Fprintf(os.Stderr, "termctl-run: OnExit callback for %s — cleaning up\n", shipID)
+			wroot := os.Getenv("MPBT_WORKSPACE_ROOT")
+			if wroot != "" {
+				os.Setenv("STARFLEET_SHIP_ID", shipID)
+				if bus, err := comms.New(wroot); err == nil {
+					_ = bus.DoClear()
+				}
+				shipReg := shipnames.New(wroot)
+				_ = shipReg.DoRelease(shipID)
+			}
+			_ = os.Remove(pipePath)
 		}),
 	)
 	if err != nil {
