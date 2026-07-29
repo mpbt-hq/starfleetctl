@@ -134,6 +134,11 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 			m.Resolved = val
 		}
 	}
+	// Default category to "active" when not set — supports hand-written
+	// topics that skip optional headers.
+	if m.Category == "" {
+		m.Category = "active"
+	}
 	return m, body, nil
 }
 

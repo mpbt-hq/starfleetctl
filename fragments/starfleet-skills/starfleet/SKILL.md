@@ -95,6 +95,25 @@ starfleetctl task purge [--no-push]                    # delete ALL done tasks
 The dashboard is the cross-session "what's in flight" index. All access via CLI —
 **never** `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md`.
 
+### Topic file format (frontmatter)
+
+Topic files in `dashboard/topics/<slug>.md` use YAML-ish frontmatter:
+
+```yaml
+---
+title: "My Task"
+category: active       # "active" or "parked"; defaults to "active" when missing
+kind: "task"           # optional; marks it as a schedulable task
+status: "open"         # active only: open/assigned/done/...
+assigned-to: "—"       # ship name or "—"
+tags: "starfleet"      # optional, comma-separated
+---
+```
+
+Only `title` is required — `category` defaults to `active`, all other fields
+are optional. This is intentional for hand-written topics: you can drop in a
+minimal file and it shows up in the active list automatically.
+
 | Command | Purpose |
 |---|---|
 | `dashboard list` | Show active topics |
