@@ -90,6 +90,17 @@ func (d *Dashboard) DoTopicShow(slug string) error {
 	return err
 }
 
+// DoTopicDelete removes a topic file from disk. No error if the file doesn't
+// exist — callers that need existence-checking should DoTopicLoad first.
+func (d *Dashboard) DoTopicDelete(slug string) error {
+	path := d.topicPath(slug)
+	if err := os.Remove(path); os.IsNotExist(err) {
+		return nil
+	} else {
+		return err
+	}
+}
+
 // DoTopicWrite replaces one topic file's content (raw, frontmatter and all)
 // from src ("-" for stdin). Does NOT commit.
 func (d *Dashboard) DoTopicWrite(slug, src string) error {

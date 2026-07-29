@@ -230,6 +230,12 @@ type TopicJSON struct {
 	Tags       []string `json:"tags,omitempty"`
 }
 
+// LoadAllTopics returns every dashboard/topics/*.md file's frontmatter, sorted
+// by slug. Exposed for task purge and other callers that need the full set.
+func (d *Dashboard) LoadAllTopics() ([]TopicMeta, error) {
+	return d.loadAllTopics()
+}
+
 // LoadAllTopicsJSON returns every dashboard/topics/*.md file's frontmatter as a
 // JSON-shaped slice, sorted by slug — for the web UI's task board.
 func (d *Dashboard) LoadAllTopicsJSON() ([]TopicJSON, error) {

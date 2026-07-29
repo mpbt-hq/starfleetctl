@@ -38,6 +38,8 @@ const usage = `task <command> [args…]
   unassign <slug>                   clear a task's assignment (status ->
                                      open, assigned-to -> —).
   status <slug> <status>            set an existing task's status field.
+  rm <slug>                         delete a task topic from the dashboard.
+  purge [--no-push]                 delete ALL tasks with status "done".
 
 Run 'starfleetctl task <command> --help' for command-specific help.
 `
@@ -61,6 +63,10 @@ func Run(root string, args []string) int {
 		return runUnassign(root, args[1:])
 	case "status":
 		return runStatus(root, args[1:])
+	case "rm", "remove", "delete":
+		return runRm(root, args[1:])
+	case "purge":
+		return runPurge(root, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "task: unknown command: %s\n\n%s", args[0], usage)
 		return 2
@@ -564,6 +570,138 @@ func runStatus(root string, args []string) int {
 	}
 	commitAndReindex(d, slug, "task: status "+slug+" -> "+status, !noPush)
 	fmt.Printf("task-status: slug=%s status=%s\n", slug, status)
+	return 0
+}
+
+const rmUsage = `task rm <slug>
+
+Delete a task topic from the dashboard. Removes the topic file under
+dashboard/topics/ and reindexes DASHBOARD.md.
+
+Exit codes:
+  0  task removed
+  2  bad arguments
+  3  no such task (slug not found)
+`
+
+const purgeUsage = `task purge [--no-push]
+
+Delete ALL tasks with status "done" from the dashboard. Removes topic files
+and reindexes DASHBOARD.md. Shows which tasks were deleted.
+
+Exit codes:
+  0  purge completed (may be zero tasks deleted)
+  2  bad arguments
+`
+
+// runRm implements `task rm <slug>` — remove a single topic file.
+func runRm(root string, args []string) int {
+	noPush := false
+	slug := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(rmUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "task rm: too many arguments")
+				return 2
+			}
+		}
+	}
+	if slug == "" {
+		fmt.Fprintln(os.Stderr, "task rm: <slug> required")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task rm:", err)
+		return 1
+	}
+
+	// Verify it exists before deleting.
+	if _, _, err := d.DoTopicLoad(slug); err != nil {
+		fmt.Fprintf(os.Stderr, "task rm: no such task: %s\n", slug)
+		return 3
+	}
+
+	if err := d.DoTopicDelete(slug); err != nil {
+		fmt.Fprintf(os.Stderr, "task rm: %v\n", err)
+		return 1
+	}
+
+	commitAndReindex(d, slug, "task: rm "+slug, !noPush)
+	fmt.Printf("task-removed: slug=%s\n", slug)
+	return 0
+}
+
+// runPurge implements `task purge` — remove all done tasks.
+func runPurge(root string, args []string) int {
+	noPush := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(purgeUsage)
+			return 0
+		default:
+			fmt.Fprintln(os.Stderr, "task purge: unknown argument:", args[i])
+			return 2
+		}
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task purge:", err)
+		return 1
+	}
+
+	metas, err := d.LoadAllTopics()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task purge:", err)
+		return 1
+	}
+
+	var toDelete []string
+	for _, m := range metas {
+		if m.Kind == "task" && m.Status == "done" {
+			toDelete = append(toDelete, m.Slug)
+		}
+	}
+
+	if len(toDelete) == 0 {
+		fmt.Println("task purge: no done tasks to remove")
+		return 0
+	}
+
+	fmt.Printf("Removing %d done task(s):\n", len(toDelete))
+	for _, slug := range toDelete {
+		if err := d.DoTopicDelete(slug); err != nil {
+			fmt.Fprintf(os.Stderr, "task purge: failed to remove %s: %v\n", slug, err)
+			return 1
+		}
+		fmt.Printf("  — %s\n", slug)
+	}
+
+	// Single reindex + commit for all deletions.
+	if err := d.DoReindex(); err != nil {
+		fmt.Fprintf(os.Stderr, "task purge: reindex failed: %v\n", err)
+		return 1
+	}
+	msg := fmt.Sprintf("task: purge %d done tasks", len(toDelete))
+	if err := d.DoCommit(msg, !noPush); err != nil {
+		fmt.Fprintf(os.Stderr, "task purge: commit failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Println("task-purge: done")
 	return 0
 }
 
