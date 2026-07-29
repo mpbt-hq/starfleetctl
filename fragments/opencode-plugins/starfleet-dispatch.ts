@@ -400,13 +400,24 @@ export const plugin = async ({ client, $ }: any) => {
       if (handleMessage(msg, client, currentSessionID)) continue
       injectable.push(msg)
     }
-    // Inject remaining directives as system prompts
+    // Inject remaining directives mid-turn as synthetic prompt
     if (injectable.length > 0) {
+      const lines = injectable.map((m: any) =>
+        `Directive ${m.id} from ${m.from}:\n${m.text}`)
       try {
         await client.session.promptAsync({
           path: { id: currentSessionID },
           body: {
-            parts: [{ type: 'text', text: `(Fleet directive${injectable.length > 1 ? 's' : ''} received)`, synthetic: true }],
+            parts: [{
+              type: 'text', synthetic: true,
+              text: [
+                '--- fleet directives (from other ships via comms) ---',
+                'Process each directive and carry out the requested action.',
+                '',
+                ...lines,
+                '--- end fleet directives ---',
+              ].join('\n'),
+            }],
           },
         })
       } catch { /* ignore */ }
