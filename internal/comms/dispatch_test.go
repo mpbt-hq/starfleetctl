@@ -7,7 +7,7 @@ import "testing"
 
 func TestDecideAction_retryTransient(t *testing.T) {
 	cases := []struct {
-		tag        string
+		tag         string
 		hasFallback bool
 	}{
 		{"nim-overload", false},

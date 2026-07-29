@@ -561,7 +561,11 @@ async function loadShip(name){
     add('Übergeordnet', s.parent);
     add('Note', s.note);
     add('Zuletzt', s.updated ? age(s.age_seconds)+' her' : '');
+    add('Fehler', s.error_tag);
     document.getElementById('ship_detail').innerHTML = kv.join('') || '<span class="muted">keine Detaildaten</span>';
+    if (s.error_tag && ['streaming-response-failed','nim-overload','resource-exhausted','no-provider'].includes(s.error_tag)){
+      toast(s.agent+' · '+s.error_tag+' · auto-recovered');
+    }
     await loadShipChat(name);
   } catch(e){ document.getElementById('ship_detail').innerHTML = '<span class="muted">Fehler: '+esc(e.message)+'</span>'; }
 }
@@ -570,16 +574,29 @@ async function loadShipChat(name){
   try {
     const msgs = await api('/api/msgs?ship='+encodeURIComponent(name));
     if (!msgs.length){ el.innerHTML = '<div class="empty">noch keine Nachrichten</div>'; return; }
-    el.innerHTML = msgs.map(m=>{
+    const byID = {}, roots = [], children = {};
+    msgs.forEach(m=>{ byID[m.id]=m; });
+    msgs.forEach(m=>{
+      if (m.reply_to && byID[m.reply_to]){
+        (children[m.reply_to] = children[m.reply_to] || []).push(m);
+      } else {
+        roots.push(m);
+      }
+    });
+    const out = [];
+    const walk = (m, depth)=>{
       const me = m.from === identity.ship_id;
       const tgt = m.target==='all' ? '📡 all' : ('→ '+m.target);
       const meta = `${esc(m.from)} ${tgt} · ${age(m.age_seconds)}` +
         (m.reply_to ? ` · <a href="#" onclick="jumpToMsg('${esc(m.reply_to)}');return false">↩ ${esc(m.reply_to)}</a>` : '');
-      return `<div class="bubble${me?' me':''}">
+      out.push(`<div class="bubble${me?' me':''}" style="${depth>0?'margin-left:18px;border-left:3px solid var(--acc)':''}">
         <div class="meta">${meta}</div>
         <pre>${esc(m.text)}</pre>
-      </div>`;
-    }).join('');
+      </div>`);
+      (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
+    };
+    roots.forEach(r=>walk(r, 0));
+    el.innerHTML = out.join('') || '<div class="empty">keine Nachrichten</div>';
     el.scrollTop = el.scrollHeight;
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
 }
@@ -876,16 +893,29 @@ async function loadTalk(){
   try {
     const msgs = await api('/api/msgs?ship='+encodeURIComponent(target));
     if (!msgs.length){ el.innerHTML = '<div class="empty">noch keine Nachrichten</div>'; return; }
-    el.innerHTML = msgs.map(m=>{
+    const byID = {}, roots = [], children = {};
+    msgs.forEach(m=>{ byID[m.id]=m; });
+    msgs.forEach(m=>{
+      if (m.reply_to && byID[m.reply_to]){
+        (children[m.reply_to] = children[m.reply_to] || []).push(m);
+      } else {
+        roots.push(m);
+      }
+    });
+    const out = [];
+    const walk = (m, depth)=>{
       const me = m.from === identity.ship_id;
       const tgt = m.target==='all' ? '📡 all' : ('→ '+m.target);
       const meta = `${esc(m.from)} ${tgt} · ${age(m.age_seconds)}` +
         (m.reply_to ? ` · <a href="#" onclick="jumpToMsg('${esc(m.reply_to)}');return false">↩ ${esc(m.reply_to)}</a>` : '');
-      return `<div class="bubble${me?' me':''}">
+      out.push(`<div class="bubble${me?' me':''}" style="${depth>0?'margin-left:18px;border-left:3px solid var(--acc)':''}">
         <div class="meta">${meta}</div>
         <pre>${esc(m.text)}</pre>
-      </div>`;
-    }).join('');
+      </div>`);
+      (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
+    };
+    roots.forEach(r=>walk(r, 0));
+    el.innerHTML = out.join('') || '<div class="empty">keine Nachrichten</div>';
     el.scrollTop = el.scrollHeight;
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
 }
