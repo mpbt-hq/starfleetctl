@@ -116,6 +116,8 @@ func runGithubPR(args []string) int {
 		return ghpr.RunShowBranchFile(rest)
 	case "show-conflict":
 		return ghpr.RunShowPRConflict(rest)
+	case "wait-green":
+		return ghpr.RunPRWaitGreen(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "github pr: unknown verb: %s\n\n", verb)
 		printGithubPRHelp()
@@ -227,6 +229,7 @@ Verbs:
   claim             claim/unclaim a PR (needs workspace)
   show-branch-file  show a file from a branch
   show-conflict     show merge conflict details for a PR
+  wait-green        poll CI until all checks pass/fail
   mk-agent-clone    create an isolated ship worktree clone (needs workspace)
   make              create a PR with commit-message conventions (formerly xx-make-pr)
 

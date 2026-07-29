@@ -202,6 +202,8 @@ func main() {
 		os.Exit(RunGithub(append([]string{"backport", "commit"}, os.Args[2:]...)))
 	case "mk-agent-clone":
 		os.Exit(RunGithub(append([]string{"pr", "mk-agent-clone"}, os.Args[2:]...)))
+	case "pr-wait-green":
+		os.Exit(RunGithub(append([]string{"pr", "wait-green"}, os.Args[2:]...)))
 	}
 
 	root, err := workspaceRoot()
