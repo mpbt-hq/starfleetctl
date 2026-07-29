@@ -54,6 +54,12 @@ func (d *Dashboard) topicPath(slug string) string {
 	return filepath.Join(d.TopicsDir(), slug+".md")
 }
 
+// TopicPath returns the absolute filesystem path for a topic slug — exported
+// so task rm etc. can access it without duplicating the path logic.
+func (d *Dashboard) TopicPath(slug string) string {
+	return d.topicPath(slug)
+}
+
 // unquoteYAML strips a double-quoted YAML scalar's quoting/escaping; a bare
 // (unquoted) value is returned unchanged.
 func unquoteYAML(v string) string {

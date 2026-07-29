@@ -90,8 +90,23 @@ func (d *Dashboard) DoTopicShow(slug string) error {
 	return err
 }
 
+// DoTopicVerify checks whether a topic exists, either on disk or in the git
+// index (for cases where the file was already deleted but still tracked).
+func (d *Dashboard) DoTopicVerify(slug string) error {
+	path := d.topicPath(slug)
+	if _, err := os.Stat(path); err == nil {
+		return nil // exists on disk
+	}
+	// Check git index.
+	if err := runQuiet(d.Root, "git", "ls-files", "--error-unmatch", path); err == nil {
+		return nil // tracked by git
+	}
+	return fmt.Errorf("topic file not found on disk or in git index: %s", path)
+}
+
 // DoTopicDelete removes a topic file from disk. No error if the file doesn't
-// exist — callers that need existence-checking should DoTopicLoad first.
+// exist — git staging is left to DoTopicCommit (which handles git rm for
+// deleted files). Use DoTopicVerify for existence checks.
 func (d *Dashboard) DoTopicDelete(slug string) error {
 	path := d.topicPath(slug)
 	if err := os.Remove(path); os.IsNotExist(err) {
@@ -99,6 +114,39 @@ func (d *Dashboard) DoTopicDelete(slug string) error {
 	} else {
 		return err
 	}
+}
+
+// DoTopicCommitAll stages all pending changes under dashboard/topics/ (both
+// additions and deletions) and commits them in one shot. Useful for batch
+// operations like task purge.
+func (d *Dashboard) DoTopicCommitAll(msg string, push bool) error {
+	lh, err := d.lock()
+	if err != nil {
+		return err
+	}
+	defer lh.Close()
+
+	if err := run(d.Root, "git", "add", "--all", d.TopicsDir()); err != nil {
+		return err
+	}
+	if err := run(d.Root, "git", "diff", "--cached", "--quiet"); err == nil {
+		fmt.Println("dashboard: nothing staged — nothing to commit")
+		return nil
+	}
+	if err := run(d.Root, "git", "commit", "-m", msg); err != nil {
+		return err
+	}
+	if !push {
+		return nil
+	}
+	branch, err := d.branch()
+	if err != nil {
+		return err
+	}
+	if err := run(d.Root, "git", "pull", "--rebase", "--autostash"); err != nil {
+		return fmt.Errorf("dashboard: pull --rebase failed, NOT pushing: %w", err)
+	}
+	return run(d.Root, "git", "push", "origin", branch)
 }
 
 // DoTopicWrite replaces one topic file's content (raw, frontmatter and all)
@@ -162,7 +210,14 @@ func (d *Dashboard) DoTopicCommit(slug, msg string, push bool) error {
 	defer lh.Close()
 
 	path := d.topicPath(slug)
-	if err := run(d.Root, "git", "add", path); err != nil {
+	// If file exists, git add; otherwise git rm to stage the deletion.
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		if err := run(d.Root, "git", "rm", "--cached", path); err != nil {
+			return nil // file not in git either — fine
+		}
+	} else if statErr != nil {
+		return statErr
+	} else if err := run(d.Root, "git", "add", path); err != nil {
 		return err
 	}
 	if err := run(d.Root, "git", "diff", "--cached", "--quiet", "--", path); err == nil {

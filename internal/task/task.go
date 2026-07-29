@@ -625,8 +625,8 @@ func runRm(root string, args []string) int {
 		return 1
 	}
 
-	// Verify it exists before deleting.
-	if _, _, err := d.DoTopicLoad(slug); err != nil {
+	// Verify existence (file on disk or in git index).
+	if err := d.DoTopicVerify(slug); err != nil {
 		fmt.Fprintf(os.Stderr, "task rm: no such task: %s\n", slug)
 		return 3
 	}
@@ -690,14 +690,15 @@ func runPurge(root string, args []string) int {
 		fmt.Printf("  — %s\n", slug)
 	}
 
-	// Single reindex + commit for all deletions.
-	if err := d.DoReindex(); err != nil {
-		fmt.Fprintf(os.Stderr, "task purge: reindex failed: %v\n", err)
+	// Single batch commit + reindex for all deletions.
+	push := !noPush
+	msg := fmt.Sprintf("task: purge %d done tasks", len(toDelete))
+	if err := d.DoTopicCommitAll(msg, push); err != nil {
+		fmt.Fprintf(os.Stderr, "task purge: commit failed: %v\n", err)
 		return 1
 	}
-	msg := fmt.Sprintf("task: purge %d done tasks", len(toDelete))
-	if err := d.DoCommit(msg, !noPush); err != nil {
-		fmt.Fprintf(os.Stderr, "task purge: commit failed: %v\n", err)
+	if err := d.DoReindex(); err != nil {
+		fmt.Fprintf(os.Stderr, "task purge: reindex failed: %v\n", err)
 		return 1
 	}
 
