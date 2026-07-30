@@ -198,7 +198,7 @@ func RunCmd(root string, args []string) int {
 // defaultPrompt returns the standard prompt for the given client/role combination.
 func defaultPrompt(root, client, shipID, role, model string) string {
 	if client == "opencode" {
-		configContent := fmt.Sprintf(`{"username":"%s","instructions":[".starfleet-ai/var/agents.d/index.md"]}`, shipID)
+		configContent := fmt.Sprintf(`{"username":"%s","instructions":[".starfleet-ai/var/agents.d/index.md"],"plugin":["./plugins/starfleet-dispatch.ts"]}`, shipID)
 		os.Setenv("OPENCODE_CONFIG_CONTENT", configContent)
 
 		if role == "flagship" {
@@ -300,7 +300,7 @@ func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model s
 
 	// Set OPENCODE_CONFIG_CONTENT for opencode
 	if client == "opencode" {
-		configContent := `{"username":"` + shipID + `","instructions":[".starfleet-ai/var/agents.d/index.md"]}`
+		configContent := `{"username":"` + shipID + `","instructions":[".starfleet-ai/var/agents.d/index.md"],"plugin":["./plugins/starfleet-dispatch.ts"]}`
 		parts = append(parts, "export OPENCODE_CONFIG_CONTENT="+shellQuote(configContent))
 	}
 
