@@ -780,18 +780,58 @@ func (s *Server) apiStoreFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if !store.Exists(name) {
-		writeErr(w, 404, "file not found or expired")
-		return
+
+	switch r.Method {
+	case http.MethodGet:
+		if !store.Exists(name) {
+			writeErr(w, 404, "file not found or expired")
+			return
+		}
+		path := store.Path(name)
+		mime.AddExtensionType(filepath.Ext(name), "")
+		ctype := mime.TypeByExtension(filepath.Ext(name))
+		if ctype == "" {
+			ctype = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", ctype)
+		http.ServeFile(w, r, path)
+
+	case http.MethodPost, http.MethodPut:
+		r.ParseMultipartForm(32 << 20) // 32 MB max
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			writeErr(w, 400, "need file field: "+err.Error())
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		if err != nil {
+			writeErr(w, 500, "read upload: "+err.Error())
+			return
+		}
+		ttl := time.Hour
+		if ttlStr := r.FormValue("ttl"); ttlStr != "" {
+			if d, err := time.ParseDuration(ttlStr); err == nil {
+				ttl = d
+			}
+		}
+		// Write via temp file for filestore.Put
+		tmp := filepath.Join(os.TempDir(), "stf-upload-"+name)
+		if err := os.WriteFile(tmp, data, 0644); err != nil {
+			writeErr(w, 500, "write temp: "+err.Error())
+			return
+		}
+		defer os.Remove(tmp)
+		url, err := store.Put(tmp, ttl)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "name": name, "url": url})
+
+	default:
+		writeErr(w, 405, "method not allowed")
 	}
-	path := store.Path(name)
-	mime.AddExtensionType(filepath.Ext(name), "")
-	ctype := mime.TypeByExtension(filepath.Ext(name))
-	if ctype == "" {
-		ctype = "application/octet-stream"
-	}
-	w.Header().Set("Content-Type", ctype)
-	http.ServeFile(w, r, path)
 }
 
 // apiFileList returns the contents of a directory within the workspace.
@@ -1035,9 +1075,12 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var p struct {
-			Title string   `json:"title"`
-			Body  string   `json:"body"`
-			Tags  []string `json:"tags"`
+			Title       string   `json:"title"`
+			Subtitle    string   `json:"subtitle"`
+			Body        string   `json:"body"`
+			Tags        []string `json:"tags"`
+			TaskRef     string   `json:"task_ref"`
+			Attachments []string `json:"attachments"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			writeErr(w, 400, "bad json: "+err.Error())
@@ -1048,11 +1091,14 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rec := &reports.ReportRecord{
-			ID:    fmt.Sprintf("r-%d", time.Now().UnixNano()),
-			Title: p.Title,
-			Ship:  s.bus.ShipID,
-			Body:  p.Body,
-			Tags:  p.Tags,
+			ID:          fmt.Sprintf("r-%d", time.Now().UnixNano()),
+			Title:       p.Title,
+			Subtitle:    p.Subtitle,
+			Ship:        s.bus.ShipID,
+			Body:        p.Body,
+			Tags:        p.Tags,
+			TaskRef:     p.TaskRef,
+			Attachments: p.Attachments,
 		}
 		id, err := store.Create(rec)
 		if err != nil {

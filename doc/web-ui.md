@@ -115,6 +115,22 @@ The Timer tab also provides quick access to:
 - **Timer Worker** status (start/stop)
 - **Web Server** restart button
 
+### Berichte
+
+Fleet report system. Each report is a structured document with title,
+subtitle, Markdown body, tags, optional task reference, and file
+attachments.
+
+- **List view**: shows title, subtitle, ship, relative time, tags —
+  click any card to open the detail modal
+- **Detail modal**: full body rendered as Markdown, clickable task
+  reference link, clickable attachment links (served via filestore)
+- **Submit form**: title (required), subtitle, Markdown body, tags,
+  task slug, file upload via filestore
+- **Filter**: by ship name or tag
+
+See [Reports](reports.md) for full CLI and API reference.
+
 ### Files
 
 Workspace file browser for viewing and downloading files.
@@ -130,6 +146,10 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 
 | Endpoint | Method | Description |
 |---|---|---|
+| `/api/reports` | GET | List all reports (JSON). Optional `?ship=` and `?tag=` filters. |
+| `/api/reports` | POST | Create a report (JSON body) |
+| `/api/reports/<id>` | GET | Get a single report (JSON) |
+| `/api/reports/<id>` | DELETE | Delete a report |
 | `/api/board` | GET | Fleet status board (all agents with status, progress, etc.) |
 | `/api/msgs` | GET | All bus messages (newest first). Optional `?ship=<name>` for per-ship conversation |
 | `/api/inbox` | GET | Messages addressed to the viewing ship |

@@ -46,6 +46,7 @@ starfleetctl genesis-init .
 | [Hooks](doc/hooks.md) | Claude Code / opencode integration |
 | [Agent Fragments](doc/agents.md) | Instruction fragment system (creating, editing, reindex) |
 | [Web UI](doc/web-ui.md) | Browser-based fleet dashboard |
+| [Reports](doc/reports.md) | Fleet report system (CLI + web) |
 | [Known Limitations](doc/known-limitations.md) | Current caveats and workarounds |
 
 ## License
