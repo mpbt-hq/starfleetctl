@@ -32,6 +32,9 @@ cleared:
   `scripts/<name>` (match the existing style) and add allow rules so it runs without a
   confirmation prompt.
 - **Bash cwd persists silently across tool calls.** After `cd`-ing into a nested directory for one
-  investigation, every later command keeps running there until you explicitly `cd` back. Always use
-  an explicit absolute path or `cd` to the workspace root before commands whose output isn't meant
-  to land in a subdirectory.
+   investigation, every later command keeps running there until you explicitly `cd` back. Always use
+   an explicit absolute path or `cd` to the workspace root before commands whose output isn't meant
+   to land in a subdirectory.
+- **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
+   (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,
+   no dashboard scanning, no proactive work — wait for a `tell`/`ask`/`broadcast` directive.
