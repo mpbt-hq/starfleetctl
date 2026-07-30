@@ -27,6 +27,7 @@ import (
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/filestore"
+	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/task"
 	"github.com/metux/starfleetctl/internal/timer"
@@ -108,6 +109,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/store/", s.apiStoreFile)
 	s.mux.HandleFunc("/api/files", s.apiFileList)
 	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
+	s.mux.HandleFunc("/api/reports", s.apiReports)
+	s.mux.HandleFunc("/api/reports/", s.apiReportDispatch)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -986,6 +989,112 @@ func (s *Server) apiTimerWorker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeErr(w, 405, "method not allowed")
+}
+
+// apiReports handles GET /api/reports (list, with optional ?ship= and ?tag=)
+// and POST /api/reports (submit).
+func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
+	store, err := reports.NewStore(s.Root)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		filterShip := r.URL.Query().Get("ship")
+		filterTag := r.URL.Query().Get("tag")
+		all, err := store.ListJSON()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		var out []reports.ReportJSON
+		for _, rec := range all {
+			if filterShip != "" && rec.Ship != filterShip {
+				continue
+			}
+			if filterTag != "" {
+				hasTag := false
+				for _, t := range rec.Tags {
+					if t == filterTag {
+						hasTag = true
+						break
+					}
+				}
+				if !hasTag {
+					continue
+				}
+			}
+			out = append(out, rec)
+		}
+		if out == nil {
+			out = []reports.ReportJSON{}
+		}
+		writeJSON(w, out)
+
+	case http.MethodPost:
+		var p struct {
+			Title string   `json:"title"`
+			Body  string   `json:"body"`
+			Tags  []string `json:"tags"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeErr(w, 400, "bad json: "+err.Error())
+			return
+		}
+		if p.Title == "" {
+			writeErr(w, 400, "title required")
+			return
+		}
+		rec := &reports.ReportRecord{
+			ID:    fmt.Sprintf("r-%d", time.Now().UnixNano()),
+			Title: p.Title,
+			Ship:  s.bus.ShipID,
+			Body:  p.Body,
+			Tags:  p.Tags,
+		}
+		id, err := store.Create(rec)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "id": id})
+
+	default:
+		writeErr(w, 405, "method not allowed")
+	}
+}
+
+// apiReportDispatch handles GET /api/reports/<id> (show) and DELETE /api/reports/<id>.
+func (s *Server) apiReportDispatch(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/reports/")
+	if id == "" {
+		writeErr(w, 400, "need report id")
+		return
+	}
+	store, err := reports.NewStore(s.Root)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rec, err := store.Get(id)
+		if err != nil {
+			writeErr(w, 404, "report not found")
+			return
+		}
+		writeJSON(w, rec)
+	case http.MethodDelete:
+		if err := store.Delete(id); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	default:
+		writeErr(w, 405, "method not allowed")
+	}
 }
 
 // serveIndex serves the embedded single-page frontend.

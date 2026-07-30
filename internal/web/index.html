@@ -87,9 +87,11 @@
   .bubble .meta a { font-size: 11px; }
   .bubble pre { white-space: pre-wrap; word-break: break-word; margin: 0;
     font: 13px/1.4 ui-monospace, monospace; }
+  #ship_chat { overflow-y: auto; max-height: 60vh; }
+  #talk_body { overflow-y: auto; max-height: 60vh; }
   .terminal { background: #000; color: #00ff00; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px; line-height: 1.3; padding: 8px; border-radius: 8px;
-    overflow-x: auto; white-space: pre; min-height: 200px; max-height: 600px;
+    overflow-x: auto; white-space: pre; min-height: 200px; max-height: 1200px;
     overflow-y: auto; border: 1px solid var(--line); }
   .terminal .cursor { animation: blink 1s step-end infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -122,6 +124,7 @@
   <div class="tab" data-p="talk" onclick="show('talk', true)">Funk</div>
   <div class="tab" data-p="log" onclick="show('log', true)">Log</div>
   <div class="tab" data-p="timers" onclick="show('timers', true)">Timer</div>
+  <div class="tab" data-p="reports" onclick="show('reports', true);loadReports()">Berichte</div>
   <div class="tab" data-p="files" onclick="show('files', true)">Files</div>
 </div>
 
@@ -250,6 +253,28 @@
     <div class="card" id="timerlist"></div>
   </section>
 
+  <section class="page" id="reports">
+    <div class="card">
+      <b>Berichte</b>
+      <div class="row" style="margin-top:8px;gap:8px">
+        <input id="rep_title" placeholder="Titel" style="flex:1">
+        <input id="rep_tags" placeholder="Tags (Komma getrennt)" style="flex:1">
+      </div>
+      <textarea id="rep_body" placeholder="Berichtstext (optional)" style="margin-top:8px"></textarea>
+      <div class="actions" style="margin-top:8px">
+        <button onclick="reportSubmit()">Bericht einreichen</button>
+      </div>
+    </div>
+    <div class="card" id="reports_filters">
+      <div class="row" style="gap:8px">
+        <input id="rep_filter_ship" placeholder="Filter: Schiff" style="flex:1">
+        <input id="rep_filter_tag" placeholder="Filter: Tag" style="flex:1">
+        <button class="sec" onclick="loadReports()">Filtern</button>
+      </div>
+    </div>
+    <div class="card" id="reports_list"></div>
+  </section>
+
   <section class="page" id="files">
     <div class="card">
       <div class="row" style="align-items:center">
@@ -347,6 +372,7 @@ async function refresh(){
   else if (cur==='log') await loadEvents();
   else if (cur==='talk') { await loadTargets(); await loadTalk(); }
   else if (cur==='timers') await loadTimers();
+  else if (cur==='reports') await loadReports();
   else if (cur==='files') await loadFiles();
 }
 
@@ -597,7 +623,7 @@ async function loadShipChat(name){
     };
     roots.forEach(r=>walk(r, 0));
     el.innerHTML = out.join('') || '<div class="empty">keine Nachrichten</div>';
-    el.scrollTop = el.scrollHeight;
+    el.scrollTop = 0;
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
 }
 async function shipSend(){
@@ -678,7 +704,7 @@ async function loadScreen(){
   const statusEl = document.getElementById('term_status');
   try {
     let url = '/api/ship/' + encodeURIComponent(shipCurrent) + '/screen';
-    if (termMode === 'scrollback') url += '?scrollback=100';
+    if (termMode === 'scrollback') url += '?scrollback=500';
     const data = await api(url);
     if (data.lines && data.lines.length > 0) {
       el.innerHTML = data.lines.map(l => esc(l)).join('\n');
@@ -915,8 +941,8 @@ async function loadTalk(){
       (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
     };
     roots.forEach(r=>walk(r, 0));
-    el.innerHTML = out.join('') || '<div class="empty">keine Nachrichten</div>';
-    el.scrollTop = el.scrollHeight;
+    el.innerHTML = out.reverse().join('') || '<div class="empty">keine Nachrichten</div>';
+    el.scrollTop = 0;
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
 }
 async function sendTell(){
@@ -1061,6 +1087,48 @@ async function timerWorkerToggle(){
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
+async function loadReports(){
+  try {
+    const ship = document.getElementById('rep_filter_ship')?.value.trim();
+    const tag = document.getElementById('rep_filter_tag')?.value.trim();
+    let url = '/api/reports';
+    const params = [];
+    if (ship) params.push('ship='+encodeURIComponent(ship));
+    if (tag) params.push('tag='+encodeURIComponent(tag));
+    if (params.length) url += '?'+params.join('&');
+    const rows = await api(url);
+    const el = document.getElementById('reports_list');
+    if (!rows.length){ el.innerHTML = '<div class="empty">keine Berichte</div>'; return; }
+    el.innerHTML = rows.map(r=>{
+      const tags = r.tags?.length ? ' ['+esc(r.tags.join(', '))+']' : '';
+      return `<div class="card">
+        <div class="row"><span class="agent grow">${esc(r.title)}</span>
+          <span class="pill dim">${esc(r.ship)}</span>
+          <span class="muted">${esc(r.ago||'')}</span></div>
+        <div class="muted" style="margin-top:4px">${esc(r.id)}${tags}</div>
+        ${r.body?`<div style="margin-top:6px;white-space:pre-wrap">${esc(r.body)}</div>`:''}
+      </div>`;
+    }).join('');
+  } catch(e){ document.getElementById('reports_list').innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+
+async function reportSubmit(){
+  const title = document.getElementById('rep_title').value.trim();
+  if (!title){ toast('Titel erforderlich', true); return; }
+  const body = document.getElementById('rep_body').value.trim();
+  const tagsStr = document.getElementById('rep_tags').value.trim();
+  const tags = tagsStr ? tagsStr.split(',').map(s=>s.trim()).filter(s=>s) : [];
+  try {
+    await api('/api/reports', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({title, body, tags})});
+    toast('Bericht eingereicht');
+    document.getElementById('rep_title').value = '';
+    document.getElementById('rep_body').value = '';
+    document.getElementById('rep_tags').value = '';
+    loadReports();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+
 async function webRestart(){
   try {
     document.getElementById('ws_info').textContent = 'Neustart…';
@@ -1080,7 +1148,7 @@ loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
-  if (c==='status'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='files') refresh();
+  if (c==='status'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='reports'||c==='files') refresh();
   if (shipCurrent) {
     loadShipChat(shipCurrent);
     // Refresh terminal if screen tab is active and auto-update is on

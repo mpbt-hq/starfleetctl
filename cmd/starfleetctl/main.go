@@ -27,6 +27,7 @@ import (
 	"github.com/metux/starfleetctl/internal/jsonutil"
 	"github.com/metux/starfleetctl/internal/logs"
 	"github.com/metux/starfleetctl/internal/models"
+	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
@@ -57,6 +58,7 @@ Fleet management:
   ws-commit         commit workspace changes with locking
   task              capture fleet tasks into the dashboard (+ optional ship commission)
   timer             fleet scheduling: one-time, interval, cron (with worker daemon)
+  reports           fleet report system (submit/list/show/delete)
   logs              scan ship logs + bus events, extract failures as tasks (feedback loop)
   web               minimalist mobile-first fleet web console (start/stop/autostart/restart)
   file              temporary file store for agents (put/list/rm/prune)
@@ -243,6 +245,8 @@ func main() {
 		os.Exit(task.Run(root, os.Args[2:]))
 	case "timer":
 		os.Exit(timer.Run(root, os.Args[2:]))
+	case "reports":
+		os.Exit(reports.Run(root, os.Args[2:]))
 	case "web":
 		os.Exit(web.Run(root, os.Args[2:]))
 	case "file":
