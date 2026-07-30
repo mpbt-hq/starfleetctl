@@ -325,7 +325,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 	// The ship will simply resume its last prompt; the flagship only needs
 	// to know about non-transient errors or those requiring manual action.
 	notifyFlagship := true
-	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
+	if isAutoRestartTag(tag) {
 		notifyFlagship = false
 		b.LogEvent("plugin", fmt.Sprintf("error: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
 	}
@@ -374,7 +374,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	// The ship will simply resume its last prompt; the flagship only needs
 	// to know about non-transient errors or those requiring manual action.
 	notifyFlagship := true
-	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
+	if isAutoRestartTag(tag) {
 		notifyFlagship = false
 		b.LogEvent("plugin", fmt.Sprintf("error-handle: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
 	}
