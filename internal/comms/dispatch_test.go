@@ -3,7 +3,11 @@
 
 package comms
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestDecideAction_retryTransient(t *testing.T) {
 	cases := []struct {
@@ -38,9 +42,22 @@ func TestDecideAction_retryTransient(t *testing.T) {
 }
 
 func TestDecideAction_switchModel(t *testing.T) {
-	action, reason := decideAction("zen-ratelimit", true, "retry-poll", "")
+	// Create temp dir with fallback model configured
+	tmpDir := t.TempDir()
+	confDir := filepath.Join(tmpDir, ".starfleet-ai", "conf")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	commsYaml := `comms:
+  fallback_model: "opencode/test-fallback"
+`
+	if err := os.WriteFile(filepath.Join(confDir, "comms.yaml"), []byte(commsYaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	action, reason := decideAction("zen-ratelimit", true, "retry-poll", tmpDir)
 	if action != "switch-model" {
-		t.Errorf("decideAction(\"zen-ratelimit\", true, \"retry-poll\") = %q, want \"switch-model\"; reason=%q",
+		t.Errorf("decideAction(\"zen-ratelimit\", true, \"retry-poll\", tmpDir) = %q, want \"switch-model\"; reason=%q",
 			action, reason)
 	}
 	if reason == "" {

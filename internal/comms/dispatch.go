@@ -46,6 +46,11 @@ type dispatchRequest struct {
 	CurrentModel string `json:"current_model,omitempty"`
 	SessionID    string `json:"session_id,omitempty"`
 	HasFallback  bool   `json:"has_fallback,omitempty"`
+
+	// toast
+	Variant string `json:"variant,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // dispatchResponse is the JSON returned to the plugin.
@@ -138,6 +143,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchTick(req)
 	case "exit":
 		return b.dispatchExit(req)
+	case "toast":
+		return b.dispatchToast(req)
 	default:
 		return dispatchResponse{OK: false, Error: "unknown cmd: " + req.Cmd}
 	}
@@ -456,6 +463,18 @@ func (b *Bus) dispatchExit(req dispatchRequest) dispatchResponse {
 	if err := b.DoExit(note); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
+	return dispatchResponse{OK: true}
+}
+
+func (b *Bus) dispatchToast(req dispatchRequest) dispatchResponse {
+	// Log the toast locally (for debugging)
+	b.LogEvent("toast", fmt.Sprintf("[%s] %s: %s", req.Variant, req.Title, req.Message))
+	// Also emit a status update with the toast info so web UI can pick it up
+	_ = b.DoStatus("working", "", StatusPatch{
+		ToastVariant: req.Variant,
+		ToastTitle:   req.Title,
+		ToastMessage: req.Message,
+	})
 	return dispatchResponse{OK: true}
 }
 

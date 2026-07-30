@@ -621,16 +621,19 @@ async function loadShip(name){
     const switchBtn = document.getElementById('ship_model_btn');
     if (s.model) {
       modelEl.textContent = s.model; modelEl.style.display = '';
-      // Populate switch dropdown from the ns_model options (already loaded)
-      const refSel = document.getElementById('ns_model');
-      switchSel.innerHTML = refSel.innerHTML;
-      // Pre-select current model if available
-      for (const opt of switchSel.options) { if (opt.value === s.model) opt.selected = true; }
-      switchSel.style.display = ''; switchBtn.style.display = '';
     } else {
       modelEl.style.display = 'none';
-      switchSel.style.display = 'none'; switchBtn.style.display = 'none';
     }
+    // Always populate switch dropdown from the ns_model options
+    const refSel = document.getElementById('ns_model');
+    switchSel.innerHTML = refSel.innerHTML;
+    // Add placeholder option at top
+    const ph = document.createElement('option');
+    ph.value = ''; ph.textContent = 'Modell wählen...';
+    switchSel.insertBefore(ph, switchSel.firstChild);
+    // Pre-select current model if available
+    for (const opt of switchSel.options) { if (opt.value === s.model) opt.selected = true; }
+    switchSel.style.display = ''; switchBtn.style.display = '';
     const kv = [];
     const add = (k,v)=>{ if(v) kv.push(`<b>${k}</b><span>${esc(v)}</span>`); };
     add('Projekt', s.project);

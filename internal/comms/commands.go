@@ -232,6 +232,15 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if patch.Model != "" {
 		rec.Model = patch.Model
 	}
+	if patch.ToastVariant != "" {
+		rec.ToastVariant = patch.ToastVariant
+	}
+	if patch.ToastTitle != "" {
+		rec.ToastTitle = patch.ToastTitle
+	}
+	if patch.ToastMessage != "" {
+		rec.ToastMessage = patch.ToastMessage
+	}
 
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {

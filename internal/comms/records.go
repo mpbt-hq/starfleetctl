@@ -34,6 +34,11 @@ type StatusRecord struct {
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
 
+	// Toast fields (from plugin commands, shown in web UI).
+	ToastVariant string `json:"toast_variant,omitempty"`
+	ToastTitle   string `json:"toast_title,omitempty"`
+	ToastMessage string `json:"toast_message,omitempty"`
+
 	// Task-status fields (written by Go CLI / status report).
 	Task       string `json:"task,omitempty"`
 	Progress   int    `json:"progress,omitempty"`
@@ -50,16 +55,19 @@ type StatusRecord struct {
 // set. Progress < 0 means "not specified" so a caller can distinguish "leave
 // unchanged" from "set to 0".
 type StatusPatch struct {
-	Task       string
-	Progress   int
-	Blocker    string
-	ETA        string
-	Branch     string
-	Note       string
-	LaunchType string
-	Parent     string
-	Provider   string
-	Model      string
+	Task         string
+	Progress     int
+	Blocker      string
+	ETA          string
+	Branch       string
+	Note         string
+	LaunchType   string
+	Parent       string
+	Provider     string
+	Model        string
+	ToastVariant string
+	ToastTitle   string
+	ToastMessage string
 }
 
 // msgRecord mirrors one msgs/<id>.json line (new format) or legacy .tsv line.
