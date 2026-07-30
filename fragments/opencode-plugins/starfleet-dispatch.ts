@@ -173,7 +173,15 @@ function handleMessage(
       const src = `[model-switch from=${msg.from}]`
       tickLog(`${src}: switching to ${targetModel}`)
       toastBus('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${targetModel}`, 5000)
-      ;(async () => { doSwitchModel(await resolveSid(), targetModel, src) })()
+      ;(async () => {
+        try {
+          await doSwitchModel(await resolveSid(), targetModel, src)
+        } catch (e) {
+          const emsg = `${src}: handler crashed: ${String(e).slice(0, 120)}`
+          tickLog(emsg)
+          toastBus('error', 'starfleet-dispatch', emsg, 8000)
+        }
+      })()
       return true
     }
   }
@@ -196,7 +204,15 @@ function handleMessage(
           const src = `[command model from=${msg.from}]`
           tickLog(`${src}: switching to ${args}`)
           toastBus('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${args}`, 5000)
-          ;(async () => { doSwitchModel(await resolveSid(), args, src) })()
+          ;(async () => {
+            try {
+              await doSwitchModel(await resolveSid(), args, src)
+            } catch (e) {
+              const emsg = `${src}: handler crashed: ${String(e).slice(0, 120)}`
+              tickLog(emsg)
+              toastBus('error', 'starfleet-dispatch', emsg, 8000)
+            }
+          })()
           return true
         }
         case 'quit': {

@@ -28,5 +28,5 @@ defer.
    different provider/model and continue. The fleet console already sees the error.
 
 4. **model directive.** Ships can switch models at runtime via comms:
-   `starfleetctl comms cmd <ship> "setModel <model-name>"`. If you receive
+   `starfleetctl comms cmd <ship> "model <model-name>"`. If you receive
    this directive, execute it and confirm the switch.
