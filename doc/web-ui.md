@@ -158,6 +158,7 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 | `/api/tasks` | GET | All dashboard topics (project tasks) |
 | `/api/task` | POST | Create or update a task (JSON body: `{title, desc, assign}` or `{slug, status}`) |
 | `/api/tell` | POST | Send a message (JSON body: `{target, text}` or form: `target` + `text`) |
+| `/api/cmd` | POST | Post a command verb to a ship (JSON body: `{target, verb, args}`). Used for `setModel`, etc. |
 | `/api/identity` | GET | Viewing ship's identity (`{ship_id, handle, project}`) |
 | `/api/models` | GET | Available models for ship launch (from `models.yaml`) |
 | `/api/ship` | POST | Launch a new ship (JSON body: `{name, model, provider, parent}`) |
@@ -188,7 +189,8 @@ Browser  ──HTTP──▶  starfleetctl web start
                        ├── /api/asks      ──▶ (filtered msgs)
                        ├── /api/events    ──▶ comms events.log
                        ├── /api/tasks     ──▶ dashboard/topics/*.md
-                       ├── /api/tell      ──▶ comms tell/broadcast
+                        ├── /api/tell      ──▶ comms tell/broadcast
+                        ├── /api/cmd       ──▶ comms command
                        ├── /api/models    ──▶ models.yaml
                        ├── /api/ship      ──▶ session.LaunchShip()
                        ├── /api/timers    ──▶ timer.Store.List()

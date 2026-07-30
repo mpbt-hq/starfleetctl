@@ -691,8 +691,8 @@ async function shipSwitchModel(){
   const model = sel.value;
   if (!model){ toast('Kein Modell ausgewählt', true); return; }
   try {
-    await api('/api/tell', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({target: shipCurrent, text: 'setModel '+model})});
+    await api('/api/cmd', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target: shipCurrent, verb: 'setModel', args: model})});
     toast('Modellwechsel angefordert: '+model);
     localStorage.setItem('fleet_model', model);
   } catch(e){ toast('Fehler: '+esc(e.message), true); }

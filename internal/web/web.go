@@ -95,6 +95,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/events", s.apiEvents)
 	s.mux.HandleFunc("/api/tasks", s.apiTasks)
 	s.mux.HandleFunc("/api/tell", s.apiTell)
+	s.mux.HandleFunc("/api/cmd", s.apiCmd)
 	s.mux.HandleFunc("/api/task", s.apiTask)
 	s.mux.HandleFunc("/api/identity", s.apiIdentity)
 	s.mux.HandleFunc("/api/models", s.apiModels)
@@ -272,6 +273,38 @@ func (s *Server) apiTell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"id": id, "target": target, "reply_to": replyTo})
+}
+
+// apiCmd posts a command (type="command") to a ship — same as
+// `comms cmd <target> <verb> [args]`. Unlike apiTell, the payload
+// is dispatched through the plugin's command handler, not injected
+// as a system prompt.
+func (s *Server) apiCmd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	var p struct {
+		Target string `json:"target"`
+		Verb   string `json:"verb"`
+		Args   string `json:"args"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	p.Target = strings.TrimSpace(p.Target)
+	p.Verb = strings.TrimSpace(p.Verb)
+	if p.Target == "" || p.Verb == "" {
+		writeErr(w, 400, "target and verb are required")
+		return
+	}
+	id, err := s.bus.Command(p.Target, p.Verb, p.Args)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"id": id, "target": p.Target, "verb": p.Verb})
 }
 
 // apiTask captures or mutates a dashboard task via the sanctioned task
