@@ -17,8 +17,10 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/metux/starfleetctl/internal/comms"
@@ -109,10 +111,58 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
-// Run starts the HTTP server (blocking).
+// Run starts the HTTP server (blocking). Registers the web frontend on the
+// fleet board (heartbeat) and refreshes it periodically so the server appears
+// as a live ship, exactly like any CLI or opencode ship.
 func (s *Server) Run() error {
+	cfg, cerr := config.Load(s.Root)
+	if cerr != nil {
+		cfg = config.DefaultConfig()
+	}
+	interval := time.Duration(cfg.Comms.HeartbeatMS) * time.Millisecond
+	if interval <= 0 {
+		interval = 300 * time.Second
+	}
+
+	// Post initial heartbeat to register on the fleet board.
+	_ = s.bus.DoStatus("idle", "web console", comms.StatusPatch{
+		LaunchType: "web",
+	})
+
+	// Periodic heartbeat refresh so the board sees a live ship.
+	done := make(chan struct{})
+	go s.heartbeatLoop(interval, done)
+
+	// Clean shutdown on SIGINT/SIGTERM: clear heartbeat from board.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		close(done)
+		_ = s.bus.DoClear()
+		os.Exit(0)
+	}()
+
 	fmt.Printf("starfleet web: listening on http://%s  (workspace: %s)\n", s.Addr, s.Root)
-	return http.ListenAndServe(s.Addr, s.mux)
+	err := http.ListenAndServe(s.Addr, s.mux)
+	close(done)
+	_ = s.bus.DoClear()
+	return err
+}
+
+// heartbeatLoop refreshes the heartbeat timestamp every interval until done
+// is closed.  Matches the pattern used by comms-monitor-loop (DoTouch).
+func (s *Server) heartbeatLoop(interval time.Duration, done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = s.bus.DoTouch()
+		case <-done:
+			return
+		}
+	}
 }
 
 // ---- API helpers ----
