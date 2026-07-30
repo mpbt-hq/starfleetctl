@@ -123,6 +123,33 @@ minimal file and it shows up in the active list automatically.
 | `dashboard reindex` | Refresh DASHBOARD.md index |
 | `dashboard commit` | Commit + push index |
 
+## Reports
+
+Submit and query structured fleet reports (test results, build summaries, CI
+status, etc.) via CLI or web UI. Each report has a title, optional subtitle,
+Markdown body, tags, a dashboard task reference, and file attachments.
+
+### Key commands
+
+```sh
+starfleetctl reports submit "Title" \
+    --subtitle "one-liner" \
+    --body "Markdown body text" \
+    --body-file path/to/log \
+    --tags "ci,build" \
+    --task-ref xlibre/some-task \
+    --attachment path/to/file
+
+starfleetctl reports list                          # newest first
+starfleetctl reports list --ship Enterprise        # by ship
+starfleetctl reports list --tag ci --json          # filter + JSON
+starfleetctl reports show <id>
+starfleetctl reports delete <id>
+```
+
+Attachments are uploaded to the filestore (`file put` → `/api/store/<name>`).
+See `doc/reports.md` for full reference and web UI walkthrough.
+
 ## Starfleetctl CLI
 
 A Go CLI for fleet coordination. Bootstrap: `./starfleet-bootstrap` (updates `.starfleet-ai/`).
@@ -137,6 +164,7 @@ Full reference: **`reference.md`** in this skill's directory.
 | **Task** | `task capture/assign/unassign/status/rm/purge` |
 | **Timer** | `timer set/list/cancel` |
 | **Web** | `web start/stop/restart/autostart` |
+| **Reports** | `reports submit/list/show/delete` |
 | **Setup** | `genesis-init`, `self-install`, `agents install-starfleet` |
 | **GitHub (read)** | `github pr view/ci/file-on-branch/wait-green/show-branch-file`, `github backport applies` |
 | **GitHub (write)** | `github pr comment/label/set-body/checkout/amend-push/make`, `github backport commit` |
