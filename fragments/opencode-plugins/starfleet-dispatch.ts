@@ -138,7 +138,7 @@ function handleMessage(
       ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
       : Promise.resolve()
     promise
-      .then(() => client.session.switchModel({ path: { id: sid }, body: { model: targetModel } }))
+      .then(() => client.session.update({ path: { id: sid }, body: { model: targetModel } }))
       .then(() => {
         currentModel.model = targetModel
         tickLog(`${src}: ok → ${targetModel}`)
@@ -272,7 +272,7 @@ function handleMessage(
               ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
               : Promise.resolve()
             promise
-              .then(() => client.session.switchModel({ path: { id: sid }, body: { model: target } }))
+              .then(() => client.session.update({ path: { id: sid }, body: { model: target } }))
               .then(() => {
                 tickLog(`${src}: ok → ${target}`)
                 toastBus('success', 'starfleet-dispatch', `Abort-retry + switch to ${target} done`, 5000)
@@ -371,9 +371,9 @@ async function executeAction(
       ? clearMethod({ path: { id: sessionID } }).then(() => new Promise(r => setTimeout(r, 500)))
       : Promise.resolve()
     promise
-      .then(() => client.session.switchModel({ path: { id: sessionID }, body: { model: targetModel } }))
+      .then(() => client.session.update({ path: { id: sessionID }, body: { model: targetModel } }))
       .then(() => {
-        tickLog(`ERROR-HANDLE ${src}: switchModel ok → ${targetModel}`)
+        tickLog(`ERROR-HANDLE ${src}: update ok → ${targetModel}`)
         return client.session.promptAsync({
           path: { id: sessionID },
           body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
