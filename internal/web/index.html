@@ -467,7 +467,7 @@ async function loadBoard(){
   try {
     const rows = await api('/api/board');
     if (!rows.length){ el.innerHTML = '<div class="empty">keine Agents gemeldet</div>'; return; }
-    el.innerHTML = rows.map(r=>{
+    el.innerHTML = rows.filter(r=>r.agent!==identity.ship_id).map(r=>{
       const stale = r.stale ? ' stale' : '';
       const st = (r.state||'idle');
       const cls = st==='done'?'ok':(st==='blocked'?'bad':(st==='working'||st==='building'?'warn':'dim'));
