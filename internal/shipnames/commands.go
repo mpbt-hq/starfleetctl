@@ -8,7 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/fsutil"
 )
 
 // DoAssignFlagship implements `ship-names assign flagship`: reserve
@@ -44,9 +49,82 @@ func (r *Registry) DoAssign() error {
 	return nil
 }
 
+// currentTTY returns the TTY device path for the current process, or "" if
+// stdin is not a terminal (e.g. piped or background).
+func currentTTY() string {
+	link, err := os.Readlink("/proc/self/fd/0")
+	if err != nil {
+		return ""
+	}
+	if strings.HasPrefix(link, "/dev/") {
+		return link
+	}
+	return ""
+}
+
+// isPIDDead returns true if the given PID is not running.
+func isPIDDead(pid int) bool {
+	return syscall.Kill(pid, 0) != nil
+}
+
+// parseReservation parses a reservation file into its components.
+// Format: <PID>:<timestamp>[:<tty>]
+func parseReservation(data string) (pid int, epoch int64, tty string) {
+	line := firstLine(data)
+	parts := strings.SplitN(line, ":", 3)
+	if len(parts) >= 1 {
+		pid, _ = strconv.Atoi(parts[0])
+	}
+	if len(parts) >= 2 {
+		epoch, _ = strconv.ParseInt(parts[1], 10, 64)
+	}
+	if len(parts) >= 3 {
+		tty = parts[2]
+	}
+	return
+}
+
+// ttyScan scans reservations for a name whose PID is dead and whose TTY
+// matches the current terminal. Returns the name (or "" if none found).
+func (r *Registry) ttyScan() string {
+	entries, err := os.ReadDir(r.ShipsDir)
+	if err != nil {
+		return ""
+	}
+	myTTY := currentTTY()
+	if myTTY == "" {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == ".assign.lock" {
+			continue
+		}
+		safe, ok := fsutil.Safe(e.Name())
+		if !ok {
+			continue
+		}
+		path := filepath.Join(r.ShipsDir, safe)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		pid, _, tty := parseReservation(string(data))
+		if tty != myTTY {
+			continue
+		}
+		if pid > 0 && !isPIDDead(pid) {
+			continue
+		}
+		// Dead PID on same TTY — reclaim this name
+		return e.Name()
+	}
+	return ""
+}
+
 // AssignName picks the first unused name from the pool, falling back to
-// "ws-<pid>" if all are taken.  Returns the name (not printed), for use
-// from the session package.
+// "ws-<pid>" if all are taken. Before scanning free names, it attempts to
+// reuse a reservation whose PID is dead and whose TTY matches the current
+// terminal (supports restart cycles without wasting ship names).
 func (r *Registry) AssignName() (string, error) {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
 		return "", err
@@ -57,6 +135,17 @@ func (r *Registry) AssignName() (string, error) {
 	}
 	defer lh.Close()
 
+	// 1. Try to reclaim a reservation for the same TTY (restart cycle).
+	if name := r.ttyScan(); name != "" {
+		path, err := r.shipFile(name)
+		if err == nil {
+			if err := writeReservation(path); err == nil {
+				return name, nil
+			}
+		}
+	}
+
+	// 2. Pick first truly free name.
 	names, err := r.readNames()
 	if err != nil {
 		return "", err
@@ -77,7 +166,8 @@ func (r *Registry) AssignName() (string, error) {
 }
 
 func writeReservation(path string) error {
-	content := fmt.Sprintf("%d:%d\n", os.Getpid(), time.Now().Unix())
+	tty := currentTTY()
+	content := fmt.Sprintf("%d:%d:%s\n", os.Getpid(), time.Now().Unix(), tty)
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
