@@ -91,8 +91,8 @@
   #talk_body { overflow-y: auto; max-height: 60vh; }
   .terminal { background: #000; color: #00ff00; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px; line-height: 1.3; padding: 8px; border-radius: 8px;
-    overflow-x: auto; white-space: pre; min-height: 200px; max-height: 1200px;
-    overflow-y: auto; border: 1px solid var(--line); }
+    overflow-x: auto; white-space: pre; min-height: 200px; max-height: 70vh;
+    overflow-y: auto; border: 1px solid var(--line); resize: vertical; }
   .terminal .cursor { animation: blink 1s step-end infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   .terminal-controls { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
@@ -305,6 +305,8 @@
       <span class="agent" id="ship_name"></span>
       <span class="pill" id="ship_state"></span>
       <span class="pill" id="ship_model" style="font-size:11px"></span>
+      <select id="ship_model_switch" style="font-size:11px;width:auto;max-width:160px;margin-left:6px;display:none"></select>
+      <button class="sec" id="ship_model_btn" style="font-size:11px;padding:3px 8px;display:none" onclick="shipSwitchModel()">Switch</button>
       <span style="flex:1"></span>
       <span class="pill" style="background:#c33;color:#fff;cursor:pointer" onclick="shipStop()">Stop</span>
       <button class="x" onclick="history.back()">×</button>
@@ -569,10 +571,22 @@ async function loadShip(name){
     const cls = st==='done'?'ok':(st==='blocked'?'bad':(st==='working'||st==='building'?'warn':'dim'));
     document.getElementById('ship_state').className = 'pill '+cls;
     document.getElementById('ship_state').textContent = st;
-    // Show model in header pill
+    // Show model in header pill + populate switch dropdown
     const modelEl = document.getElementById('ship_model');
-    if (s.model) { modelEl.textContent = s.model; modelEl.style.display = ''; }
-    else { modelEl.style.display = 'none'; }
+    const switchSel = document.getElementById('ship_model_switch');
+    const switchBtn = document.getElementById('ship_model_btn');
+    if (s.model) {
+      modelEl.textContent = s.model; modelEl.style.display = '';
+      // Populate switch dropdown from the ns_model options (already loaded)
+      const refSel = document.getElementById('ns_model');
+      switchSel.innerHTML = refSel.innerHTML;
+      // Pre-select current model if available
+      for (const opt of switchSel.options) { if (opt.value === s.model) opt.selected = true; }
+      switchSel.style.display = ''; switchBtn.style.display = '';
+    } else {
+      modelEl.style.display = 'none';
+      switchSel.style.display = 'none'; switchBtn.style.display = 'none';
+    }
     const kv = [];
     const add = (k,v)=>{ if(v) kv.push(`<b>${k}</b><span>${esc(v)}</span>`); };
     add('Projekt', s.project);
@@ -621,10 +635,23 @@ async function loadShipChat(name){
       </div>`);
       (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
     };
-    roots.forEach(r=>walk(r, 0));
+    roots.reverse().forEach(r=>walk(r, 0));
     el.innerHTML = out.join('') || '<div class="empty">keine Nachrichten</div>';
     el.scrollTop = 0;
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+
+async function shipSwitchModel(){
+  if (!shipCurrent) return;
+  const sel = document.getElementById('ship_model_switch');
+  const model = sel.value;
+  if (!model){ toast('Kein Modell ausgewählt', true); return; }
+  try {
+    await api('/api/tell', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target: shipCurrent, text: 'setModel '+model})});
+    toast('Modellwechsel angefordert: '+model);
+    localStorage.setItem('fleet_model', model);
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 async function shipSend(){
   if (!shipCurrent) return;
@@ -704,7 +731,7 @@ async function loadScreen(){
   const statusEl = document.getElementById('term_status');
   try {
     let url = '/api/ship/' + encodeURIComponent(shipCurrent) + '/screen';
-    if (termMode === 'scrollback') url += '?scrollback=500';
+    if (termMode === 'scrollback') url += '?scrollback=2000';
     const data = await api(url);
     if (data.lines && data.lines.length > 0) {
       el.innerHTML = data.lines.map(l => esc(l)).join('\n');
