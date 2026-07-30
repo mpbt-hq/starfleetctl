@@ -111,6 +111,7 @@ type inboxEntryJSON struct {
 	Acked      bool   `json:"acked"`
 	Text       string `json:"text"`
 	ReplyTo    string `json:"reply_to,omitempty"`
+	Type       string `json:"type,omitempty"`
 }
 
 // DoInboxJSON implements `comms inbox --json`.
@@ -127,6 +128,7 @@ func (b *Bus) DoInboxJSON() error {
 			Acked:      b.acked(m.ID, b.ShipID),
 			Text:       m.Text,
 			ReplyTo:    m.ReplyTo,
+			Type:       m.Type,
 		})
 	}
 	return printJSON(orEmpty(out))
@@ -140,6 +142,7 @@ type msgEntryJSON struct {
 	Acks       int    `json:"acks"`
 	Text       string `json:"text"`
 	ReplyTo    string `json:"reply_to,omitempty"`
+	Type       string `json:"type,omitempty"`
 }
 
 // DoMsgsJSON implements `comms msgs --json`.
@@ -149,8 +152,14 @@ func (b *Bus) DoMsgsJSON() error {
 	for _, m := range msgs {
 		nacks := b.ackedCount(m.ID)
 		out = append(out, msgEntryJSON{
-			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: nacks, Text: m.Text, ReplyTo: m.ReplyTo,
+			ID:         m.ID,
+			AgeSeconds: now() - m.Epoch,
+			From:       m.From,
+			Target:     m.Target,
+			Acks:       nacks,
+			Text:       m.Text,
+			ReplyTo:    m.ReplyTo,
+			Type:       m.Type,
 		})
 	}
 	return printJSON(out)
@@ -167,8 +176,14 @@ func (b *Bus) Conversation(ship string) []msgEntryJSON {
 			continue
 		}
 		out = append(out, msgEntryJSON{
-			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: b.ackedCount(m.ID), Text: m.Text, ReplyTo: m.ReplyTo,
+			ID:         m.ID,
+			AgeSeconds: now() - m.Epoch,
+			From:       m.From,
+			Target:     m.Target,
+			Acks:       b.ackedCount(m.ID),
+			Text:       m.Text,
+			ReplyTo:    m.ReplyTo,
+			Type:       m.Type,
 		})
 	}
 	return out
@@ -191,8 +206,14 @@ func (b *Bus) ConversationWithViewer(ship, viewer string) []msgEntryJSON {
 			continue
 		}
 		out = append(out, msgEntryJSON{
-			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: b.ackedCount(m.ID), Text: m.Text, ReplyTo: m.ReplyTo,
+			ID:         m.ID,
+			AgeSeconds: now() - m.Epoch,
+			From:       m.From,
+			Target:     m.Target,
+			Acks:       b.ackedCount(m.ID),
+			Text:       m.Text,
+			ReplyTo:    m.ReplyTo,
+			Type:       m.Type,
 		})
 	}
 	return out
@@ -228,8 +249,14 @@ func (b *Bus) AllMsgRecordsJSON() []msgEntryJSON {
 	out := make([]msgEntryJSON, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, msgEntryJSON{
-			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Target: m.Target, Acks: b.ackedCount(m.ID), Text: m.Text,
+			ID:         m.ID,
+			AgeSeconds: now() - m.Epoch,
+			From:       m.From,
+			Target:     m.Target,
+			Acks:       b.ackedCount(m.ID),
+			Text:       m.Text,
+			ReplyTo:    m.ReplyTo,
+			Type:       m.Type,
 		})
 	}
 	return out
@@ -244,8 +271,13 @@ func (b *Bus) AllInboxRecordsJSON() []inboxEntryJSON {
 			continue
 		}
 		out = append(out, inboxEntryJSON{
-			ID: m.ID, AgeSeconds: now() - m.Epoch, From: m.From,
-			Acked: b.acked(m.ID, b.ShipID), Text: m.Text,
+			ID:         m.ID,
+			AgeSeconds: now() - m.Epoch,
+			From:       m.From,
+			Acked:      b.acked(m.ID, b.ShipID),
+			Text:       m.Text,
+			ReplyTo:    m.ReplyTo,
+			Type:       m.Type,
 		})
 	}
 	return out
