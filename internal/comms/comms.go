@@ -267,7 +267,7 @@ func (b *Bus) allTargetsAcked(id string, live map[string]bool) bool {
 	return true
 }
 
-func (b *Bus) logEvent(kind, note string) {
+func (b *Bus) LogEvent(kind, note string) {
 	f, err := os.OpenFile(b.Events, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return // best-effort, matches bash's `|| true`

@@ -22,10 +22,14 @@ import (
 // controller, BLOCKS for the answer, and emits a permissionDecision JSON to
 // stdout (allow/deny/ask).
 //
+// While blocking on the answer the ship's heartbeat is kept alive (touch +
+// status "waiting-permission") so the board shows what is happening and the
+// ship does not appear stale.
+//
 // Fail-safe: Claude Code's own hook timeout FAILS OPEN (the tool proceeds),
 // so we enforce our own timeout and return a decision first:
 //
-//	$AGENT_PERM_TIMEOUT           seconds to wait (default 60; keep it <
+//	$AGENT_PERM_TIMEOUT           seconds to wait (default 10; keep it <
 //	                              the hook's Claude Code "timeout" setting)
 //	$AGENT_PERM_TIMEOUT_DECISION  decision on timeout (default deny)
 func permission(root string) int {
@@ -35,7 +39,7 @@ func permission(root string) int {
 		return 0
 	}
 
-	timeout := int64(60)
+	timeout := int64(10)
 	if v := os.Getenv("AGENT_PERM_TIMEOUT"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			timeout = n
@@ -85,19 +89,36 @@ func permission(root string) int {
 		return 0
 	}
 
+	bus.DoStatus("waiting-permission", fmt.Sprintf("ask: %s %s", tool, summary), comms.StatusPatch{})
+	bus.LogEvent("permission", fmt.Sprintf("ask: %s %s", tool, summary))
+
 	ctrl := comms.Controller()
-	ans, err := bus.AskAndWait(question, ctrl, timeout)
+
+	heartbeatFn := func() {
+		bus.DoStatus("waiting-permission", fmt.Sprintf("ask: %s %s", tool, summary), comms.StatusPatch{})
+		bus.DoTouch()
+	}
+
+	ans, err := bus.AskAndWait(question, ctrl, timeout, heartbeatFn)
 	if err != nil {
+		bus.LogEvent("permission", fmt.Sprintf("timeout after %ds: %s %s", timeout, tool, summary))
+		bus.DoStatus("idle", "permission timeout", comms.StatusPatch{})
 		emitPermission(onTimeout, fmt.Sprintf("control agent did not answer within %ds (fail-%s)", timeout, onTimeout))
 		return 0
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ans)) {
 	case "allow", "yes", "y", "approve", "ok", "1":
+		bus.LogEvent("permission", fmt.Sprintf("allowed: %s %s", tool, summary))
+		bus.DoStatus("idle", "permission allowed", comms.StatusPatch{})
 		emitPermission("allow", "approved by control agent")
 	case "deny", "no", "n", "block", "0":
+		bus.LogEvent("permission", fmt.Sprintf("denied: %s %s", tool, summary))
+		bus.DoStatus("idle", "permission denied", comms.StatusPatch{})
 		emitPermission("deny", "denied by control agent")
 	default:
+		bus.LogEvent("permission", fmt.Sprintf("unrecognised reply '%s': %s %s", ans, tool, summary))
+		bus.DoStatus("idle", "permission unrecognised", comms.StatusPatch{})
 		emitPermission(onTimeout, "unrecognised control reply: "+ans)
 	}
 	return 0

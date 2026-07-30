@@ -151,7 +151,7 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	// User-initiated aborts are expected, not actionable fleet events.
 	// Suppress: log locally only, do not notify the flagship.
 	if IsUserAbort(detail) {
-		b.logEvent("plugin", fmt.Sprintf("error (user abort, suppressed): %s", detail))
+		b.LogEvent("plugin", fmt.Sprintf("error (user abort, suppressed): %s", detail))
 		return nil
 	}
 
@@ -171,7 +171,7 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	if tag != "" {
 		label = " [" + tag + "]"
 	}
-	b.logEvent("plugin", fmt.Sprintf("error%s: %s", label, detail))
+	b.LogEvent("plugin", fmt.Sprintf("error%s: %s", label, detail))
 
 	// Transient model errors: tell the affected ship to simply resume its
 	// last prompt (re-run with an empty/synthetic prompt) instead of only
@@ -183,9 +183,9 @@ func (b *Bus) DoErrorHandle(args []string) error {
 			tag, detail,
 		)
 		if _, err := b.Tell(shipID, restartMsg, ""); err != nil {
-			b.logEvent("plugin", fmt.Sprintf("error: failed to queue restart directive to %s: %v", shipID, err))
+			b.LogEvent("plugin", fmt.Sprintf("error: failed to queue restart directive to %s: %v", shipID, err))
 		} else {
-			b.logEvent("plugin", fmt.Sprintf("error: queued auto-restart directive → %s [%s]", shipID, tag))
+			b.LogEvent("plugin", fmt.Sprintf("error: queued auto-restart directive → %s [%s]", shipID, tag))
 		}
 	}
 
@@ -195,7 +195,7 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	notifyFlagship := true
 	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
 		notifyFlagship = false
-		b.logEvent("plugin", fmt.Sprintf("error: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
+		b.LogEvent("plugin", fmt.Sprintf("error: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
 	}
 
 	if notifyFlagship {

@@ -107,7 +107,7 @@ func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) 
 	if err := os.WriteFile(mpath, data, 0o644); err != nil {
 		return "", err
 	}
-	b.logEvent("directive", fmt.Sprintf("%s → %s: %s", id, target, text))
+	b.LogEvent("directive", fmt.Sprintf("%s → %s: %s", id, target, text))
 	return id, nil
 }
 
@@ -245,7 +245,7 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	if b.Project != "" {
 		proj = fmt.Sprintf("[%s] ", b.Project)
 	}
-	b.logEvent("status", fmt.Sprintf("%s %s%s", state, proj, note))
+	b.LogEvent("status", fmt.Sprintf("%s %s%s", state, proj, note))
 	suffix := ""
 	if b.Project != "" {
 		suffix = fmt.Sprintf(" (%s)", b.Project)
@@ -304,7 +304,7 @@ func (b *Bus) DoClear() error {
 	}
 	defer lock.Close()
 	_ = os.Remove(b.sfile(b.ShipID))
-	b.logEvent("clear", "")
+	b.LogEvent("clear", "")
 	fmt.Printf("comms: cleared heartbeat for '%s'\n", b.ShipID)
 	return nil
 }
@@ -326,7 +326,7 @@ func (b *Bus) DoExit(reason string) error {
 	if reason == "" {
 		reason = "exit"
 	}
-	b.logEvent("exit", reason)
+	b.LogEvent("exit", reason)
 	return nil
 }
 
@@ -359,7 +359,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 			}
 		}
 		acked = append(acked, inboxMsg{ID: m.ID, From: m.From, Text: m.Text})
-		b.logEvent("ack", m.ID+" init-seen")
+		b.LogEvent("ack", m.ID+" init-seen")
 	}
 
 	// 2. Prune stale heartbeats + old directives.
@@ -396,7 +396,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 		}
 	}
 	if statusCnt+msgCnt > 0 {
-		b.logEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
+		b.LogEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
 	}
 
 	// 4. Set status to idle.
@@ -502,7 +502,7 @@ func (b *Bus) DoAck(id, note string) error {
 		return err
 	}
 
-	b.logEvent("ack", fmt.Sprintf("%s %s", id, note))
+	b.LogEvent("ack", fmt.Sprintf("%s %s", id, note))
 	noteSuffix := ""
 	if note != "" {
 		noteSuffix = " — " + note
@@ -842,7 +842,7 @@ func (b *Bus) DoPrune() error {
 		}
 	}
 
-	b.logEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
+	b.LogEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
 	fmt.Printf("comms: pruned %d stale heartbeat(s), %d spent directive(s)\n", statusCnt, msgCnt)
 	return nil
 }
@@ -852,7 +852,11 @@ func (b *Bus) DoPrune() error {
 // returns the raw answer text.  This is the same logic as DoAsk but returns
 // (string, error) instead of calling os.Exit(3) on timeout — suitable for
 // use from hook subcommands that must not blow away the whole process.
-func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error) {
+//
+// onPoll is an optional variadic — if set, the function is called every
+// polling iteration so the caller can refresh heartbeat / status while
+// blocking for the reply.
+func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64, onPoll ...func()) (string, error) {
 	b.warnID()
 	qid, err := b.post(ctrl, "[ask] "+question, "", "", "", "ship")
 	if err != nil {
@@ -886,6 +890,9 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64) (string, error
 		}
 		if time.Now().After(deadline) {
 			return "", fmt.Errorf("no reply to %s within %ds", qid, timeoutSec)
+		}
+		for _, fn := range onPoll {
+			fn()
 		}
 		time.Sleep(5 * time.Second)
 	}

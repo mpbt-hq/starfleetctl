@@ -161,6 +161,7 @@ func RunCmd(root string, args []string) int {
 	// Set env vars
 	os.Setenv("STARFLEET_SHIP_ID", shipID)
 	os.Setenv("STARFLEET_ROLE", role)
+	os.Setenv("OC_IGNORE_QUOTA_UI", "1")
 	if role == "ship" {
 		os.Setenv("STARFLEET_TARGET", shipnames.FlagshipName(root))
 	} else {

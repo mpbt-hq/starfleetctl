@@ -299,7 +299,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 		return dispatchResponse{OK: false, Error: "error: need detail"}
 	}
 	if IsUserAbort(req.Detail) {
-		b.logEvent("plugin", fmt.Sprintf("error (user abort, suppressed): %s", req.Detail))
+		b.LogEvent("plugin", fmt.Sprintf("error (user abort, suppressed): %s", req.Detail))
 		return dispatchResponse{OK: true}
 	}
 	tag := ClassifyModelError(req.Detail)
@@ -308,7 +308,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 	if tag != "" {
 		label = " [" + tag + "]"
 	}
-	b.logEvent("plugin", fmt.Sprintf("error%s: %s", label, req.Detail))
+	b.LogEvent("plugin", fmt.Sprintf("error%s: %s", label, req.Detail))
 	shipID := b.ShipID
 	if req.Ship != "" {
 		shipID = req.Ship
@@ -320,7 +320,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 	notifyFlagship := true
 	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
 		notifyFlagship = false
-		b.logEvent("plugin", fmt.Sprintf("error: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
+		b.LogEvent("plugin", fmt.Sprintf("error: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
 	}
 
 	if notifyFlagship {
@@ -348,7 +348,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 
 	// 1. User abort → ignore.
 	if IsUserAbort(detail) {
-		b.logEvent("plugin", fmt.Sprintf("error-handle (user abort, suppressed): %s", detail))
+		b.LogEvent("plugin", fmt.Sprintf("error-handle (user abort, suppressed): %s", detail))
 		return dispatchResponse{OK: true, Action: "ignore", Reason: "user abort"}
 	}
 
@@ -361,7 +361,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	if tag != "" {
 		label = " [" + tag + "]"
 	}
-	b.logEvent("plugin", fmt.Sprintf("error-handle%s: %s (source=%s)", label, detail, req.Source))
+	b.LogEvent("plugin", fmt.Sprintf("error-handle%s: %s (source=%s)", label, detail, req.Source))
 
 	// Transient model errors that auto-restart: do NOT notify the flagship.
 	// The ship will simply resume its last prompt; the flagship only needs
@@ -369,7 +369,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	notifyFlagship := true
 	if tag == "streaming-response-failed" || tag == "resource-exhausted" {
 		notifyFlagship = false
-		b.logEvent("plugin", fmt.Sprintf("error-handle: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
+		b.LogEvent("plugin", fmt.Sprintf("error-handle: transient auto-restart [%s], suppressing flagship notify for %s", tag, shipID))
 	}
 
 	if notifyFlagship {
@@ -379,7 +379,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	}
 
 	// 4. Policy decision.
-	action, reason := decideAction(tag, req.HasFallback, req.Source)
+	action, reason := decideAction(tag, req.HasFallback, req.Source, b.Root)
 	target := ""
 	if action == "switch-model" {
 		cfg, err := config.Load(b.Root)
@@ -406,7 +406,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 // Transient errors → retry (just re-prompt, model is fine).
 // Hard errors → switch-model (need different provider/model).
 // Unknown → ignore (safe default).
-func decideAction(tag string, hasFallback bool, source string) (action, reason string) {
+func decideAction(tag string, hasFallback bool, source string, root string) (action, reason string) {
 	switch tag {
 	case "nim-overload":
 		return "retry", "transient provider overload, retry alone should suffice"
@@ -417,7 +417,9 @@ func decideAction(tag string, hasFallback bool, source string) (action, reason s
 	case "no-provider":
 		return "retry", "no provider available for model, transient pool rotation, retry alone should suffice"
 	case "zen-ratelimit":
-		if hasFallback {
+		// Check config directly for fallback model (plugin's has_fallback is unreliable)
+		cfg, err := config.Load(root)
+		if err == nil && cfg.Comms.FallbackModel != "" {
 			return "switch-model", "quota/rate limit exhausted, switch to fallback model"
 		}
 		return "retry", "quota/rate limit but no fallback configured, retry anyway"
@@ -442,7 +444,7 @@ func (b *Bus) dispatchTick(req dispatchRequest) dispatchResponse {
 	if note == "" {
 		note = "tick"
 	}
-	b.logEvent("tick", note)
+	b.LogEvent("tick", note)
 	return dispatchResponse{OK: true}
 }
 
