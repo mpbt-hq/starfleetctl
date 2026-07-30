@@ -141,6 +141,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchClear()
 	case "tick":
 		return b.dispatchTick(req)
+	case "seen_mark":
+		return b.dispatchSeenMark(req)
 	case "exit":
 		return b.dispatchExit(req)
 	case "toast":
@@ -452,6 +454,21 @@ func (b *Bus) dispatchTick(req dispatchRequest) dispatchResponse {
 		note = "tick"
 	}
 	b.LogEvent("tick", note)
+	return dispatchResponse{OK: true}
+}
+
+// dispatchSeenMark implements `cmd: "seen_mark"` — marks a message as seen/acked
+// for the current ship by moving it from unseen/ to seen/. This is the
+// lightweight "I've processed this message" counterpart to the full DoAck
+// (which prints a human-facing line). The plugin calls this after injecting
+// a directive so it doesn't reappear on the next inbox poll.
+func (b *Bus) dispatchSeenMark(req dispatchRequest) dispatchResponse {
+	if req.ID == "" {
+		return dispatchResponse{OK: false, Error: "seen_mark: need id"}
+	}
+	if err := b.DoAck(req.ID, "seen-mark"); err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
 	return dispatchResponse{OK: true}
 }
 

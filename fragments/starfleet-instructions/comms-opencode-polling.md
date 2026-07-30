@@ -27,6 +27,6 @@ defer.
    cap) or `nim-overload` error, do **not** retry the same model — switch to a
    different provider/model and continue. The fleet console already sees the error.
 
-4. **setModel directive.** Ships can switch models at runtime via comms:
-   `starfleetctl comms tell <ship> "setModel <model-name>"`. If you receive
+4. **model directive.** Ships can switch models at runtime via comms:
+   `starfleetctl comms cmd <ship> "setModel <model-name>"`. If you receive
    this directive, execute it and confirm the switch.

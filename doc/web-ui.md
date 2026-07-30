@@ -100,7 +100,7 @@ Fleet scheduling with three timer types:
 | Type | Purpose |
 |---|---|
 | **ship** | Send a directive to a specific agent or fleet |
-| **command** | Send a structured command (e.g. `setModel`) to an agent |
+| **command** | Send a structured command (e.g. `model`) to an agent |
 | **system** | Execute workspace-level commands directly in the worker |
 
 System commands (executed directly in the timer worker, no agent needed):
@@ -158,7 +158,7 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 | `/api/tasks` | GET | All dashboard topics (project tasks) |
 | `/api/task` | POST | Create or update a task (JSON body: `{title, desc, assign}` or `{slug, status}`) |
 | `/api/tell` | POST | Send a message (JSON body: `{target, text}` or form: `target` + `text`) |
-| `/api/cmd` | POST | Post a command verb to a ship (JSON body: `{target, verb, args}`). Used for `setModel`, etc. |
+| `/api/cmd` | POST | Post a command verb to a ship (JSON body: `{target, verb, args}`). Used for `model`, etc. |
 | `/api/identity` | GET | Viewing ship's identity (`{ship_id, handle, project}`) |
 | `/api/models` | GET | Available models for ship launch (from `models.yaml`) |
 | `/api/ship` | POST | Launch a new ship (JSON body: `{name, model, provider, parent}`) |

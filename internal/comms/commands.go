@@ -630,7 +630,7 @@ func (b *Bus) DoPost(target string, words []string, useStdin bool, attachPath, r
 
 // Command posts a command directive (type="command") to the target.
 // Commands are structurally different from regular directives: they carry
-// a verb (setModel, /quit, /reset, etc.) and are handled by the plugin's
+// a verb (model, /quit, /reset, etc.) and are handled by the plugin's
 // command dispatch, not injected as system prompts.
 func (b *Bus) Command(target, verb, args string) (string, error) {
 	text := verb
