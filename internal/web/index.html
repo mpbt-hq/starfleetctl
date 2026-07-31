@@ -193,6 +193,28 @@
       </div>
       <div class="actions"><button onclick="taskNew()">Erfassen</button></div>
     </div>
+    <div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <span class="muted">Filter:</span>
+      <select id="tf_status" onchange="taskFilterChange()">
+        <option value="">Status: alle</option>
+        <option value="open">open</option>
+        <option value="assigned">assigned</option>
+        <option value="in-progress">in-progress</option>
+        <option value="done">done</option>
+        <option value="parked">parked</option>
+      </select>
+      <select id="tf_ship" onchange="taskFilterChange()"><option value="">Schiff: alle</option></select>
+      <select id="tf_cat" onchange="taskFilterChange()"><option value="">Kategorie: alle</option></select>
+      <span class="muted">Sortieren:</span>
+      <select id="tf_sort" onchange="taskFilterChange()">
+        <option value="status" selected>Status</option>
+        <option value="ship">Schiff</option>
+        <option value="cat">Kategorie</option>
+        <option value="title">Titel</option>
+        <option value="created">Erstellt</option>
+      </select>
+      <button class="sec" id="tf_dir" onclick="taskToggleDir()" style="width:auto;padding:6px 10px">↑</button>
+    </div>
     <div class="card" id="tasklist"></div>
   </section>
 
@@ -870,34 +892,96 @@ async function loadTasks(){
   const el = document.getElementById('tasklist');
   try {
     const [rows, board] = await Promise.all([api('/api/tasks'), api('/api/board')]);
-    if (!rows.length){ el.innerHTML = '<div class="empty">keine Tasks</div>'; return; }
-    // Live "in Bearbeitung" marker: ships in state working report their
-    // current task via the heartbeat (task/progress status fields).
-    const workers = {};
-    for (const r of board) if ((r.state==='working'||r.state==='building') && r.task) workers[r.task] = r.agent;
-    // All ships for the assign dropdown ("auto" => flagship picks a free ship).
-    const ships = [...new Set(board.map(r=>r.agent))].sort();
-    el.innerHTML = rows.map(r=>{
-      const cls = (r.status==='done')?'ok':(r.status==='assigned')?'warn':'dim';
-      const worker = workers[r.slug];
-      const assignOpts = '<option value="__auto__">auto — Flagschiff wählt</option>' +
-        ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-      return `<div class="card">
-        <div class="row"><b class="grow">${esc(r.title)}</b>
-          <span class="pill ${cls}">${esc(r.status)}</span></div>
-        <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)} bearbeitet gerade`:''}</div>
-        <div class="actions">
-          <select id="st_${esc(r.slug)}" style="width:auto">
-            ${['open','assigned','in-progress','done','parked'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}
-          </select>
-          <button class="sec" onclick="taskStatus('${esc(r.slug)}')">Status</button>
-          <select id="as_${esc(r.slug)}" style="width:auto">${assignOpts}</select>
-          <button class="sec" onclick="taskAssign('${esc(r.slug)}')">Zuweisen</button>
-          <button class="sec" onclick="taskUnassign('${esc(r.slug)}')">Frei</button>
-        </div>
-      </div>`;
-    }).join('');
+    taskState.rows = rows; taskState.board = board;
+    renderTasks();
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+
+// Client-side filter/sort state for the task board. Filters are re-applied on
+// every render, so status/assign actions (which reload the list) keep them.
+const taskState = { rows:[], board:[], status:'', ship:'', cat:'', sort:'status', dir:1 };
+
+function taskFilterChange(){
+  taskState.status = document.getElementById('tf_status').value;
+  taskState.ship   = document.getElementById('tf_ship').value;
+  taskState.cat    = document.getElementById('tf_cat').value;
+  taskState.sort   = document.getElementById('tf_sort').value;
+  renderTasks();
+}
+function taskToggleDir(){
+  taskState.dir = -taskState.dir;
+  document.getElementById('tf_dir').textContent = taskState.dir>0?'↑':'↓';
+  renderTasks();
+}
+
+// taskPrefix extracts the category (path prefix) from a topic slug, e.g.
+// "starfleet/plan-mode-dashboard-access" -> "starfleet".
+function taskPrefix(slug){ const i = slug.indexOf('/'); return i<0 ? slug : slug.slice(0,i); }
+
+// Status sort order — stable priority list; unknown statuses sort last.
+const taskStatusRank = {'':0,'open':1,'assigned':2,'in-progress':3,'parked':4,'done':5};
+
+function renderTasks(){
+  const el = document.getElementById('tasklist');
+  const rows = taskState.rows;
+  if (!rows.length){ el.innerHTML = '<div class="empty">keine Tasks</div>'; return; }
+  // Live "in Bearbeitung" marker: ships in state working report their
+  // current task via the heartbeat (task/progress status fields).
+  const workers = {};
+  for (const r of taskState.board) if ((r.state==='working'||r.state==='building') && r.task) workers[r.task] = r.agent;
+  // All ships for the assign dropdown ("auto" => flagship picks a free ship).
+  const ships = [...new Set(taskState.board.map(r=>r.agent))].sort();
+  // Populate the ship + category filter dropdowns (selections preserved).
+  const shipSel = document.getElementById('tf_ship');
+  const allShips = [...new Set(rows.map(r=>r.assigned_to||'').filter(Boolean).concat(ships))].sort();
+  if (!allShips.includes(taskState.ship)) taskState.ship = '';
+  shipSel.innerHTML = '<option value="">Schiff: alle</option>' + allShips.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  shipSel.value = taskState.ship;
+  const catSel = document.getElementById('tf_cat');
+  const cats = [...new Set(rows.map(r=>taskPrefix(r.slug)))].sort();
+  if (!cats.includes(taskState.cat)) taskState.cat = '';
+  catSel.innerHTML = '<option value="">Kategorie: alle</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  catSel.value = taskState.cat;
+  // Apply filters.
+  let filtered = rows;
+  if (taskState.status) filtered = filtered.filter(r=>r.status===taskState.status);
+  if (taskState.ship)   filtered = filtered.filter(r=>r.assigned_to===taskState.ship);
+  if (taskState.cat)    filtered = filtered.filter(r=>taskPrefix(r.slug)===taskState.cat);
+  // Sort.
+  const dir = taskState.dir;
+  filtered = [...filtered].sort((a,b)=>{
+    let c = 0;
+    switch (taskState.sort) {
+      case 'ship':    c = (a.assigned_to||'').localeCompare(b.assigned_to||''); break;
+      case 'cat':     c = taskPrefix(a.slug).localeCompare(taskPrefix(b.slug)); break;
+      case 'title':   c = (a.title||'').localeCompare(b.title||''); break;
+      case 'created': c = (a.created||'').localeCompare(b.created||''); break;
+      default:        c = (taskStatusRank[a.status]??99)-(taskStatusRank[b.status]??99);
+                      if (c===0) c = (a.slug||'').localeCompare(b.slug||'');
+    }
+    return dir*c;
+  });
+  if (!filtered.length){ el.innerHTML = '<div class="empty">keine Tasks (Filter)</div>'; return; }
+  el.innerHTML = filtered.map(r=>{
+    const cls = (r.status==='done')?'ok':(r.status==='assigned')?'warn':'dim';
+    const worker = workers[r.slug];
+    const assignOpts = '<option value="__auto__">auto — Flagschiff wählt</option>' +
+      ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    return `<div class="card">
+      <div class="row"><b class="grow">${esc(r.title)}</b>
+        <span class="pill ${cls}">${esc(r.status)}</span></div>
+      <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)} bearbeitet gerade`:''}</div>
+      <div class="actions">
+        <select id="st_${esc(r.slug)}" style="width:auto">
+          ${['open','assigned','in-progress','done','parked'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+        <button class="sec" onclick="taskStatus('${esc(r.slug)}')">Status</button>
+        <select id="as_${esc(r.slug)}" style="width:auto">${assignOpts}</select>
+        <button class="sec" onclick="taskAssign('${esc(r.slug)}')">Zuweisen</button>
+        <button class="sec" onclick="taskUnassign('${esc(r.slug)}')">Frei</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function taskNew(){
