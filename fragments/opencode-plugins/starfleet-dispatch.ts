@@ -118,6 +118,19 @@ function tickLog(line: string): void {
   try { bus({ cmd: 'tick', note: line }) } catch { /* ignore */ }
 }
 
+// Toast factories (need client & bus from closure)
+const toast = (variant: string, title: string, message: string, duration = 2500): void => {
+  try {
+    const t: any = (client as any).tui
+    t.showToast({ body: { variant: variant as any, title, message, duration } })
+  } catch { /* tui not ready / unavailable */ }
+}
+
+const toastBus = (variant: string, title: string, message: string, duration = 5000): void => {
+  toast(variant, title, message, duration)
+  try { bus({ cmd: 'toast', variant, title, message, duration }) } catch { /* ignore */ }
+}
+
 // Parse and handle fleet messages by type.
 // Returns true if the message was handled (should NOT be injected as system prompt).
 function handleMessage(
@@ -415,13 +428,6 @@ export const plugin = async ({ client, $ }: any) => {
       const t: any = (client as any).tui
       t.showToast({ body: { variant: variant as any, title, message, duration } })
     } catch { /* tui not ready / unavailable */ }
-  }
-
-  const toastBus = (variant: string, title: string, message: string, duration = 5000): void => {
-    toast(variant, title, message, duration)
-    try { bus({ cmd: 'toast', variant, title, message, duration }) } catch { /* ignore */ }
-  }
-
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
   // failures as a `session.error` event — it parks the session in a `retry`
   // status with a human-readable message instead. Poll that status so the
