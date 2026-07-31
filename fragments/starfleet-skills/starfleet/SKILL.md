@@ -114,9 +114,14 @@ Only `title` is required — `category` defaults to `active`, all other fields
 are optional. This is intentional for hand-written topics: you can drop in a
 minimal file and it shows up in the active list automatically.
 
+**List topics always via `dashboard topic list --json`** — there is **no**
+`dashboard list` subcommand; `dashboard list` is the wrong/invalid command and
+returns `dashboard: unknown command: list`.
+
 | Command | Purpose |
 |---|---|
-| `dashboard list` | Show active topics |
+| `dashboard topic list --json` | List all topics (JSON, for filtering) |
+| `dashboard topic list` | List all topics (human-readable) |
 | `dashboard topic new <slug>` | Create a topic |
 | `dashboard topic write <slug> <file>` | Write topic content |
 | `dashboard topic commit <slug>` | Commit + push topic |
