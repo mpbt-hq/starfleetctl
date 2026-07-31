@@ -71,6 +71,35 @@ const opencodePluginsSubdir = "opencode-plugins"
 // opencode launcher scripts (run-opencode.flagship, run-opencode.ship).
 const opencodeScriptsSubdir = "opencode-scripts"
 
+// opencodeConfigRel is the project-scoped opencode config file bootstrap
+// merges its required keys into (relative to the workspace root).
+const opencodeConfigRel = ".opencode/opencode.json"
+
+// opencodeInstructionsPath is the generated agents index bootstrap registers
+// in the opencode config's "instructions" array — same file that the
+// verifyAgentsIndex/fixAgentsIndex pair maintains.
+const opencodeInstructionsPath = ".starfleet-ai/var/agents.d/index.md"
+
+// opencodeStaleInstructionsPaths are legacy instruction entries that older
+// starfleetctl versions registered under a different location. fix drops them
+// so agents load the current index instead of a path that no longer exists.
+var opencodeStaleInstructionsPaths = []string{
+	".starfleet-ai/agents.d/index.md",
+}
+
+// opencodePlanCommands are the starfleetctl top-level verbs the built-in
+// opencode "plan" agent is explicitly allowed to run (read + write via the
+// starfleetctl CLI). Deliberately narrow — extend here, not in per-workspace
+// configs, so every bootstrap keeps agents in sync.
+var opencodePlanCommands = []string{
+	"comms",
+	"dashboard",
+	"logs",
+	"reports",
+	"session",
+	"task",
+}
+
 // claudeHooksSubdir is the subdirectory in embedded fragments that holds
 // Claude Code hook scripts (e.g. agent-permission-hook).
 const claudeHooksSubdir = "claude-hooks"
@@ -132,6 +161,11 @@ func Checks() []Check {
 			Name:   "opencode plugins (.opencode/plugins/)",
 			Verify: verifyOpencodePlugins,
 			Fix:    fixOpencodePlugins,
+		},
+		{
+			Name:   "opencode plan access (.opencode/opencode.json)",
+			Verify: verifyOpencodePlanAccess,
+			Fix:    fixOpencodePlanAccess,
 		},
 		{
 			Name:   "opencode launcher scripts (.starfleet-ai/bin/)",
@@ -751,6 +785,153 @@ func fixOpencodePlugins(b *Bootstrap) error {
 	}
 
 	return nil
+}
+
+// opencodePlanPermissionRules returns the opencode agent.plan.permission.bash
+// map for the starfleetctl verbs: one allow rule per verb and invocation style
+// (bare binary via PATH, and via the workspace-local path). opencode matches
+// these keys as substrings of the command line.
+func opencodePlanPermissionRules() map[string]string {
+	rules := map[string]string{}
+	for _, v := range opencodePlanCommands {
+		rules["starfleetctl "+v+"*"] = "allow"
+		rules[".starfleet-ai/bin/starfleetctl "+v+"*"] = "allow"
+	}
+	return rules
+}
+
+// verifyOpencodePlanAccess checks that .opencode/opencode.json already carries
+// bootstrap's required entries: the generated agents index in "instructions"
+// and the plan-agent bash allow rules for the starfleetctl verbs.
+func verifyOpencodePlanAccess(b *Bootstrap) (bool, string) {
+	doc := readOpencodeConfig(b)
+	if doc == nil {
+		return false, "missing .opencode/opencode.json"
+	}
+	if ensureOpencodePlanAccess(cloneOpencodeConfig(doc)) {
+		return false, "missing required instruction/permission entries"
+	}
+	return true, "instructions + plan permissions present"
+}
+
+func fixOpencodePlanAccess(b *Bootstrap) error {
+	doc := readOpencodeConfig(b)
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	if ensureOpencodePlanAccess(doc) {
+		out, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			return err
+		}
+		out = append(out, '\n')
+		if err := os.WriteFile(filepath.Join(b.Root, opencodeConfigRel), out, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readOpencodeConfig loads .opencode/opencode.json into a map (nil if absent
+// or unparsable).
+func readOpencodeConfig(b *Bootstrap) map[string]any {
+	data, err := os.ReadFile(filepath.Join(b.Root, opencodeConfigRel))
+	if err != nil {
+		return nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	return doc
+}
+
+// cloneOpencodeConfig deep-copies a config map so verify can probe changes
+// without mutating the on-disk doc.
+func cloneOpencodeConfig(doc map[string]any) map[string]any {
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return map[string]any{}
+	}
+	var out map[string]any
+	_ = json.Unmarshal(data, &out)
+	return out
+}
+
+// ensureOpencodePlanAccess mutates the opencode config doc in place so it
+// carries bootstrap's required entries, preserving every unrelated key and
+// any user-defined rules (merge, never clobber). Returns true if doc changed.
+func ensureOpencodePlanAccess(doc map[string]any) bool {
+	changed := false
+
+	// "instructions": register the generated agents index, drop legacy paths.
+	instructions, _ := doc["instructions"].([]any)
+	keep := instructions[:0]
+	hasIndex := false
+	for _, entry := range instructions {
+		s, ok := entry.(string)
+		if !ok {
+			keep = append(keep, entry)
+			continue
+		}
+		if s == opencodeInstructionsPath {
+			hasIndex = true
+			keep = append(keep, entry)
+			continue
+		}
+		if stringInSlice(s, opencodeStaleInstructionsPaths) {
+			changed = true
+			continue
+		}
+		keep = append(keep, entry)
+	}
+	if !hasIndex {
+		keep = append(keep, opencodeInstructionsPath)
+		changed = true
+	}
+	doc["instructions"] = keep
+
+	// "agent.plan.permission.bash": ensure the starfleetctl allow rules.
+	agent, _ := doc["agent"].(map[string]any)
+	if agent == nil {
+		agent = map[string]any{}
+		doc["agent"] = agent
+		changed = true
+	}
+	plan, _ := agent["plan"].(map[string]any)
+	if plan == nil {
+		plan = map[string]any{}
+		agent["plan"] = plan
+		changed = true
+	}
+	permission, _ := plan["permission"].(map[string]any)
+	if permission == nil {
+		permission = map[string]any{}
+		plan["permission"] = permission
+		changed = true
+	}
+	bash, _ := permission["bash"].(map[string]any)
+	if bash == nil {
+		bash = map[string]any{}
+		permission["bash"] = bash
+		changed = true
+	}
+	for pattern, want := range opencodePlanPermissionRules() {
+		if cur, ok := bash[pattern]; !ok || cur != want {
+			bash[pattern] = want
+			changed = true
+		}
+	}
+	return changed
+}
+
+func stringInSlice(s string, list []string) bool {
+	for _, e := range list {
+		if e == s {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyOpencodeScripts checks that every embedded opencode launcher script is
