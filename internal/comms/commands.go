@@ -202,7 +202,9 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	}
 
 	// Merge structured detail fields from patch.
-	if patch.Task != "" {
+	if patch.TaskSet {
+		rec.Task = patch.Task
+	} else if patch.Task != "" {
 		rec.Task = patch.Task
 	}
 	if patch.Progress >= 0 {

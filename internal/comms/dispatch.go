@@ -51,6 +51,10 @@ type dispatchRequest struct {
 	Variant string `json:"variant,omitempty"`
 	Title   string `json:"title,omitempty"`
 	Message string `json:"message,omitempty"`
+
+	// task status (cmd: "task")
+	Task      string `json:"task,omitempty"`
+	TaskClear bool   `json:"task_clear,omitempty"`
 }
 
 // dispatchResponse is the JSON returned to the plugin.
@@ -147,6 +151,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchExit(req)
 	case "toast":
 		return b.dispatchToast(req)
+	case "task":
+		return b.dispatchTask(req)
 	default:
 		return dispatchResponse{OK: false, Error: "unknown cmd: " + req.Cmd}
 	}
@@ -212,6 +218,9 @@ func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
 		}
 		if req.ErrorTag != "" {
 			args = append(args, "--error-tag", req.ErrorTag)
+		}
+		if req.Task != "" {
+			args = append(args, "--task", req.Task)
 		}
 	}
 	if err := b.DoHealthUpdate(args); err != nil {
@@ -492,6 +501,23 @@ func (b *Bus) dispatchToast(req dispatchRequest) dispatchResponse {
 		ToastTitle:   req.Title,
 		ToastMessage: req.Message,
 	})
+	return dispatchResponse{OK: true}
+}
+
+// dispatchTask records which task the ship is currently working on (or, when
+// cleared, that it is back to idle). The web UI / flagship use this to show a
+// live "in Bearbeitung von <ship>" marker on the task.
+func (b *Bus) dispatchTask(req dispatchRequest) dispatchResponse {
+	state := "working"
+	if req.TaskClear || req.Task == "" {
+		state = "idle"
+	}
+	if err := b.DoStatus(state, "", StatusPatch{
+		Task:    req.Task,
+		TaskSet: true,
+	}); err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
 	return dispatchResponse{OK: true}
 }
 

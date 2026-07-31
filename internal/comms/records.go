@@ -56,6 +56,7 @@ type StatusRecord struct {
 // unchanged" from "set to 0".
 type StatusPatch struct {
 	Task         string
+	TaskSet      bool // explicitly set Task even to "" (clear) — status report leaves it unset
 	Progress     int
 	Blocker      string
 	ETA          string
