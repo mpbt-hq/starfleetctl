@@ -214,6 +214,7 @@
         <option value="created">Erstellt</option>
       </select>
       <button class="sec" id="tf_dir" onclick="taskToggleDir()" style="width:auto;padding:6px 10px">↑</button>
+      <button class="sec" onclick="taskReindex()" title="DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)" style="margin-left:auto;width:auto;padding:6px 12px">↻ Reindex</button>
     </div>
     <div class="card" id="tasklist"></div>
   </section>
@@ -912,6 +913,17 @@ function taskToggleDir(){
   taskState.dir = -taskState.dir;
   document.getElementById('tf_dir').textContent = taskState.dir>0?'↑':'↓';
   renderTasks();
+}
+
+// taskReindex regenerates DASHBOARD.md's index from the topic files — for
+// topics added/edited directly in the filesystem. The task list itself reads
+// the files live, so only the index (and downstream dedup/listing) needs this.
+async function taskReindex(){
+  try {
+    await api('/api/dashboard/reindex', {method:'POST'});
+    toast('Dashboard reindexiert');
+    loadTasks();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
 // taskPrefix extracts the category (path prefix) from a topic slug, e.g.

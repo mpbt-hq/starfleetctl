@@ -96,6 +96,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/asks", s.apiAsks)
 	s.mux.HandleFunc("/api/events", s.apiEvents)
 	s.mux.HandleFunc("/api/tasks", s.apiTasks)
+	s.mux.HandleFunc("/api/dashboard/reindex", s.apiDashboardReindex)
 	s.mux.HandleFunc("/api/tell", s.apiTell)
 	s.mux.HandleFunc("/api/cmd", s.apiCmd)
 	s.mux.HandleFunc("/api/task", s.apiTask)
@@ -227,6 +228,24 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, metas)
+}
+
+// apiDashboardReindex handles POST /api/dashboard/reindex — regenerates the
+// thin index tables in DASHBOARD.md from every dashboard/topics/*.md file's
+// frontmatter. Needed after topics are added/edited directly in the
+// filesystem: the task list itself reads the topic files live, but the
+// index (which `dashboard topic list` / task dedup read) only updates when a
+// reindex runs.
+func (s *Server) apiDashboardReindex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	if err := s.dash.DoReindex(); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // apiIdentity reports the web server's own fleet identity (what the bus sees
