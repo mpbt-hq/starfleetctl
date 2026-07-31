@@ -219,10 +219,20 @@ can use `@import` to reference individual fragments — but the generated
 
 opencode reads the `instructions` path from `.opencode/opencode.json`:
 ```json
-{ "instructions": [".starfleet-ai/agents.d/index.md"] }
+{ "instructions": [".starfleet-ai/var/agents.d/index.md"] }
 ```
 
 This points to the auto-generated index containing all fragment bodies.
+`starfleetctl bootstrap` merges (idempotent, preserving any existing keys) the
+required opencode config into `.opencode/opencode.json`:
+
+- `instructions` — registers `.starfleet-ai/var/agents.d/index.md` (dropping
+  the legacy `.starfleet-ai/agents.d/index.md` path)
+- `plugin` — registers the embedded starfleet plugins (see `fixOpencodePlugins`)
+- `agent.plan.permission.bash` — explicit `allow` rules for the built-in
+  `plan` agent to run the starfleetctl verbs `comms`, `dashboard`, `logs`,
+  `reports`, `session`, `task` (read + write via the starfleetctl CLI)
+
 opencode does **not** read `.claude/skills/` — skills are loaded via the
 native `skill` tool instead.
 
