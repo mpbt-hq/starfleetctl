@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/filestore"
+	"github.com/metux/starfleetctl/internal/ocsessions"
 	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/task"
@@ -112,6 +114,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
 	s.mux.HandleFunc("/api/reports", s.apiReports)
 	s.mux.HandleFunc("/api/reports/", s.apiReportDispatch)
+	s.mux.HandleFunc("/api/sessions", s.apiSessions)
+	s.mux.HandleFunc("/api/sessions/", s.apiSessionDispatch)
+	s.mux.HandleFunc("/api/oclog", s.apiOCLog)
 	s.mux.HandleFunc("/", s.serveIndex)
 }
 
@@ -1178,6 +1183,129 @@ func (s *Server) apiReportDispatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": true})
 	default:
 		writeErr(w, 405, "method not allowed")
+	}
+}
+
+// apiSessions handles GET /api/sessions — list opencode sessions, most
+// recently updated first. Optional filters: ?title=<ship name> and
+// ?agent=<mode> (build / plan / explore / general), plus ?limit=.
+func (s *Server) apiSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	q := r.URL.Query()
+	limit := 0
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeErr(w, 400, "limit must be a number")
+			return
+		}
+		limit = n
+	}
+	sessions, err := ocsessions.List(ocsessions.ListOpts{
+		Title: q.Get("title"),
+		Mode:  q.Get("agent"),
+		Limit: limit,
+	})
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	s.markRunning(sessions)
+	writeJSON(w, map[string]any{"sessions": sessions})
+}
+
+// apiSessionDispatch handles GET /api/sessions/<id> — the session's meta plus
+// a chronological transcript window (?limit=, ?offset=).
+func (s *Server) apiSessionDispatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if id == "" {
+		writeErr(w, 400, "need session id")
+		return
+	}
+	q := r.URL.Query()
+	limit, offset := 0, 0
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeErr(w, 400, "limit must be a number")
+			return
+		}
+		limit = n
+	}
+	if v := q.Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			writeErr(w, 400, "offset must be a number")
+			return
+		}
+		offset = n
+	}
+	tr, err := ocsessions.SessionTranscript(id, limit, offset)
+	if err != nil {
+		code := 500
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "invalid") {
+			code = 404
+		}
+		writeErr(w, code, err.Error())
+		return
+	}
+	tr.Session.Running = s.liveShip(tr.Session.Title)
+	writeJSON(w, tr)
+}
+
+// apiOCLog handles GET /api/oclog?n= — the last n lines (default 200) of the
+// opencode client log.
+func (s *Server) apiOCLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	n := 0
+	if v := r.URL.Query().Get("n"); v != "" {
+		parsed, err := strconv.Atoi(v)
+		if err != nil {
+			writeErr(w, 400, "n must be a number")
+			return
+		}
+		n = parsed
+	}
+	if n < 0 || n > 5000 {
+		writeErr(w, 400, "n must be between 0 and 5000")
+		return
+	}
+	lines, err := ocsessions.TailLog(n)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"lines": lines})
+}
+
+// liveShip reports whether a live (non-stale) board entry uses the given
+// agent name — used to flag opencode sessions whose ship is currently up.
+func (s *Server) liveShip(agent string) bool {
+	if agent == "" {
+		return false
+	}
+	for _, e := range s.bus.BoardEntries() {
+		if !e.Stale && e.Agent == agent {
+			return true
+		}
+	}
+	return false
+}
+
+// markRunning flags each session whose title matches a live board entry.
+func (s *Server) markRunning(list []ocsessions.Session) {
+	for i := range list {
+		list[i].Running = s.liveShip(list[i].Title)
 	}
 }
 

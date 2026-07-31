@@ -130,6 +130,12 @@
   .md-body table { border-collapse:collapse; margin:8px 0; }
   .md-body th, .md-body td { border:1px solid var(--line); padding:4px 8px; text-align:left; }
   .md-body th { background:var(--bg2); }
+  .sess-msg { margin:10px 0; }
+  .sess-msg .meta { font-size:12px; color:var(--dim); margin-bottom:4px; }
+  .sess-part pre { background:var(--chip); padding:8px; border-radius:6px; border:1px solid var(--line); font-size:13px; white-space:pre-wrap; word-break:break-word; margin:4px 0; }
+  .sess-part details summary { cursor:pointer; font-size:13px; color:var(--acc); }
+  .sess-part.tool details summary { color:#e8a33c; }
+  .sess-part details pre { margin-top:4px; }
 </style>
 </head>
 <body>
@@ -145,6 +151,7 @@
   <div class="tab" data-p="bus" onclick="show('bus', true)">Bus</div>
   <div class="tab" data-p="talk" onclick="show('talk', true)">Funk</div>
   <div class="tab" data-p="log" onclick="show('log', true)">Log</div>
+  <div class="tab" data-p="sessions" onclick="show('sessions', true);loadSessions()">Sitzungen</div>
   <div class="tab" data-p="timers" onclick="show('timers', true)">Timer</div>
   <div class="tab" data-p="reports" onclick="show('reports', true);loadReports()">Berichte</div>
   <div class="tab" data-p="files" onclick="show('files', true)">Files</div>
@@ -339,6 +346,54 @@
       <pre id="files_viewer_content" style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow-y:auto;font:13px/1.4 ui-monospace,monospace;background:var(--chip);padding:10px;border-radius:8px;border:1px solid var(--line)"></pre>
     </div>
   </section>
+
+  <section class="page" id="sessions">
+    <div class="card">
+      <div class="row" style="align-items:center;gap:8px">
+        <b>opencode-Sitzungen</b>
+        <span style="flex:1"></span>
+        <input id="sess_filter" placeholder="Filter: Schiff" style="width:auto" onchange="loadSessions()">
+        <select id="sess_agent" style="width:auto" onchange="loadSessions()">
+          <option value="">alle Modes</option>
+          <option>build</option><option>plan</option><option>explore</option><option>general</option>
+        </select>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:4px">opencode-DB wird read-only gelesen — auch Sessions ohne termctl-Terminal</div>
+    </div>
+    <div class="card" id="sess_list"></div>
+    <div class="card">
+      <div class="row" style="align-items:center">
+        <b>opencode.log</b>
+        <span style="flex:1"></span>
+        <select id="oclog_n" style="width:auto" onchange="loadOCLog()">
+          <option value="100">100</option>
+          <option value="200" selected>200</option>
+          <option value="1000">1000</option>
+        </select>
+        <button class="sec" onclick="loadOCLog()" style="width:auto;padding:4px 10px">Aktualisieren</button>
+      </div>
+      <pre id="oclog_content" style="margin:8px 0 0;max-height:40vh;overflow-y:auto;font:12px/1.4 ui-monospace,monospace;background:var(--chip);padding:8px;border-radius:6px;border:1px solid var(--line)">Lade…</pre>
+    </div>
+  </section>
+
+  <!-- session detail modal -->
+  <div id="sess_modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSessModal()">
+    <div class="modal" style="max-width:760px">
+      <div class="row" style="align-items:flex-start">
+        <div class="grow"><b id="sess_m_title"></b> <span class="pill" id="sess_m_state"></span></div>
+        <div class="row" style="gap:8px;align-items:center">
+          <select id="sess_m_window" style="width:auto;font-size:12px" onchange="loadSessTranscript()">
+            <option value="50">letzte 50</option>
+            <option value="200">letzte 200</option>
+          </select>
+          <button class="sec" onclick="loadSessTranscript()" style="width:auto;padding:4px 10px;font-size:14px">↻</button>
+          <button class="sec" onclick="closeSessModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
+        </div>
+      </div>
+      <div id="sess_m_meta" class="muted" style="margin-top:4px;font-size:12px"></div>
+      <div id="sess_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word"></div>
+    </div>
+  </div>
 </main>
 
 <div class="toast" id="toast"></div>
@@ -362,9 +417,13 @@
       <div class="tabs" style="border:0;padding:0 0 8px;margin:0">
         <div class="tab on" data-s="chat" onclick="shipTab('chat')">Chat</div>
         <div class="tab" data-s="screen" onclick="shipTab('screen')">Terminal</div>
+        <div class="tab" data-s="hist" onclick="shipTab('hist')">Verlauf</div>
       </div>
       <div id="ship_chat_tab">
         <div id="ship_chat"></div>
+      </div>
+      <div id="ship_hist_tab" style="display:none">
+        <div id="ship_hist"></div>
       </div>
       <div id="ship_screen_tab" style="display:none">
         <div class="terminal-controls">
@@ -427,6 +486,7 @@ async function refresh(){
   else if (cur==='tasks') await loadTasks();
   else if (cur==='bus') await loadBus(document.querySelector('#bus .tab.on')?.dataset.b || 'msgs');
   else if (cur==='log') await loadEvents();
+  else if (cur==='sessions') await loadSessions();
   else if (cur==='talk') { await loadTargets(); await loadTalk(); }
   else if (cur==='timers') await loadTimers();
   else if (cur==='reports') await loadReports();
@@ -744,11 +804,13 @@ function shipTab(tab){
   document.querySelectorAll('#ship_overlay .tabs .tab').forEach(t=>t.classList.toggle('on', t.dataset.s===tab));
   document.getElementById('ship_chat_tab').style.display = tab==='chat' ? '' : 'none';
   document.getElementById('ship_screen_tab').style.display = tab==='screen' ? '' : 'none';
+  document.getElementById('ship_hist_tab').style.display = tab==='hist' ? '' : 'none';
   if (tab==='screen') {
     loadScreen();
     startTermAutoUpdate();
   } else {
     stopTermAutoUpdate();
+    if (tab==='hist') loadShipHist(shipCurrent);
   }
 }
 
@@ -1270,6 +1332,115 @@ function removeRepAttachment(name){
   renderRepAttachments();
 }
 
+// --- Sitzungen tab (opencode sessions + client log) ---
+function fmtDT(ms){
+  if (!ms) return '';
+  const d = new Date(ms);
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+function fmtTokens(n){
+  if (n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if (n>=1e3) return (n/1e3).toFixed(1)+'k';
+  return String(n);
+}
+let sessCurrentId = null;
+
+async function loadSessions(){
+  const el = document.getElementById('sess_list');
+  const filter = (document.getElementById('sess_filter')?.value || '').trim();
+  const agent = (document.getElementById('sess_agent')?.value || '').trim();
+  const params = ['limit=100'];
+  if (filter) params.push('title='+encodeURIComponent(filter));
+  if (agent) params.push('agent='+encodeURIComponent(agent));
+  try {
+    const data = await api('/api/sessions?'+params.join('&'));
+    const rows = data.sessions || [];
+    if (!rows.length){ el.innerHTML = '<div class="empty">keine Sessions</div>'; return; }
+    el.innerHTML = rows.map(s=>{
+      const run = s.running ? ' <span class="pill warn">▶ läuft</span>' : '';
+      const model = s.model ? ' · <span class="muted">'+esc(s.model)+'</span>' : '';
+      const toks = (s.tokens_input+s.tokens_output+s.tokens_reasoning) ? ' · '+fmtTokens(s.tokens_input+s.tokens_output+s.tokens_reasoning)+' Tokens' : '';
+      const cost = s.cost>0 ? ' · '+s.cost.toFixed(3)+' €' : '';
+      return `<div class="card" onclick="openSess('${esc(s.id)}')" style="cursor:pointer">
+        <div class="row"><span class="agent grow">${esc(s.title)}${run}${model}</span>
+          <span class="pill dim">${esc(s.mode)}</span>
+          <span class="muted">${fmtDT(s.updated)}</span></div>
+        <div class="muted" style="margin-top:2px;font-size:11px">${esc(s.id)}${toks}${cost}</div>
+      </div>`;
+    }).join('');
+  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+
+function openSess(id){
+  sessCurrentId = id;
+  document.getElementById('sess_modal').style.display = 'flex';
+  loadSessTranscript();
+}
+function closeSessModal(){
+  sessCurrentId = null;
+  document.getElementById('sess_modal').style.display = 'none';
+}
+
+async function loadSessTranscript(){
+  if (!sessCurrentId) return;
+  const win = Number(document.getElementById('sess_m_window')?.value || 50);
+  try {
+    const t = await api('/api/sessions/'+encodeURIComponent(sessCurrentId)+'?limit='+win);
+    document.getElementById('sess_m_title').textContent = t.session.title || t.session.id;
+    const stEl = document.getElementById('sess_m_state');
+    stEl.textContent = t.session.running ? '▶ läuft' : 'beendet';
+    stEl.className = 'pill ' + (t.session.running ? 'warn' : 'dim');
+    const model = t.session.model ? ' · '+t.session.model : '';
+    const toks = (t.session.tokens_input+t.session.tokens_output+t.session.tokens_reasoning) ? ' · '+fmtTokens(t.session.tokens_input+t.session.tokens_output+t.session.tokens_reasoning)+' Tokens' : '';
+    const cost = t.session.cost>0 ? ' · '+t.session.cost.toFixed(3)+' €' : '';
+    document.getElementById('sess_m_meta').textContent =
+      (t.session.mode||'') + model + ' · ' + fmtDT(t.session.created) + ' → ' + fmtDT(t.session.updated) +
+      toks + cost + ' · ' + t.session.id;
+    const out = (t.messages||[]).map(m=>{
+      const who = m.role==='user' ? 'User' : 'Assistent';
+      const meta = (m.model_id?esc(m.model_id)+' ':'') + (m.tokens_total?'· '+fmtTokens(m.tokens_total)+' Tokens ':'') + fmtDT(m.time);
+      const parts = (m.parts||[]).map(p=>{
+        if (p.type==='reasoning') return `<details class="sess-part"><summary>🧠 Reasoning</summary><pre>${esc(p.text||'')}</pre></details>`;
+        if (p.type==='tool') return `<details class="sess-part tool"><summary>🔧 ${esc(p.tool||'tool')}${p.truncated?' <span class="muted">(gekürzt)</span>':''}</summary><pre>${esc(p.input||'')}${p.output?'\n────────\n':''}${esc(p.output||'')}</pre></details>`;
+        return `<div class="sess-part"><pre>${esc(p.text||'')}${p.truncated?'<span class="muted"> … (gekürzt)</span>':''}</pre></div>`;
+      }).join('');
+      return `<div class="sess-msg ${m.role}"><div class="meta"><b>${who}</b> · ${meta}</div>${parts}</div>`;
+    }).join('') || '<div class="empty">keine Nachrichten</div>';
+    document.getElementById('sess_m_body').innerHTML = out;
+  } catch(e){ document.getElementById('sess_m_body').innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+
+async function loadOCLog(){
+  const n = Number(document.getElementById('oclog_n')?.value || 200);
+  const el = document.getElementById('oclog_content');
+  try {
+    const data = await api('/api/oclog?n='+n);
+    const lines = data.lines || [];
+    el.innerHTML = lines.map(l=>esc(l)).join('\n') || '(leer)';
+    el.scrollTop = el.scrollHeight;
+  } catch(e){ el.innerHTML = 'Fehler: '+esc(e.message); }
+}
+
+async function loadShipHist(name){
+  if (!name) return;
+  const el = document.getElementById('ship_hist');
+  try {
+    const data = await api('/api/sessions?title='+encodeURIComponent(name)+'&limit=100');
+    const rows = data.sessions || [];
+    if (!rows.length){ el.innerHTML = '<div class="empty">keine opencode-Sessions für '+esc(name)+'</div>'; return; }
+    el.innerHTML = rows.map(s=>{
+      const run = s.running ? ' <span class="pill warn">▶ läuft</span>' : '';
+      return `<div class="card" onclick="openSess('${esc(s.id)}')" style="cursor:pointer">
+        <div class="row"><span class="agent grow">${esc(s.title)}${run}</span>
+          <span class="pill dim">${esc(s.mode)}</span>
+          <span class="muted">${fmtDT(s.updated)}</span></div>
+        <div class="muted" style="margin-top:2px;font-size:11px">${esc(s.id)} · ${esc(s.model||'')}</div>
+      </div>`;
+    }).join('');
+  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+}
+
 async function loadReports(){
   try {
     const ship = document.getElementById('rep_filter_ship')?.value.trim();
@@ -1382,9 +1553,12 @@ loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
-  if (c==='status'||c==='tasks'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='reports'||c==='files') refresh();
+  if (c==='status'||c==='tasks'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='reports'||c==='files'||c==='sessions') refresh();
   if (shipCurrent) {
     loadShipChat(shipCurrent);
+    // Refresh history if the Verlauf tab is active.
+    const histTab = document.getElementById('ship_hist_tab');
+    if (histTab && histTab.style.display !== 'none') loadShipHist(shipCurrent);
     // Refresh terminal if screen tab is active and auto-update is on
     const screenTab = document.getElementById('ship_screen_tab');
     if (screenTab && screenTab.style.display !== 'none' && termAutoUpdate) {
