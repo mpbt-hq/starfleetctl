@@ -188,7 +188,7 @@
       <div class="grid2" style="margin-top:8px">
         <input id="t_ship" placeholder="Ship (leer=offen, 'auto'=freier)">
         <select id="t_assign"><option value="">nicht zuweisen</option>
-          <option value="auto">freien Ship wählen</option>
+          <option value="auto">an Flagschiff (delegiert)</option>
           <option value="name">explizit (oben)</option></select>
       </div>
       <div class="actions"><button onclick="taskNew()">Erfassen</button></div>
@@ -941,7 +941,7 @@ function renderTasks(){
   // current task via the heartbeat (task/progress status fields).
   const workers = {};
   for (const r of taskState.board) if ((r.state==='working'||r.state==='building') && r.task) workers[r.task] = r.agent;
-  // All ships for the assign dropdown ("auto" => flagship picks a free ship).
+  // All ships for the assign dropdown ("auto" => flagship delegates/executes).
   const ships = [...new Set(taskState.board.map(r=>r.agent))].sort();
   // Populate the ship + category filter dropdowns (selections preserved).
   const shipSel = document.getElementById('tf_ship');
@@ -977,7 +977,7 @@ function renderTasks(){
   el.innerHTML = filtered.map(r=>{
     const cls = (r.status==='done')?'ok':(r.status==='assigned')?'warn':'dim';
     const worker = workers[r.slug];
-    const assignOpts = '<option value="__auto__">auto — Flagschiff wählt</option>' +
+    const assignOpts = '<option value="__auto__">auto — Flagschiff (delegiert)</option>' +
       ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
     return `<div class="card">
       <div class="row"><b class="grow">${esc(r.title)}</b>
@@ -1008,7 +1008,7 @@ async function taskNew(){
   try {
     await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({title, desc, assign})});
-    toast('Task erfasst'); document.getElementById('t_title').value=''; document.getElementById('t_desc').value='';
+    toast(assign==='__auto__' ? 'Task erfasst — an Flagschiff zur Delegation' : 'Task erfasst'); document.getElementById('t_title').value=''; document.getElementById('t_desc').value='';
     loadTasks();
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
@@ -1023,12 +1023,14 @@ async function taskUnassign(slug){
     body: JSON.stringify({slug, unassign:true})}); toast('frei'); loadTasks(); }
   catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
-// taskAssign kicks off (or reassigns) an existing task: "__auto__" lets the
-// flagship pick the first free ship, any other value names the ship directly.
+// taskAssign kicks off (or reassigns) an existing task: "__auto__" routes to
+// the flagship (which delegates or executes it), any other value names the
+// ship directly.
 async function taskAssign(slug){
   const ship = document.getElementById('as_'+slug).value;
   try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({slug, ship})}); toast('zugewiesen → '+ship); loadTasks(); }
+    body: JSON.stringify({slug, ship})});
+    toast(ship==='__auto__' ? 'an Flagschiff zur Delegation' : 'zugewiesen → '+ship); loadTasks(); }
   catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 

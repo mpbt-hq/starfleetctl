@@ -76,7 +76,7 @@ starfleetctl task capture --title "<title>" \
     [--no-push]
 ```
 
-- `--assign` (no name) → picks first idle, non-stale ship
+- `--assign` (no name) → routes to the flagship, which delegates or executes it
 - `--assign <ship>` → that specific ship
 - Without `--assign` → recorded as open, no ship
 

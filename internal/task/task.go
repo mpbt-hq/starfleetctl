@@ -6,8 +6,9 @@
 // dashboard (as a dashboard/topics/*.md topic entry) via the sanctioned
 // dashboard package calls ONLY, never touching the topic files as raw
 // filesystem paths, and it NEVER executes the task itself. Optionally it
-// commissions a free (idle, non-stale) ship by sending it a comms
-// directive. See scripts/task-capture (the bash original) for the full
+// commissions a ship by sending it a comms directive; auto-assignment routes
+// to the flagship, which may delegate the work to a worker ship (or execute
+// it itself). See scripts/task-capture (the bash original) for the full
 // rationale; this is the consolidated, in-process equivalent.
 package task
 
@@ -22,18 +23,19 @@ import (
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
 const usage = `task <command> [args…]
 
   capture --title "<t>" [options]   capture a task into the dashboard (as a
                                      dashboard/topics/<slug>.md topic) and
-                                     optionally commission a free ship to work
+                                     optionally commission a ship to work
                                      it. Never executes the task itself.
   assign <slug> [<ship>]            assign an existing task to a ship (or,
-                                     with no ship, to the first idle
-                                     non-stale ship). Updates status +
-                                     assigned-to via the sanctioned
+                                     with no ship, to the flagship, which
+                                     delegates or executes it). Updates status
+                                     + assigned-to via the sanctioned
                                      dashboard path and commissions the ship.
   unassign <slug>                   clear a task's assignment (status ->
                                      open, assigned-to -> —).
@@ -76,15 +78,16 @@ func Run(root string, args []string) int {
 const captureUsage = `task capture --title "<t>" [options]
 
 Captures a task into the dashboard (a dashboard/topics/<slug>.md topic entry,
-showing up under "Active Topics") and optionally commissions a free ship.
+showing up under "Active Topics") and optionally commissions a ship.
 
 Options:
   --title "<t>"        Task title (required).
   --desc  "<text>"     Free-form task description / acceptance criteria.
   --slug  "<slug>"     Override the auto-derived dashboard topic slug.
-  --assign [<ship>]    Commission a ship. With no arg, pick the first idle,
-                       non-stale ship from the comms board. With a ship
-                       name, commission that specific ship.
+  --assign [<ship>]    Commission a ship. With no arg, route the task to the
+                       flagship, which delegates it to a worker (or executes
+                       it itself). With a ship name, commission that specific
+                       ship.
   --no-push            Stage + commit locally but do not push to origin.
   -h, --help           this help.
 
@@ -92,7 +95,6 @@ Exit codes:
   0  task captured (and assigned, if requested)
   2  bad arguments
   3  slug already exists (collision — pick a different title/slug)
-  4  no free ship available for --assign (without explicit ship)
 `
 
 // runCapture implements `task capture` — the Go port of scripts/task-capture.
@@ -122,20 +124,14 @@ func runCapture(root string, args []string) int {
 	status := "open"
 	assignedTo := "—"
 
-	// Pick a free ship before we write the final frontmatter.
+	// Route the task to the flagship before we write the final frontmatter.
 	if assignMode == "auto" {
-		ship, perr := pickFreeShip(root)
-		if perr != nil {
-			fmt.Fprintln(os.Stderr, "task capture:", perr)
-			return 1
-		}
-		if ship == "" {
-			fmt.Fprintln(os.Stderr, "task capture: no free (idle, non-stale) ship available — capturing as open")
-			assignMode = ""
-		} else {
-			assign = ship
-			assignMode = ship
-		}
+		// Auto-assign targets the flagship, which then delegates the work to
+		// a suitable worker (or executes it itself). Never blind-pick the
+		// first idle board entry: that could pick the calling ship/console
+		// itself (a self-assignment) and skips the coordinator.
+		assign = shipnames.FlagshipName(root)
+		assignMode = assign
 	}
 
 	if assignMode != "" {
@@ -170,15 +166,8 @@ func runCapture(root string, args []string) int {
 
 	// Commission the ship (after the dashboard state is durable).
 	if assignMode != "" && assign != "" {
-		msg := "Neue Aufgabe für dich erfasst: " + title +
-			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via comms melden."
-		b, berr := comms.New(root)
-		if berr != nil {
-			fmt.Fprintln(os.Stderr, "task capture:", berr)
-			return 1
-		}
-		if _, terr := b.Tell(assign, msg, ""); terr != nil {
-			fmt.Fprintln(os.Stderr, "task capture:", terr)
+		if cerr := commissionShip(root, slug, title, assign, false); cerr != nil {
+			fmt.Fprintln(os.Stderr, "task capture:", cerr)
 			return 1
 		}
 	}
@@ -263,22 +252,6 @@ func deriveSlug(title string) string {
 	return "task-" + s
 }
 
-// pickFreeShip returns the first idle, non-stale ship from the comms
-// board, or "" if none is available. Mirrors scripts/task-capture's python
-// one-liner (cand[0] of idle+!stale).
-func pickFreeShip(root string) (string, error) {
-	b, err := comms.New(root)
-	if err != nil {
-		return "", err
-	}
-	for _, e := range b.BoardEntries() {
-		if e.State == "idle" && !e.Stale {
-			return e.Agent, nil
-		}
-	}
-	return "", nil
-}
-
 // buildTopicFile renders the topic file content (frontmatter + body), matching
 // scripts/task-capture's output exactly.
 func buildTopicFile(slug, title, status, assignedTo, desc string) string {
@@ -330,16 +303,15 @@ func writeTopicContent(d *dashboard.Dashboard, slug, content string) error {
 
 const assignUsage = `task assign <slug> [<ship>] [--no-push]
 
-Assign an existing task to a ship. With no <ship>, commission the first idle,
-non-stale ship from the comms board. Updates the topic's status +
-assigned-to via the sanctioned dashboard path (no raw file access) and
-commissions the ship with an comms directive.
+Assign an existing task to a ship. With no <ship>, route the task to the
+flagship, which delegates it to a worker (or executes it itself). Updates the
+topic's status + assigned-to via the sanctioned dashboard path (no raw file
+access) and commissions the ship with an comms directive.
 
 Exit codes:
   0  task assigned + commissioned
   2  bad arguments / unknown option
   3  no such task (slug not found)
-  4  no free ship available (with no explicit ship)
 `
 
 const unassignUsage = `task unassign <slug> [--no-push]
@@ -383,10 +355,21 @@ func commitAndReindex(d *dashboard.Dashboard, slug, msg string, push bool) {
 
 // commissionShip sends the assignment directive to the assigned ship.
 // wasAssigned reports whether the task already had an assignee before this
-// call, so the message reads as a fresh assignment vs. a reassignment.
+// call, so the message reads as a fresh assignment vs. a reassignment. When
+// the target is the flagship, the message explicitly notes that it may
+// delegate the task to a worker ship instead of executing it itself.
 func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
+	delegate := " (Dashboard-Topic `" + slug + "`). Du kannst sie selbst bearbeiten" +
+		" oder an einen freien Worker delegieren (z.B. via `task assign " + slug + " <ship>`)." +
+		" Status danach via comms melden."
 	var msg string
-	if wasAssigned {
+	if ship == shipnames.FlagshipName(root) {
+		if wasAssigned {
+			msg = "Dir wurde die Aufgabe neu zugewiesen: " + title + delegate
+		} else {
+			msg = "Neue Aufgabe für dich erfasst: " + title + delegate
+		}
+	} else if wasAssigned {
 		msg = "Dir wurde die Aufgabe neu zugewiesen: " + title +
 			" (Dashboard-Topic `" + slug + "`). Bitte dort Details lesen und abarbeiten. Status danach via comms melden."
 	} else {
@@ -444,18 +427,14 @@ func runAssign(root string, args []string) int {
 		return 3
 	}
 
-	assignMode := ship // explicit ship, or "" -> auto-pick
+	assignMode := ship // explicit ship, or "" -> flagship for delegation
 	if assignMode == "" {
-		picked, perr := pickFreeShip(root)
-		if perr != nil {
-			fmt.Fprintln(os.Stderr, "task assign:", perr)
-			return 1
-		}
-		if picked == "" {
-			fmt.Fprintln(os.Stderr, "task assign: no free (idle, non-stale) ship available — leaving unassigned")
-			return 4
-		}
-		ship = picked
+		// Auto-assign targets the flagship, which then delegates the work to
+		// a suitable worker (or executes it itself). Never blind-pick the
+		// first idle board entry: that could pick the calling ship/console
+		// itself (a self-assignment) and skips the coordinator.
+		ship = shipnames.FlagshipName(root)
+		assignMode = ship
 	}
 
 	wasAssigned := m.AssignedTo != "" && m.AssignedTo != "—"
@@ -709,14 +688,14 @@ func runPurge(root string, args []string) int {
 // --- Programmatic wrappers (no os.Exit) for the web UI / in-process callers.
 // Each builds the same argument vector a CLI invocation would and routes it
 // through the existing run* logic, so the web interface and `starfleetctl task`
-// stay behaviour-identical. "__auto__" as the ship means "pick the first idle,
-// non-stale ship" (mirrors `--assign` with no arg).
+// stay behaviour-identical. "__auto__" as the ship means "route to the
+// flagship for delegation" (mirrors `--assign` with no arg).
 
-// RunCaptureOnly captures a task. assign == "" means unassigned; "auto" picks a
-// free ship; any other value commissions that specific ship. noPush suppresses
-// the git push (local-only capture) — used by the web UI so a LAN viewer never
-// blocks on a (possibly offline) remote. Returns the exit code (0 == ok) and
-// any fatal error.
+// RunCaptureOnly captures a task. assign == "" means unassigned; "auto" routes
+// to the flagship; any other value commissions that specific ship. noPush
+// suppresses the git push (local-only capture) — used by the web UI so a LAN
+// viewer never blocks on a (possibly offline) remote. Returns the exit code
+// (0 == ok) and any fatal error.
 func RunCaptureOnly(root, title, desc, assign string, noPush bool) (int, error) {
 	args := []string{"--title", title}
 	if desc != "" {
@@ -740,8 +719,8 @@ func RunCaptureOnly(root, title, desc, assign string, noPush bool) (int, error) 
 	return 0, nil
 }
 
-// RunAssignOnly assigns an existing task to ship ("" / "__auto__" => first free
-// ship). noPush suppresses the git push.
+// RunAssignOnly assigns an existing task to ship ("" / "__auto__" => flagship,
+// which delegates or executes it). noPush suppresses the git push.
 func RunAssignOnly(root, slug, ship string, noPush bool) (int, error) {
 	args := []string{slug}
 	if ship != "" && ship != "__auto__" {

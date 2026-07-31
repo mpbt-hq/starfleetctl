@@ -41,8 +41,8 @@ type boardEntryJSON struct {
 }
 
 // BoardEntries returns the same board data that `comms board --json`
-// prints, as a slice — for programmatic callers (e.g. task capture's free-ship
-// picker) that need it without parsing stdout.
+// prints, as a slice — for programmatic callers that need it without parsing
+// stdout.
 func (b *Bus) BoardEntries() []boardEntryJSON {
 	recs := b.AllStatusRecords()
 	out := make([]boardEntryJSON, 0, len(recs))
