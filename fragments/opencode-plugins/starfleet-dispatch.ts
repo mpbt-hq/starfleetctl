@@ -542,7 +542,7 @@ export const plugin = async ({ client, $ }: any) => {
       client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: 'active (fallback)' } }).catch(() => {})
       resolveSessionId().then(() => {
         if (currentModel.model) {
-          bus({ cmd: 'health', state: 'working', ...currentModel })
+          bus({ cmd: 'health', ...currentModel })
         }
       })
     }
@@ -636,10 +636,8 @@ export const plugin = async ({ client, $ }: any) => {
         cmd: 'health',
         plugin_last_run: new Date().toISOString(),
         model_last_action: turnCount > 1 ? new Date().toISOString() : undefined,
-        state: 'working',
         pid: process.pid,
       })
-      bus({ cmd: 'status', state: 'working', note: 'opencode ship' })
 
       // Fleet identity injection.
       const hasIdentity = output.system.some(l => l.includes('--- fleet identity ---'))
