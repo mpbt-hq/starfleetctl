@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.4.1'
+const PLUGIN_VERSION = '2.5.0'
 
 import { execSync } from 'node:child_process'
 
@@ -118,301 +118,11 @@ function tickLog(line: string): void {
   try { bus({ cmd: 'tick', note: line }) } catch { /* ignore */ }
 }
 
-// Toast factories (need client & bus from closure)
-const toast = (variant: string, title: string, message: string, duration = 2500): void => {
-  try {
-    const t: any = (client as any).tui
-    t.showToast({ body: { variant: variant as any, title, message, duration } })
-  } catch { /* tui not ready / unavailable */ }
-}
-
-const toastBus = (variant: string, title: string, message: string, duration = 5000): void => {
-  toast(variant, title, message, duration)
-  try { bus({ cmd: 'toast', variant, title, message, duration }) } catch { /* ignore */ }
-}
-
-// Parse and handle fleet messages by type.
-// Returns true if the message was handled (should NOT be injected as system prompt).
-function handleMessage(
-  msg: { id: string; from: string; text: string; type?: string },
-  client: any, sessionID: string,
-): boolean {
-  const text = msg.text.trim()
-
-  // Helper: resolve session ID, trying cache, closure, then fresh discovery
-  const resolveSid = async (): Promise<string> =>
-    sessionID || currentSessionID || await resolveSessionId() || ''
-
-  // Helper: execute model switch with current model update + bus feedback
-  const doSwitchModel = async (sid: string, targetModel: string, src: string) => {
-    if (!sid) { tickLog(`${src}: no session ID, can't switch model`); return }
-    const clearMethod = client.session.clear || client.session.reset
-    const promise = clearMethod
-      ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
-      : Promise.resolve()
-    promise
-      .then(() => client.session.update({ path: { id: sid }, body: { model: targetModel } }))
-      .then(() => {
-        currentModel.model = targetModel
-        tickLog(`${src}: ok → ${targetModel}`)
-        toastBus('success', 'starfleet-dispatch', `Model switched to ${targetModel}`, 5000)
-        bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString(), ...currentModel })
-      })
-      .catch((e: any) => {
-        const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
-        tickLog(emsg)
-        toastBus('error', 'starfleet-dispatch', emsg, 8000)
-      })
-  }
-
-  // Check for model-switch directives in ship/user/control messages.
-  // Both "setmodel <model>" and "model <model>" are accepted: the former is
-  // an explicit directive, the latter is a command-style shorthand that
-  // some senders (e.g. McKinley/Enterprise) use via `comms tell` with
-  // type="ship" — without this, those messages fall through to the
-  // case 'ship' → return false branch and get injected as a directive
-  // instead of being executed as a model-switch command.
-  if (msg.type === 'ship' || msg.type === 'user' || msg.type === 'control') {
-    const lower = text.toLowerCase()
-    let prefix = ''
-    if (lower.startsWith('setmodel ')) {
-      prefix = 'setmodel '
-    } else if (lower.startsWith('model ')) {
-      prefix = 'model '
-    }
-    if (prefix) {
-      const targetModel = text.slice(prefix.length).trim()
-      if (!targetModel) { tickLog(`model-switch from=${msg.from}: missing model name`); return true }
-      const src = `[model-switch from=${msg.from}]`
-      tickLog(`${src}: switching to ${targetModel}`)
-      toastBus('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${targetModel}`, 5000)
-      ;(async () => {
-        try {
-          await doSwitchModel(await resolveSid(), targetModel, src)
-        } catch (e) {
-          const emsg = `${src}: handler crashed: ${String(e).slice(0, 120)}`
-          tickLog(emsg)
-          toastBus('error', 'starfleet-dispatch', emsg, 8000)
-        }
-      })()
-      return true
-    }
-  }
-
-  switch (msg.type || 'ship') {
-    // --- directives: inject as system prompt ---
-    case 'ship':
-    case 'user':
-    case 'control':
-      return false
-
-    // --- commands: execute locally, never inject ---
-    case 'command': {
-      const verb = text.split(/\s+/)[0].toLowerCase()
-      const args = text.slice(verb.length).trim()
-
-      switch (verb) {
-        case 'model': {
-          if (!args) { tickLog(`command model from=${msg.from}: missing model name`); return true }
-          const src = `[command model from=${msg.from}]`
-          tickLog(`${src}: switching to ${args}`)
-          toastBus('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${args}`, 5000)
-          ;(async () => {
-            try {
-              await doSwitchModel(await resolveSid(), args, src)
-            } catch (e) {
-              const emsg = `${src}: handler crashed: ${String(e).slice(0, 120)}`
-              tickLog(emsg)
-              toastBus('error', 'starfleet-dispatch', emsg, 8000)
-            }
-          })()
-          return true
-        }
-        case 'quit': {
-          const src = `[command quit from=${msg.from}]`
-          tickLog(`${src}: shutting down`)
-          toastBus('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
-          bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
-          setTimeout(() => process.exit(0), 500)
-          return true
-        }
-        case 'reset': {
-          const src = `[command reset from=${msg.from}]`
-          tickLog(`${src}: clearing session`)
-          toastBus('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
-          ;(async () => {
-            const sid = await resolveSid()
-            if (!sid) { tickLog(`${src}: no session ID`); return }
-            const clearMethod = client.session.clear || client.session.reset
-            if (clearMethod) {
-              clearMethod({ path: { id: sid } })
-                .then(() => {
-                  tickLog(`${src}: ok`)
-                  toastBus('success', 'starfleet-dispatch', 'Session cleared', 3000)
-                  bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
-                })
-                .catch((e: any) => {
-                  const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
-                  tickLog(emsg)
-                  toastBus('error', 'starfleet-dispatch', emsg, 8000)
-                })
-            } else {
-              tickLog(`${src}: no clear/reset method available`)
-              toastBus('error', 'starfleet-dispatch', 'No session clear/reset method', 5000)
-            }
-          })()
-          return true
-        }
-        case 'status': {
-          const src = `[command status from=${msg.from}]`
-          tickLog(`${src}: reporting status`)
-          bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
-          toastBus('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
-          return true
-        }
-        case 'abort-retry': {
-          // Clear session state and switch model — hard reset for stuck retries
-          const target = args || FALLBACK_MODEL
-          if (!target) { tickLog(`command abort-retry from=${msg.from}: no model specified, no fallback`); return true }
-          const src = `[command abort-retry from=${msg.from}]`
-          tickLog(`${src}: clearing session + switching to ${target}`)
-          toastBus('warning', 'starfleet-dispatch', `Abort-retry + model switch to ${target}`, 5000)
-          ;(async () => {
-            const sid = await resolveSid()
-            if (!sid) { tickLog(`${src}: no session ID`); return }
-            const clearMethod = client.session.clear || client.session.reset
-            const promise = clearMethod
-              ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
-              : Promise.resolve()
-            promise
-              .then(() => client.session.update({ path: { id: sid }, body: { model: target } }))
-              .then(() => {
-                tickLog(`${src}: ok → ${target}`)
-                toastBus('success', 'starfleet-dispatch', `Abort-retry + switch to ${target} done`, 5000)
-                bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
-              })
-              .catch((e: any) => {
-                const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
-                tickLog(emsg)
-                toastBus('error', 'starfleet-dispatch', emsg, 8000)
-              })
-          })()
-          return true
-        }
-        default: {
-          tickLog(`unknown command from=${msg.from}: ${verb}`)
-          return true
-        }
-      }
-    }
-
-    // --- unknown type: log and don't inject ---
-    default: {
-      tickLog(`unknown message type=${msg.type} from=${msg.from}`)
-      return true
-    }
-  }
-}
-
-// Execute a policy action returned by starfleetctl error-handle.
-// This is the ONLY place recovery actions are performed — the plugin is a
-// thin detector + executor, all policy logic lives in the Go binary.
-async function executeAction(
-  action: string, targetModel: string, detail: string,
-  client: any, sessionID: string, hasSwitched: { v: boolean },
-): Promise<void> {
-  const src = `[action=${action}]`
-  if (!sessionID) { tickLog(`ERROR-HANDLE ${src}: no session ID, skipping`); return }
-  if (action === 'ignore') {
-    tickLog(`ERROR-HANDLE ${src}: ignoring "${detail}"`)
-    return
-  }
-  if (action === 'retry') {
-    // For transient stream/resource errors, clear the session first to
-    // properly restart it. Just re-prompting doesn't fix broken streams.
-    const isStreamError =
-      detail.includes('ResourceExhausted') ||
-      detail.includes('Streaming response failed') ||
-      detail.includes('stream interrupted') ||
-      detail.includes('response stream') ||
-      detail.includes('connection closed') ||
-      detail.includes('broken pipe') ||
-      detail.includes('unexpected eof') ||
-      detail.includes('stream closed')
-
-    const promise = Promise.resolve()
-    if (isStreamError) {
-      tickLog(`ERROR-HANDLE ${src}: clearing session for stream error (detail: ${detail})`)
-      const clearMethod = client.session.clear || client.session.reset
-      if (clearMethod) {
-        promise.then(() => clearMethod({ path: { id: sessionID } }))
-          .then(() => tickLog(`ERROR-HANDLE ${src}: session cleared, will re-prompt`))
-          .then(() => new Promise(r => setTimeout(r, 500)))
-          .catch((e: any) => tickLog(`ERROR-HANDLE ${src}: session.clear failed: ${String(e).slice(0, 120)}`))
-      }
-    }
-
-    tickLog(`ERROR-HANDLE ${src}: re-prompting (detail: ${detail})`)
-    promise
-      .then(() => client.session.promptAsync({
-        path: { id: sessionID },
-        body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-      }))
-      .then(() => tickLog(`ERROR-HANDLE ${src}: promptAsync sent`))
-      .catch((e: any) => tickLog(`ERROR-HANDLE ${src}: promptAsync failed: ${String(e).slice(0, 120)}`))
-    return
-  }
-  if (action === 'switch-model') {
-    if (!targetModel || hasSwitched.v) {
-      tickLog(`ERROR-HANDLE ${src}: switch-model requested but ${!targetModel ? 'no target' : 'already switched'} — falling back to retry`)
-      try {
-        await client.session.promptAsync({
-          path: { id: sessionID },
-          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-        })
-      } catch { /* ignore */ }
-      return
-    }
-    hasSwitched.v = true
-    const msg = `ERROR-HANDLE ${src}: switching to ${targetModel} (was: ${detail})`
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
-    tickLog(msg)
-    toastBus('warning', 'starfleet-dispatch', msg, 8000)
-    // Use .then() chain like the working 'model' command, not await
-    const clearMethod = client.session.clear || client.session.reset
-    const promise = clearMethod
-      ? clearMethod({ path: { id: sessionID } }).then(() => new Promise(r => setTimeout(r, 500)))
-      : Promise.resolve()
-    promise
-      .then(() => client.session.update({ path: { id: sessionID }, body: { model: targetModel } }))
-      .then(() => {
-        tickLog(`ERROR-HANDLE ${src}: update ok → ${targetModel}`)
-        return client.session.promptAsync({
-          path: { id: sessionID },
-          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
-        })
-      })
-      .then(() => tickLog(`ERROR-HANDLE ${src}: promptAsync sent`))
-      .catch((e: any) => {
-        const emsg = `ERROR-HANDLE ${src}: failed: ${String(e).slice(0, 120)}`
-        client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
-        tickLog(emsg)
-        hasSwitched.v = false
-      })
-    return
-  }
-  tickLog(`ERROR-HANDLE ${src}: unknown action "${action}" — ignoring`)
-}
-
 export const plugin = async ({ client, $ }: any) => {
   loadConfig()
 
   // Initial health: reset stale + fresh write.
   bus({ cmd: 'health', reset: true, state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
-
-  const heartbeatTimer = setInterval(() => {
-    bus({ cmd: 'health', touch: true, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel })
-  }, HEARTBEAT_MS)
 
   let tuiReady = false
   let sessionNeedsIdentity = true
@@ -420,6 +130,7 @@ export const plugin = async ({ client, $ }: any) => {
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
+  let currentTask = ''
   const hasSwitchedToFallback = { v: false }
 
   // Toast factories (need client & bus from closure)
@@ -428,6 +139,319 @@ export const plugin = async ({ client, $ }: any) => {
       const t: any = (client as any).tui
       t.showToast({ body: { variant: variant as any, title, message, duration } })
     } catch { /* tui not ready / unavailable */ }
+  }
+
+  const toastBus = (variant: string, title: string, message: string, duration = 5000): void => {
+    toast(variant, title, message, duration)
+    try { bus({ cmd: 'toast', variant, title, message, duration }) } catch { /* ignore */ }
+  }
+
+  // Parse and handle fleet messages by type.
+  // Returns true if the message was handled (should NOT be injected as system prompt).
+  // Lives in the plugin closure because it needs client, currentModel,
+  // currentSessionID, resolveSessionId and toastBus.
+  function handleMessage(
+    msg: { id: string; from: string; text: string; type?: string },
+    client: any, sessionID: string,
+  ): boolean {
+    const text = msg.text.trim()
+
+    // Helper: resolve session ID, trying cache, closure, then fresh discovery
+    const resolveSid = async (): Promise<string> =>
+      sessionID || currentSessionID || await resolveSessionId() || ''
+
+    // Helper: execute model switch with current model update + bus feedback
+    const doSwitchModel = async (sid: string, targetModel: string, src: string) => {
+      if (!sid) { tickLog(`${src}: no session ID, can't switch model`); return }
+      const clearMethod = client.session.clear || client.session.reset
+      const promise = clearMethod
+        ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
+        : Promise.resolve()
+      promise
+        .then(() => client.session.update({ path: { id: sid }, body: { model: targetModel } }))
+        .then(() => {
+          currentModel.model = targetModel
+          tickLog(`${src}: ok → ${targetModel}`)
+          toastBus('success', 'starfleet-dispatch', `Model switched to ${targetModel}`, 5000)
+          bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString(), ...currentModel })
+        })
+        .catch((e: any) => {
+          const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+          tickLog(emsg)
+          toastBus('error', 'starfleet-dispatch', emsg, 8000)
+        })
+    }
+
+    // Check for model-switch directives in ship/user/control messages.
+    // Both "setmodel <model>" and "model <model>" are accepted: the former is
+    // an explicit directive, the latter is a command-style shorthand that
+    // some senders (e.g. McKinley/Enterprise) use via `comms tell` with
+    // type="ship" — without this, those messages fall through to the
+    // case 'ship' → return false branch and get injected as a directive
+    // instead of being executed as a model-switch command.
+    if (msg.type === 'ship' || msg.type === 'user' || msg.type === 'control') {
+      const lower = text.toLowerCase()
+      let prefix = ''
+      if (lower.startsWith('setmodel ')) {
+        prefix = 'setmodel '
+      } else if (lower.startsWith('model ')) {
+        prefix = 'model '
+      }
+      if (prefix) {
+        const targetModel = text.slice(prefix.length).trim()
+        if (!targetModel) { tickLog(`model-switch from=${msg.from}: missing model name`); return true }
+        const src = `[model-switch from=${msg.from}]`
+        tickLog(`${src}: switching to ${targetModel}`)
+        toastBus('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${targetModel}`, 5000)
+        ;(async () => {
+          try {
+            await doSwitchModel(await resolveSid(), targetModel, src)
+          } catch (e) {
+            const emsg = `${src}: handler crashed: ${String(e).slice(0, 120)}`
+            tickLog(emsg)
+            toastBus('error', 'starfleet-dispatch', emsg, 8000)
+          }
+        })()
+        return true
+      }
+    }
+
+    switch (msg.type || 'ship') {
+      // --- directives: inject as system prompt ---
+      case 'ship':
+      case 'user':
+      case 'control': {
+        // Auto-report: task-commission directives reference the dashboard
+        // topic ("(Dashboard-Topic `slug`)"). Adopt it as the current task so
+        // the fleet can see what this ship is working on right now.
+        const topic = /Dashboard-Topic[ \t]*[`']([^`']+)[`']/.exec(text)
+        if (topic) {
+          currentTask = topic[1]
+          bus({ cmd: 'task', task: topic[1] })
+          tickLog(`[task-adopt] ${msg.from}: → ${topic[1]}`)
+        }
+        return false
+      }
+
+      // --- commands: execute locally, never inject ---
+      case 'command': {
+        const verb = text.split(/\s+/)[0].toLowerCase()
+        const args = text.slice(verb.length).trim()
+
+        switch (verb) {
+          case 'model': {
+            if (!args) { tickLog(`command model from=${msg.from}: missing model name`); return true }
+            const src = `[command model from=${msg.from}]`
+            tickLog(`${src}: switching to ${args}`)
+            toastBus('info', 'starfleet-dispatch', `Model switch requested by ${msg.from}: ${args}`, 5000)
+            ;(async () => {
+              try {
+                await doSwitchModel(await resolveSid(), args, src)
+              } catch (e) {
+                const emsg = `${src}: handler crashed: ${String(e).slice(0, 120)}`
+                tickLog(emsg)
+                toastBus('error', 'starfleet-dispatch', emsg, 8000)
+              }
+            })()
+            return true
+          }
+          case 'task': {
+            // `task <slug>` — report what we're working on; `task clear` /
+            // `task done` (or bare `task`) — report back to idle.
+            const src = `[command task from=${msg.from}]`
+            if (!args || args === 'clear' || args === 'done') {
+              currentTask = ''
+              bus({ cmd: 'task', task: '', task_clear: true })
+              tickLog(`${src}: cleared`)
+              toastBus('info', 'starfleet-dispatch', 'Task cleared', 3000)
+            } else {
+              currentTask = args
+              bus({ cmd: 'task', task: args })
+              tickLog(`${src}: → ${args}`)
+              toastBus('info', 'starfleet-dispatch', `Task set: ${args}`, 3000)
+            }
+            return true
+          }
+          case 'quit': {
+            const src = `[command quit from=${msg.from}]`
+            tickLog(`${src}: shutting down`)
+            toastBus('info', 'starfleet-dispatch', `Quit requested by ${msg.from}`, 3000)
+            bus({ cmd: 'status', state: 'done', note: `quit requested by ${msg.from}` })
+            setTimeout(() => process.exit(0), 500)
+            return true
+          }
+          case 'reset': {
+            const src = `[command reset from=${msg.from}]`
+            tickLog(`${src}: clearing session`)
+            toastBus('info', 'starfleet-dispatch', `Session reset requested by ${msg.from}`, 3000)
+            ;(async () => {
+              const sid = await resolveSid()
+              if (!sid) { tickLog(`${src}: no session ID`); return }
+              const clearMethod = client.session.clear || client.session.reset
+              if (clearMethod) {
+                clearMethod({ path: { id: sid } })
+                  .then(() => {
+                    tickLog(`${src}: ok`)
+                    toastBus('success', 'starfleet-dispatch', 'Session cleared', 3000)
+                    bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+                  })
+                  .catch((e: any) => {
+                    const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+                    tickLog(emsg)
+                    toastBus('error', 'starfleet-dispatch', emsg, 8000)
+                  })
+              } else {
+                tickLog(`${src}: no clear/reset method available`)
+                toastBus('error', 'starfleet-dispatch', 'No session clear/reset method', 5000)
+              }
+            })()
+            return true
+          }
+          case 'status': {
+            const src = `[command status from=${msg.from}]`
+            tickLog(`${src}: reporting status`)
+            bus({ cmd: 'tell', to: msg.from, text: `status: alive, session=${sessionID}, model=${currentModel.model || 'unknown'}` })
+            toastBus('info', 'starfleet-dispatch', `Status reported to ${msg.from}`, 3000)
+            return true
+          }
+          case 'abort-retry': {
+            // Clear session state and switch model — hard reset for stuck retries
+            const target = args || FALLBACK_MODEL
+            if (!target) { tickLog(`command abort-retry from=${msg.from}: no model specified, no fallback`); return true }
+            const src = `[command abort-retry from=${msg.from}]`
+            tickLog(`${src}: clearing session + switching to ${target}`)
+            toastBus('warning', 'starfleet-dispatch', `Abort-retry + model switch to ${target}`, 5000)
+            ;(async () => {
+              const sid = await resolveSid()
+              if (!sid) { tickLog(`${src}: no session ID`); return }
+              const clearMethod = client.session.clear || client.session.reset
+              const promise = clearMethod
+                ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
+                : Promise.resolve()
+              promise
+                .then(() => client.session.update({ path: { id: sid }, body: { model: target } }))
+                .then(() => {
+                  tickLog(`${src}: ok → ${target}`)
+                  toastBus('success', 'starfleet-dispatch', `Abort-retry + switch to ${target} done`, 5000)
+                  bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+                })
+                .catch((e: any) => {
+                  const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+                  tickLog(emsg)
+                  toastBus('error', 'starfleet-dispatch', emsg, 8000)
+                })
+            })()
+            return true
+          }
+          default: {
+            tickLog(`unknown command from=${msg.from}: ${verb}`)
+            return true
+          }
+        }
+      }
+
+      // --- unknown type: log and don't inject ---
+      default: {
+        tickLog(`unknown message type=${msg.type} from=${msg.from}`)
+        return true
+      }
+    }
+  }
+
+  // Execute a policy action returned by starfleetctl error-handle.
+  // This is the ONLY place recovery actions are performed — the plugin is a
+  // thin detector + executor, all policy logic lives in the Go binary.
+  async function executeAction(
+    action: string, targetModel: string, detail: string,
+    client: any, sessionID: string, hasSwitched: { v: boolean },
+  ): Promise<void> {
+    const src = `[action=${action}]`
+    if (!sessionID) { tickLog(`ERROR-HANDLE ${src}: no session ID, skipping`); return }
+    if (action === 'ignore') {
+      tickLog(`ERROR-HANDLE ${src}: ignoring "${detail}"`)
+      return
+    }
+    if (action === 'retry') {
+      // For transient stream/resource errors, clear the session first to
+      // properly restart it. Just re-prompting doesn't fix broken streams.
+      const isStreamError =
+        detail.includes('ResourceExhausted') ||
+        detail.includes('Streaming response failed') ||
+        detail.includes('stream interrupted') ||
+        detail.includes('response stream') ||
+        detail.includes('connection closed') ||
+        detail.includes('broken pipe') ||
+        detail.includes('unexpected eof') ||
+        detail.includes('stream closed')
+
+      const promise = Promise.resolve()
+      if (isStreamError) {
+        tickLog(`ERROR-HANDLE ${src}: clearing session for stream error (detail: ${detail})`)
+        const clearMethod = client.session.clear || client.session.reset
+        if (clearMethod) {
+          promise.then(() => clearMethod({ path: { id: sessionID } }))
+            .then(() => tickLog(`ERROR-HANDLE ${src}: session cleared, will re-prompt`))
+            .then(() => new Promise(r => setTimeout(r, 500)))
+            .catch((e: any) => tickLog(`ERROR-HANDLE ${src}: session.clear failed: ${String(e).slice(0, 120)}`))
+        }
+      }
+
+      tickLog(`ERROR-HANDLE ${src}: re-prompting (detail: ${detail})`)
+      promise
+        .then(() => client.session.promptAsync({
+          path: { id: sessionID },
+          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+        }))
+        .then(() => tickLog(`ERROR-HANDLE ${src}: promptAsync sent`))
+        .catch((e: any) => tickLog(`ERROR-HANDLE ${src}: promptAsync failed: ${String(e).slice(0, 120)}`))
+      return
+    }
+    if (action === 'switch-model') {
+      if (!targetModel || hasSwitched.v) {
+        tickLog(`ERROR-HANDLE ${src}: switch-model requested but ${!targetModel ? 'no target' : 'already switched'} — falling back to retry`)
+        try {
+          await client.session.promptAsync({
+            path: { id: sessionID },
+            body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+          })
+        } catch { /* ignore */ }
+        return
+      }
+      hasSwitched.v = true
+      const msg = `ERROR-HANDLE ${src}: switching to ${targetModel} (was: ${detail})`
+      client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
+      tickLog(msg)
+      toastBus('warning', 'starfleet-dispatch', msg, 8000)
+      // Use .then() chain like the working 'model' command, not await
+      const clearMethod = client.session.clear || client.session.reset
+      const promise = clearMethod
+        ? clearMethod({ path: { id: sessionID } }).then(() => new Promise(r => setTimeout(r, 500)))
+        : Promise.resolve()
+      promise
+        .then(() => client.session.update({ path: { id: sessionID }, body: { model: targetModel } }))
+        .then(() => {
+          tickLog(`ERROR-HANDLE ${src}: update ok → ${targetModel}`)
+          return client.session.promptAsync({
+            path: { id: sessionID },
+            body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+          })
+        })
+        .then(() => tickLog(`ERROR-HANDLE ${src}: promptAsync sent`))
+        .catch((e: any) => {
+          const emsg = `ERROR-HANDLE ${src}: failed: ${String(e).slice(0, 120)}`
+          client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
+          tickLog(emsg)
+          hasSwitched.v = false
+        })
+      return
+    }
+    tickLog(`ERROR-HANDLE ${src}: unknown action "${action}" — ignoring`)
+  }
+
+  const heartbeatTimer = setInterval(() => {
+    bus({ cmd: 'health', touch: true, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel, task: currentTask })
+  }, HEARTBEAT_MS)
+
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
   // failures as a `session.error` event — it parks the session in a `retry`
   // status with a human-readable message instead. Poll that status so the
