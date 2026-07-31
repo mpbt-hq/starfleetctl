@@ -75,6 +75,11 @@ const opencodeScriptsSubdir = "opencode-scripts"
 // merges its required keys into (relative to the workspace root).
 const opencodeConfigRel = ".opencode/opencode.json"
 
+// opencodeConfigSchema is the JSON-schema URL bootstrap writes into a
+// freshly-created .opencode/opencode.json (and into any existing config that
+// lacks a $schema key). Existing $schema values are never overwritten.
+const opencodeConfigSchema = "https://opencode.ai/config.json"
+
 // opencodeInstructionsPath is the generated agents index bootstrap registers
 // in the opencode config's "instructions" array — same file that the
 // verifyAgentsIndex/fixAgentsIndex pair maintains.
@@ -860,9 +865,16 @@ func cloneOpencodeConfig(doc map[string]any) map[string]any {
 
 // ensureOpencodePlanAccess mutates the opencode config doc in place so it
 // carries bootstrap's required entries, preserving every unrelated key and
-// any user-defined rules (merge, never clobber). Returns true if doc changed.
+// never overwriting explicit user values (merge, never clobber). Returns true
+// if doc changed.
 func ensureOpencodePlanAccess(doc map[string]any) bool {
 	changed := false
+
+	// "$schema": only ever added, never overwritten (editor validation).
+	if _, ok := doc["$schema"]; !ok {
+		doc["$schema"] = opencodeConfigSchema
+		changed = true
+	}
 
 	// "instructions": register the generated agents index, drop legacy paths.
 	instructions, _ := doc["instructions"].([]any)
@@ -891,7 +903,9 @@ func ensureOpencodePlanAccess(doc map[string]any) bool {
 	}
 	doc["instructions"] = keep
 
-	// "agent.plan.permission.bash": ensure the starfleetctl allow rules.
+	// "agent.plan.permission.bash": ensure the starfleetctl allow rules. Only
+	// absent rules are added — an explicit user value ("ask"/"deny") for the
+	// same pattern is honored, never overwritten (merge, not clobber).
 	agent, _ := doc["agent"].(map[string]any)
 	if agent == nil {
 		agent = map[string]any{}
@@ -917,7 +931,7 @@ func ensureOpencodePlanAccess(doc map[string]any) bool {
 		changed = true
 	}
 	for pattern, want := range opencodePlanPermissionRules() {
-		if cur, ok := bash[pattern]; !ok || cur != want {
+		if _, ok := bash[pattern]; !ok {
 			bash[pattern] = want
 			changed = true
 		}
