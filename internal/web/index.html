@@ -349,6 +349,29 @@
     </div>
   </div>
 
+  <!-- task detail modal (full text view + edit) -->
+  <div id="task_modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTaskModal()">
+    <div class="modal" style="max-width:760px">
+      <div class="row" style="align-items:flex-start">
+        <div class="grow">
+          <b id="task_m_title"></b>
+          <div id="task_m_meta" class="muted" style="margin-top:4px;font-size:12px"></div>
+        </div>
+        <button class="sec" onclick="taskDetailEdit()" style="width:auto;padding:4px 10px">Bearbeiten</button>
+        <button class="sec" onclick="closeTaskModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
+      </div>
+      <div id="task_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></div>
+      <div id="task_m_edit" style="display:none;margin-top:12px">
+        <input id="task_m_t" placeholder="Titel" style="width:100%;box-sizing:border-box">
+        <textarea id="task_m_text" placeholder="Task-Volltext (Markdown-Body)..." style="width:100%;min-height:280px;margin-top:8px;box-sizing:border-box;font:13px/1.5 ui-monospace,monospace"></textarea>
+        <div class="row" style="margin-top:8px;gap:8px">
+          <button onclick="taskDetailSave()">Speichern</button>
+          <button class="sec" onclick="showTaskBody()">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <section class="page" id="files">
     <div class="card">
       <div class="row" style="align-items:center">
@@ -991,6 +1014,7 @@ function renderTasks(){
         <select id="as_${esc(r.slug)}" style="width:auto">${assignOpts}</select>
         <button class="sec" onclick="taskAssign('${esc(r.slug)}')">Zuweisen</button>
         <button class="sec" onclick="taskUnassign('${esc(r.slug)}')">Frei</button>
+        <button class="sec" onclick="taskDetail('${esc(r.slug)}')">Detail</button>
       </div>
     </div>`;
   }).join('');
@@ -1022,6 +1046,49 @@ async function taskUnassign(slug){
   try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({slug, unassign:true})}); toast('frei'); loadTasks(); }
   catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+// --- Task full-text detail: view (GET /api/topic/<slug>) + edit (POST) ---
+let taskDetailSlug = null;
+async function taskDetail(slug){
+  try {
+    const t = await api('/api/topic/' + encodeURIComponent(slug));
+    taskDetailSlug = slug;
+    document.getElementById('task_m_title').textContent = t.title;
+    document.getElementById('task_m_meta').textContent =
+      t.slug + ' · ' + (t.kind||'task') + ' · ' + (t.status||'') + ' · 👤 ' + (t.assigned_to||'-');
+    document.getElementById('task_m_t').value = t.title;
+    document.getElementById('task_m_text').value = t.body || '';
+    showTaskBody();
+    document.getElementById('task_modal').style.display = 'flex';
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+function closeTaskModal(){
+  document.getElementById('task_modal').style.display = 'none';
+  taskDetailSlug = null;
+}
+// showTaskBody switches the edit pane back to the rendered view, re-reading
+// the textarea so unsaved edits are displayed (but not persisted).
+function showTaskBody(){
+  document.getElementById('task_m_edit').style.display = 'none';
+  const el = document.getElementById('task_m_body');
+  el.textContent = document.getElementById('task_m_text').value || '(leer)';
+  el.style.display = '';
+}
+function taskDetailEdit(){
+  document.getElementById('task_m_body').style.display = 'none';
+  document.getElementById('task_m_edit').style.display = 'block';
+}
+async function taskDetailSave(){
+  if (!taskDetailSlug) return;
+  const title = document.getElementById('task_m_t').value.trim();
+  const body = document.getElementById('task_m_text').value;
+  try {
+    await api('/api/topic/' + encodeURIComponent(taskDetailSlug), {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({title, body})});
+    toast('Task aktualisiert');
+    closeTaskModal();
+    loadTasks();
+  } catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 // taskAssign kicks off (or reassigns) an existing task: "__auto__" routes to
 // the flagship (which delegates or executes it), any other value names the

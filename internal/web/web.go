@@ -100,6 +100,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/tell", s.apiTell)
 	s.mux.HandleFunc("/api/cmd", s.apiCmd)
 	s.mux.HandleFunc("/api/task", s.apiTask)
+	s.mux.HandleFunc("/api/topic/", s.apiTopicDispatch)
 	s.mux.HandleFunc("/api/identity", s.apiIdentity)
 	s.mux.HandleFunc("/api/models", s.apiModels)
 	s.mux.HandleFunc("/api/timers", s.apiTimers)
@@ -228,6 +229,90 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, metas)
+}
+
+// apiTopicDispatch routes /api/topic/<slug> — full-text view/edit of a
+// dashboard topic (used for the task detail view):
+//
+//	GET  -> full topic (frontmatter + markdown body)
+//	POST {title?, body, commit_msg?, push?} -> rewrite body (+ title) via the
+//	      sanctioned dashboard path and commit (+ push by default)
+func (s *Server) apiTopicDispatch(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimPrefix(r.URL.Path, "/api/topic/")
+	if slug == "" {
+		writeErr(w, 400, "slug required — /api/topic/<slug>")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.apiTopicGet(w, slug)
+	case http.MethodPost:
+		s.apiTopicUpdate(w, r, slug)
+	default:
+		writeErr(w, 405, "method not allowed")
+	}
+}
+
+func (s *Server) apiTopicGet(w http.ResponseWriter, slug string) {
+	m, body, err := s.dash.DoTopicLoad(slug)
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{
+		"slug":        m.Slug,
+		"title":       m.Title,
+		"body":        body,
+		"kind":        m.Kind,
+		"status":      m.Status,
+		"assigned_to": m.AssignedTo,
+		"created_by":  m.CreatedBy,
+		"created":     m.Created,
+	})
+}
+
+// apiTopicUpdate rewrites a topic's full text (and optionally its title)
+// through the sanctioned dashboard path (DoTopicLoad -> DoTopicUpdate ->
+// DoTopicCommit), never touching the topic file directly. It commits and,
+// unless push=false, pushes — an explicit full-text edit is meant to
+// propagate to the fleet; if the git remote is unreachable the error
+// surfaces to the caller instead of silently dropping the push.
+func (s *Server) apiTopicUpdate(w http.ResponseWriter, r *http.Request, slug string) {
+	var p struct {
+		Title     string `json:"title"`
+		Body      string `json:"body"`
+		CommitMsg string `json:"commit_msg"`
+		Push      *bool  `json:"push"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	m, _, err := s.dash.DoTopicLoad(slug)
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	if p.Title != "" {
+		m.Title = p.Title
+	}
+	msg := strings.TrimSpace(p.CommitMsg)
+	if msg == "" {
+		msg = "web: topic update " + slug
+	}
+	push := true
+	if p.Push != nil {
+		push = *p.Push
+	}
+	if err := s.dash.DoTopicUpdate(slug, m, p.Body); err != nil {
+		writeErr(w, 500, "write: "+err.Error())
+		return
+	}
+	if err := s.dash.DoTopicCommit(slug, msg, push); err != nil {
+		writeErr(w, 500, "commit: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "slug": slug})
 }
 
 // apiDashboardReindex handles POST /api/dashboard/reindex — regenerates the
