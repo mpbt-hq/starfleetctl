@@ -870,7 +870,7 @@ async function taskUnassign(slug){
 async function taskAssign(slug){
   const ship = document.getElementById('as_'+slug).value;
   try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({slug, ship})); toast('zugewiesen → '+ship); loadTasks(); }
+    body: JSON.stringify({slug, ship})}); toast('zugewiesen → '+ship); loadTasks(); }
   catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
