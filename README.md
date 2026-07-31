@@ -32,6 +32,11 @@ starfleetctl genesis-init .
 ./starfleet-bootstrap
 ```
 
+`make all` additionally runs `vet`, `fmt`, the unit tests, and a static
+build-test of the opencode plugin (`check-plugin` — esbuild bundle check plus
+`tsc --noEmit`; both steps skip gracefully when their toolchain isn't
+installed, see `scripts/check-opencode-plugin.sh`).
+
 ## Documentation
 
 | Document | Description |

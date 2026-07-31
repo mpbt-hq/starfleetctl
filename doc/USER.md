@@ -29,7 +29,10 @@ make build              # produces ./starfleetctl binary
 ./starfleetctl --version  # verify
 ```
 
-**Requirements:** Go 1.21+ (stdlib only, no external dependencies).
+**Requirements:** Go 1.21+ (stdlib only, no external dependencies). The
+optional `check-plugin` step of `make all` additionally needs `esbuild` and —
+for the type check — `typescript` + `@types/node` (`npm i -g typescript
+@types/node`); both steps skip gracefully when absent.
 **Build is always via `make` — `go build` and `go install` are not supported.**
 
 ### Option B: Use the Bootstrap Script (Workspace Setup)
