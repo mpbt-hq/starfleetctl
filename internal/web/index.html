@@ -383,7 +383,18 @@
 </div>
 
 <script>
-const api = (p, opt) => fetch(p, opt).then(r => r.ok ? r.json() : Promise.reject(r));
+// api wraps fetch and rejects with a real Error carrying the server's error
+// message (if any), so callers can show a useful message instead of the raw
+// Response object.
+const api = async (p, opt) => {
+  const r = await fetch(p, opt);
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { const j = await r.json(); if (j && j.error) msg = j.error; } catch { /* not JSON */ }
+    throw new Error(msg);
+  }
+  return r.json();
+};
 let identity = { ship_id: "" };
 
 function show(p, push){
@@ -796,19 +807,30 @@ async function loadScreen(){
 async function loadTasks(){
   const el = document.getElementById('tasklist');
   try {
-    const rows = await api('/api/tasks');
+    const [rows, board] = await Promise.all([api('/api/tasks'), api('/api/board')]);
     if (!rows.length){ el.innerHTML = '<div class="empty">keine Tasks</div>'; return; }
+    // Live "in Bearbeitung" marker: ships in state working report their
+    // current task via the heartbeat (task/progress status fields).
+    const workers = {};
+    for (const r of board) if ((r.state==='working'||r.state==='building') && r.task) workers[r.task] = r.agent;
+    // All ships for the assign dropdown ("auto" => flagship picks a free ship).
+    const ships = [...new Set(board.map(r=>r.agent))].sort();
     el.innerHTML = rows.map(r=>{
       const cls = (r.status==='done')?'ok':(r.status==='assigned')?'warn':'dim';
+      const worker = workers[r.slug];
+      const assignOpts = '<option value="__auto__">auto — Flagschiff wählt</option>' +
+        ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
       return `<div class="card">
         <div class="row"><b class="grow">${esc(r.title)}</b>
           <span class="pill ${cls}">${esc(r.status)}</span></div>
-        <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}</div>
+        <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)} bearbeitet gerade`:''}</div>
         <div class="actions">
           <select id="st_${esc(r.slug)}" style="width:auto">
             ${['open','assigned','in-progress','done','parked'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}
           </select>
           <button class="sec" onclick="taskStatus('${esc(r.slug)}')">Status</button>
+          <select id="as_${esc(r.slug)}" style="width:auto">${assignOpts}</select>
+          <button class="sec" onclick="taskAssign('${esc(r.slug)}')">Zuweisen</button>
           <button class="sec" onclick="taskUnassign('${esc(r.slug)}')">Frei</button>
         </div>
       </div>`;
@@ -839,8 +861,16 @@ async function taskStatus(slug){
   catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 async function taskUnassign(slug){
-  const fd = new FormData(); fd.set('slug', slug); fd.set('unassign','1');
-  try { await api('/api/task', {method:'POST', body: fd}); toast('frei'); loadTasks(); }
+  try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({slug, unassign:true})}); toast('frei'); loadTasks(); }
+  catch(e){ toast('Fehler: '+esc(e.message), true); }
+}
+// taskAssign kicks off (or reassigns) an existing task: "__auto__" lets the
+// flagship pick the first free ship, any other value names the ship directly.
+async function taskAssign(slug){
+  const ship = document.getElementById('as_'+slug).value;
+  try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({slug, ship})); toast('zugewiesen → '+ship); loadTasks(); }
   catch(e){ toast('Fehler: '+esc(e.message), true); }
 }
 
@@ -1352,7 +1382,7 @@ loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
-  if (c==='status'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='reports'||c==='files') refresh();
+  if (c==='status'||c==='tasks'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='reports'||c==='files') refresh();
   if (shipCurrent) {
     loadShipChat(shipCurrent);
     // Refresh terminal if screen tab is active and auto-update is on

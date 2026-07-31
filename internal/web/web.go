@@ -334,7 +334,12 @@ func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
+		// ParseForm() alone makes r.Form non-nil before FormValue() runs, which
+		// suppresses FormValue's implicit multipart parse — so a FormData body
+		// (what the web UI's fetch() sends) would yield empty fields. Parse
+		// both explicitly.
 		_ = r.ParseForm()
+		_ = r.ParseMultipartForm(32 << 20)
 		p.Title = r.FormValue("title")
 		p.Desc = r.FormValue("desc")
 		p.Slug = r.FormValue("slug")
