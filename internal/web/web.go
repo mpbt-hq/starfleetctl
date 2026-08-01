@@ -226,10 +226,17 @@ func (s *Server) apiEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
-	metas, err := s.dash.LoadAllTopicsJSON()
+	// Try non-strict first (skip invalid files)
+	metas, err := s.dash.LoadAllTopicsJSON(false)
 	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
+		// If even non-strict fails, try auto-reindex and retry
+		if reindexErr := s.dash.DoReindex(); reindexErr == nil {
+			metas, err = s.dash.LoadAllTopicsJSON(false)
+		}
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 	}
 	writeJSON(w, metas)
 }

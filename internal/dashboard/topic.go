@@ -249,10 +249,17 @@ func (d *Dashboard) LoadAllTopics() ([]TopicMeta, error) {
 
 // LoadAllTopicsJSON returns every dashboard/topics/*.md file's frontmatter as a
 // JSON-shaped slice, sorted by slug — for the web UI's task board.
-func (d *Dashboard) LoadAllTopicsJSON() ([]TopicJSON, error) {
+// If strict=true, any parse error fails the whole call. If strict=false (default),
+// invalid files are skipped with a warning and the rest are returned.
+func (d *Dashboard) LoadAllTopicsJSON(strict bool) ([]TopicJSON, error) {
 	metas, err := d.loadAllTopics()
 	if err != nil {
-		return nil, err
+		if strict {
+			return nil, err
+		}
+		// Non-strict: log and continue with what we have
+		fmt.Fprintf(os.Stderr, "dashboard: loadAllTopics warning: %v\n", err)
+		metas = nil
 	}
 	out := make([]TopicJSON, 0, len(metas))
 	for _, m := range metas {
