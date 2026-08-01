@@ -33,7 +33,7 @@ Safe to run multiple times. Verifies and repairs everything:
 | opencode plugins | `.opencode/plugins/` | Agent-bus polling, inbox injection |
 | Launcher scripts | `.starfleet-ai/bin/` | `run-opencode.ship`, `run-opencode.flagship`, `run-claude.*` |
 | Claude hooks | `.claude/hooks/` | `agent-permission-hook` for tool gating |
-| Dashboard | `.starfleet-ai/var/DASHBOARD.md` + `.starfleet-ai/var/dashboard/topics/` | Project status tracking |
+| Dashboard | `.starfleet-ai/var/DASHBOARD.md` + `.starfleet-ai/dashboard/topics/` | Project status tracking |
 
 ## What the launcher scripts do
 
