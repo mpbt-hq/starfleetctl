@@ -215,6 +215,12 @@ func (b *Bus) stale(epoch int64, state string) bool {
 	return now()-epoch >= b.BusTTL
 }
 
+// IsStale is the public wrapper for stale, allowing external packages
+// (e.g. shipnames) to check if a status record is stale.
+func (b *Bus) IsStale(epoch int64, state string) bool {
+	return b.stale(epoch, state)
+}
+
 // age mirrors bash's age() formatting: Ns / Nm / NhNm.
 func age(epoch int64) string {
 	s := now() - epoch

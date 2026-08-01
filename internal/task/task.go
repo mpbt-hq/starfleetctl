@@ -88,6 +88,7 @@ Options:
                        flagship, which delegates it to a worker (or executes
                        it itself). With a ship name, commission that specific
                        ship.
+  --category <cat>     Dashboard topic category (default: active).
   --no-push            Stage + commit locally but do not push to origin.
   -h, --help           this help.
 
@@ -99,7 +100,7 @@ Exit codes:
 
 // runCapture implements `task capture` — the Go port of scripts/task-capture.
 func runCapture(root string, args []string) int {
-	title, desc, slug, assign, assignMode, noPush, err := parseCaptureArgs(args)
+	title, desc, slug, assign, assignMode, category, noPush, err := parseCaptureArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "task capture:", err)
 		return 2
@@ -141,7 +142,7 @@ func runCapture(root string, args []string) int {
 
 	// Build the topic file content (frontmatter + body) and write it via the
 	// sanctioned dashboard path (never hand-edit the file directly).
-	content := buildTopicFile(slug, title, status, assignedTo, desc)
+	content := buildTopicFile(slug, title, status, assignedTo, desc, category)
 	if err := writeTopicContent(d, slug, content); err != nil {
 		fmt.Fprintln(os.Stderr, "task capture:", err)
 		return 1
@@ -181,7 +182,7 @@ func runCapture(root string, args []string) int {
 
 // parseCaptureArgs parses `task capture` arguments, mirroring the bash
 // original's getopts. Returns the parsed fields and an error on bad args.
-func parseCaptureArgs(args []string) (title, desc, slug, assign, assignMode string, noPush bool, err error) {
+func parseCaptureArgs(args []string) (title, desc, slug, assign, assignMode, category string, noPush bool, err error) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--title":
@@ -213,6 +214,13 @@ func parseCaptureArgs(args []string) (title, desc, slug, assign, assignMode stri
 			} else {
 				assignMode = "auto"
 			}
+		case "--category":
+			if i+1 >= len(args) {
+				err = fmt.Errorf("--category requires an argument")
+				return
+			}
+			i++
+			category = args[i]
 		case "--no-push":
 			noPush = true
 		case "-h", "--help":
@@ -254,18 +262,22 @@ func deriveSlug(title string) string {
 
 // buildTopicFile renders the topic file content (frontmatter + body), matching
 // scripts/task-capture's output exactly.
-func buildTopicFile(slug, title, status, assignedTo, desc string) string {
+func buildTopicFile(slug, title, status, assignedTo, desc, category string) string {
 	createdBy := os.Getenv("STARFLEET_SHIP_ID")
 	if createdBy == "" {
 		createdBy = "unknown"
 	}
 	created := time.Now().UTC().Format(time.RFC3339)
 
+	if category == "" {
+		category = "active"
+	}
+
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "slug: %s\n", slug)
 	fmt.Fprintf(&b, "title: \"%s\"\n", title)
-	b.WriteString("category: active\n")
+	fmt.Fprintf(&b, "category: %s\n", category)
 	b.WriteString("kind: task\n")
 	fmt.Fprintf(&b, "status: %s\n", status)
 	fmt.Fprintf(&b, "created-by: %s\n", createdBy)
@@ -694,9 +706,10 @@ func runPurge(root string, args []string) int {
 // RunCaptureOnly captures a task. assign == "" means unassigned; "auto" routes
 // to the flagship; any other value commissions that specific ship. noPush
 // suppresses the git push (local-only capture) — used by the web UI so a LAN
-// viewer never blocks on a (possibly offline) remote. Returns the exit code
-// (0 == ok) and any fatal error.
-func RunCaptureOnly(root, title, desc, assign string, noPush bool) (int, error) {
+// viewer never blocks on a (possibly offline) remote. category is the dashboard
+// topic category (default "active"). Returns the exit code (0 == ok) and any
+// fatal error.
+func RunCaptureOnly(root, title, desc, assign, category string, noPush bool) (int, error) {
 	args := []string{"--title", title}
 	if desc != "" {
 		args = append(args, "--desc", desc)
@@ -708,6 +721,9 @@ func RunCaptureOnly(root, title, desc, assign string, noPush bool) (int, error) 
 		// unassigned
 	default:
 		args = append(args, "--assign", assign)
+	}
+	if category != "" {
+		args = append(args, "--category", category)
 	}
 	if noPush {
 		args = append(args, "--no-push")

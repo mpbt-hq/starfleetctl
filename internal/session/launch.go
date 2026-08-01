@@ -13,6 +13,7 @@ import (
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
 	"github.com/metux/starfleetctl/internal/comms"
+	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -687,6 +688,27 @@ func RunTermctl(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "termctl-run: need <ship-id> <pipe-path> <shell-cmd>")
 		return 2
 	}
+
+	// Load terminal config from web.yaml
+	cfg, cerr := config.Load(root)
+	if cerr != nil {
+		fmt.Fprintf(os.Stderr, "termctl-run: config load: %v\n", cerr)
+	}
+	termRows := 60
+	termCols := 120
+	termScrollback := 10000
+	if cfg != nil {
+		if cfg.Web.TerminalRows > 0 {
+			termRows = cfg.Web.TerminalRows
+		}
+		if cfg.Web.TerminalCols > 0 {
+			termCols = cfg.Web.TerminalCols
+		}
+		if cfg.Web.TerminalScrollback > 0 {
+			termScrollback = cfg.Web.TerminalScrollback
+		}
+	}
+
 	shipID := args[0]
 	pipePath := args[1]
 	shellCmd := args[2]
@@ -718,6 +740,9 @@ func RunTermctl(root string, args []string) int {
 		termctl.WithExtraEnv([]string{
 			"STARFLEET_SHIP_ID=" + shipID,
 		}),
+		termctl.WithRows(termRows),
+		termctl.WithCols(termCols),
+		termctl.WithScrollbackCap(termScrollback),
 		termctl.WithOnExit(func() {
 			fmt.Fprintf(os.Stderr, "termctl-run: OnExit callback for %s — cleaning up\n", shipID)
 			wroot := os.Getenv("MPBT_WORKSPACE_ROOT")

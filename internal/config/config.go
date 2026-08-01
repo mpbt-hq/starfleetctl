@@ -41,6 +41,11 @@ type WebConfig struct {
 	ShipID string `yaml:"ship_id"`
 	// ShipHandle is the optional human-readable handle shown alongside ShipID.
 	ShipHandle string `yaml:"ship_handle"`
+
+	// Terminal configuration for termctl terminals spawned by this server.
+	TerminalRows       int `yaml:"terminal_rows"`
+	TerminalCols       int `yaml:"terminal_cols"`
+	TerminalScrollback int `yaml:"terminal_scrollback"`
 }
 
 // CommsConfig holds comms / opencode plugin tuning knobs.
@@ -58,10 +63,13 @@ type CommsConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Web: WebConfig{
-			ListenAddr:       "0.0.0.0:8080",
-			AutostartEnabled: false,
-			PIDFile:          ".starfleet-ai/var/web.pid",
-			LogFile:          ".starfleet-ai/var/log/web.log",
+			ListenAddr:         "0.0.0.0:8080",
+			AutostartEnabled:   false,
+			PIDFile:            ".starfleet-ai/var/web.pid",
+			LogFile:            ".starfleet-ai/var/log/web.log",
+			TerminalRows:       60,
+			TerminalCols:       120,
+			TerminalScrollback: 10000,
 		},
 		Comms: CommsConfig{
 			HeartbeatMS:     300_000,

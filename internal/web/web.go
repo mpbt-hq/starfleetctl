@@ -24,6 +24,8 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
@@ -114,6 +116,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/store/", s.apiStoreFile)
 	s.mux.HandleFunc("/api/files", s.apiFileList)
 	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
+	s.mux.HandleFunc("/api/files/save", s.apiFileSave)
 	s.mux.HandleFunc("/api/reports", s.apiReports)
 	s.mux.HandleFunc("/api/reports/", s.apiReportDispatch)
 	s.mux.HandleFunc("/api/sessions", s.apiSessions)
@@ -436,6 +439,7 @@ func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
 		Assign   string `json:"assign"` // "" | "auto"/"__auto__" | "<ship>"
 		Status   string `json:"status"`
 		Unassign bool   `json:"unassign"`
+		Category string `json:"category"`
 	}
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -484,7 +488,7 @@ func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
 		}
 		code, err = task.RunAssignOnly(s.Root, p.Slug, ship, noPush)
 	case p.Title != "":
-		code, err = task.RunCaptureOnly(s.Root, p.Title, p.Desc, assign, noPush)
+		code, err = task.RunCaptureOnly(s.Root, p.Title, p.Desc, assign, p.Category, noPush)
 	default:
 		writeErr(w, 400, "need title (capture) or slug+status / slug+assign / slug(unassign)")
 		return
@@ -812,7 +816,7 @@ func (s *Server) apiShipDispatch(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/ship/")
 	parts := strings.SplitN(rest, "/", 2)
 	if len(parts) < 2 {
-		writeErr(w, 404, "not found — use /api/ship/<id>/screen or /api/ship/<id>/stop")
+		writeErr(w, 404, "not found — use /api/ship/<id>/screen or /api/ship/<id>/stop or /api/ship/<id>/dimensions")
 		return
 	}
 	id, action := parts[0], parts[1]
@@ -821,6 +825,8 @@ func (s *Server) apiShipDispatch(w http.ResponseWriter, r *http.Request) {
 		s.apiShipScreen(w, r, id)
 	case "stop":
 		s.apiShipStop(w, r, id)
+	case "dimensions":
+		s.apiShipDimensions(w, r)
 	default:
 		writeErr(w, 404, "unknown action: "+action)
 	}
@@ -912,6 +918,34 @@ func (s *Server) apiShipScreen(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	writeJSON(w, map[string]any{"ship_id": id, "lines": lines, "type": "screen"})
+}
+
+// apiShipDimensions returns the terminal dimensions for a ship.
+func (s *Server) apiShipDimensions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/ship/")
+	id = strings.TrimSuffix(id, "/dimensions")
+	if id == "" {
+		writeErr(w, 400, "need ship id")
+		return
+	}
+
+	pipePath, ok := session.ResolvePipe(s.Root, id)
+	if !ok {
+		writeErr(w, 404, "no running terminal for "+id)
+		return
+	}
+
+	rows, cols, err := session.ScreenDimensions(pipePath)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ship_id": id, "rows": rows, "cols": cols})
 }
 
 // apiStoreFile serves files from the agent file store.
@@ -1073,6 +1107,178 @@ func (s *Server) apiFileRaw(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(abs))
 	}
 	http.ServeFile(w, r, abs)
+}
+
+// apiFileSave saves a file with YAML comment preservation.
+// POST /api/files/save with JSON body: {"path": "<relpath>", "content": "<new content>"}
+// Uses gopkg.in/yaml.v3 to round-trip YAML files while preserving comments.
+func (s *Server) apiFileSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	var p struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	p.Path = strings.TrimSpace(p.Path)
+	if p.Path == "" {
+		writeErr(w, 400, "path required")
+		return
+	}
+	abs := filepath.Join(s.Root, filepath.Clean(p.Path))
+	if !strings.HasPrefix(abs, filepath.Clean(s.Root)+string(filepath.Separator)) && abs != filepath.Clean(s.Root) {
+		writeErr(w, 403, "path escapes workspace root")
+		return
+	}
+	// Check if file exists
+	if _, err := os.Stat(abs); err != nil {
+		writeErr(w, 404, "file not found")
+		return
+	}
+	// For YAML files, use round-trip to preserve comments
+	ext := strings.ToLower(filepath.Ext(abs))
+	if ext == ".yaml" || ext == ".yml" {
+		if err := saveYAMLWithComments(abs, p.Content); err != nil {
+			writeErr(w, 500, "failed to save YAML: "+err.Error())
+			return
+		}
+	} else {
+		// For non-YAML files, just write the content
+		if err := os.WriteFile(abs, []byte(p.Content), 0o644); err != nil {
+			writeErr(w, 500, "failed to save file: "+err.Error())
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true, "path": p.Path})
+}
+
+// saveYAMLWithComments preserves comments when saving YAML files.
+// It loads the original YAML with comments, updates the values from newContent,
+// and writes back preserving the comment structure.
+func saveYAMLWithComments(path, newContent string) error {
+	// Read original file to preserve comments
+	origData, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	// Parse new content to get the updated values
+	var newNode yaml.Node
+	if err := yaml.Unmarshal([]byte(newContent), &newNode); err != nil {
+		return fmt.Errorf("invalid YAML in new content: %w", err)
+	}
+	// Parse original with comments
+	var origNode yaml.Node
+	if err := yaml.Unmarshal(origData, &origNode); err != nil {
+		// If original has parse errors, fall back to writing new content directly
+		return os.WriteFile(path, []byte(newContent), 0o644)
+	}
+	// Merge: replace original document content with new content but keep original comments
+	// by copying the new content into the original document structure
+	mergedNode := mergeYAMLNodes(&origNode, &newNode)
+	// Marshal back to YAML
+	out, err := yaml.Marshal(mergedNode)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
+// mergeYAMLNodes recursively merges newNode into origNode, preserving origNode's comments.
+// It replaces the content but keeps comments attached to nodes.
+func mergeYAMLNodes(origNode, newNode *yaml.Node) *yaml.Node {
+	if origNode == nil {
+		return newNode
+	}
+	if newNode == nil {
+		return origNode
+	}
+	// For document nodes, merge the first (and usually only) content
+	if origNode.Kind == yaml.DocumentNode && newNode.Kind == yaml.DocumentNode {
+		if len(origNode.Content) > 0 && len(newNode.Content) > 0 {
+			merged := mergeYAMLNodes(origNode.Content[0], newNode.Content[0])
+			return &yaml.Node{
+				Kind:        yaml.DocumentNode,
+				Content:     []*yaml.Node{merged},
+				HeadComment: origNode.HeadComment,
+				LineComment: origNode.LineComment,
+				FootComment: origNode.FootComment,
+			}
+		}
+	}
+	// For mapping nodes (objects), merge keys
+	if origNode.Kind == yaml.MappingNode && newNode.Kind == yaml.MappingNode {
+		// Build a map of new values for quick lookup
+		newMap := make(map[string]*yaml.Node)
+		for i := 0; i < len(newNode.Content); i += 2 {
+			if i+1 < len(newNode.Content) {
+				key := newNode.Content[i].Value
+				newMap[key] = newNode.Content[i+1]
+			}
+		}
+		// Build merged content preserving original order and comments
+		var mergedContent []*yaml.Node
+		for i := 0; i < len(origNode.Content); i += 2 {
+			if i+1 >= len(origNode.Content) {
+				continue
+			}
+			keyNode := origNode.Content[i]
+			valNode := origNode.Content[i+1]
+			key := keyNode.Value
+			if newVal, ok := newMap[key]; ok {
+				// Key exists in new - merge recursively
+				mergedVal := mergeYAMLNodes(valNode, newVal)
+				mergedContent = append(mergedContent, keyNode, mergedVal)
+				delete(newMap, key)
+			} else {
+				// Key only in original - keep it
+				mergedContent = append(mergedContent, keyNode, valNode)
+			}
+		}
+		// Add new keys that weren't in original
+		for _, newVal := range newMap {
+			// Need to find the key node for this value
+			for i := 0; i < len(newNode.Content); i += 2 {
+				if i+1 < len(newNode.Content) && newNode.Content[i+1] == newVal {
+					mergedContent = append(mergedContent, newNode.Content[i], newVal)
+					break
+				}
+			}
+		}
+		return &yaml.Node{
+			Kind:        yaml.MappingNode,
+			Content:     mergedContent,
+			HeadComment: origNode.HeadComment,
+			LineComment: origNode.LineComment,
+			FootComment: origNode.FootComment,
+		}
+	}
+	// For sequence nodes (arrays), replace entirely (complex to merge)
+	if origNode.Kind == yaml.SequenceNode && newNode.Kind == yaml.SequenceNode {
+		// Keep original's comments, use new content
+		newContent := make([]*yaml.Node, len(newNode.Content))
+		copy(newContent, newNode.Content)
+		return &yaml.Node{
+			Kind:        yaml.SequenceNode,
+			Content:     newContent,
+			HeadComment: origNode.HeadComment,
+			LineComment: origNode.LineComment,
+			FootComment: origNode.FootComment,
+		}
+	}
+	// For scalar nodes and others, use new node but preserve original comments
+	return &yaml.Node{
+		Kind:        newNode.Kind,
+		Value:       newNode.Value,
+		Tag:         newNode.Tag,
+		HeadComment: origNode.HeadComment,
+		LineComment: origNode.LineComment,
+		FootComment: origNode.FootComment,
+	}
 }
 
 // apiModels returns the list of available models from models.yaml.

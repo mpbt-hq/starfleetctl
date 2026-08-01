@@ -4,6 +4,7 @@
 package shipnames
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,6 +126,10 @@ func (r *Registry) ttyScan() string {
 // "ws-<pid>" if all are taken. Before scanning free names, it attempts to
 // reuse a reservation whose PID is dead and whose TTY matches the current
 // terminal (supports restart cycles without wasting ship names).
+//
+// A name is considered "free" if either:
+//   - No reservation file exists, OR
+//   - Reservation exists but the ship's comms status is stale/missing (dead ship)
 func (r *Registry) AssignName() (string, error) {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
 		return "", err
@@ -150,19 +155,95 @@ func (r *Registry) AssignName() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	// Load current status records to check if a reserved name is actually alive.
+	statusMap := r.loadStatusMap()
+
 	for _, name := range names {
 		path, err := r.shipFile(name)
 		if err != nil {
 			continue
 		}
-		if _, err := os.Stat(path); err != nil {
+		_, err = os.Stat(path)
+		if err != nil {
+			// No reservation file — name is free
 			if err := writeReservation(path); err != nil {
 				return "", err
 			}
 			return name, nil
 		}
+		// Reservation file exists — check if ship is actually alive via comms status
+		if rec, ok := statusMap[name]; ok {
+			// Status exists — check if it's stale (using same logic as comms.Bus.stale)
+			if !r.isStale(rec.Epoch, rec.State) {
+				// Ship is alive — name is taken
+				continue
+			}
+		}
+		// No status or stale status — ship is dead, reclaim the name
+		if err := writeReservation(path); err != nil {
+			return "", err
+		}
+		return name, nil
 	}
 	return fmt.Sprintf("ws-%d", os.Getpid()), nil
+}
+
+// loadStatusMap reads all status files and returns a map of ship name -> StatusRecord
+func (r *Registry) loadStatusMap() map[string]StatusRecord {
+	statusMap := make(map[string]StatusRecord)
+	entries, err := os.ReadDir(r.StatusDir)
+	if err != nil {
+		return statusMap
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json")
+		path := filepath.Join(r.StatusDir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var rec StatusRecord
+		if err := json.Unmarshal(data, &rec); err != nil {
+			continue
+		}
+		if rec.Agent == "" {
+			rec.Agent = name
+		}
+		statusMap[rec.Agent] = rec
+	}
+	return statusMap
+}
+
+// isStale mirrors comms.Bus.stale logic: a ship is stale if it's not in "idle"
+// state and its epoch is older than BusTTL (900s default).
+func (r *Registry) isStale(epoch int64, state string) bool {
+	if state == "idle" {
+		return false
+	}
+	busTTL := int64(900) // default BusTTL from comms
+	// Try to read BusTTL from environment or config
+	if v := os.Getenv("STARFLEET_BUS_TTL"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			busTTL = n
+		}
+	}
+	return time.Now().Unix()-epoch >= busTTL
+}
+
+// StatusRecord mirrors the comms.StatusRecord for status file parsing.
+type StatusRecord struct {
+	Epoch   int64  `json:"epoch"`
+	ISO     string `json:"iso"`
+	Agent   string `json:"agent"`
+	Project string `json:"project"`
+	State   string `json:"state"`
+	PID     int    `json:"pid"`
+	Handle  string `json:"handle"`
+	Note    string `json:"note"`
 }
 
 func writeReservation(path string) error {

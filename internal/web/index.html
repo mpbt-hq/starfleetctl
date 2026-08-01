@@ -10,6 +10,7 @@
     --bg: #0b0e14; --card: #151a23; --line: #232b38; --fg: #d7dee8;
     --dim: #8a97a8; --acc: #4aa3ff; --ok: #4ade80; --warn: #fbbf24;
     --bad: #f87171; --chip: #1d2532;
+    --bg2: #0d121a; --accent: #4aa3ff;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
@@ -61,6 +62,8 @@
     border-radius: 999px; overflow: hidden; min-width: 80px; }
   .bar .fill { height: 100%; background: var(--acc); }
   a { color: var(--acc); }
+  .task-title-link { cursor: pointer; color: var(--acc); text-decoration: underline; }
+  .task-title-link:hover { color: var(--ok); }
   .ship { cursor: pointer; transition: border-color .15s; }
   .ship:hover { border-color: var(--acc); }
   .overlay { position: fixed; inset: 0; background: rgba(4,7,12,.66);
@@ -91,7 +94,7 @@
   #talk_body { overflow-y: auto; max-height: 60vh; }
   .terminal { background: #000; color: #00ff00; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px; line-height: 1.3; padding: 8px; border-radius: 8px;
-    overflow-x: auto; white-space: pre; min-height: 200px; max-height: 70vh;
+    overflow-x: auto; white-space: pre; min-height: 200px;
     overflow-y: auto; border: 1px solid var(--line); resize: vertical; }
   .terminal .cursor { animation: blink 1s step-end infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -191,6 +194,16 @@
           <option value="auto">an Flagschiff (delegiert)</option>
           <option value="name">explizit (oben)</option></select>
       </div>
+      <div class="grid2" style="margin-top:8px">
+        <select id="t_status"><option value="open">Status: open (Standard)</option>
+          <option value="open">open</option>
+          <option value="assigned">assigned</option>
+          <option value="in-progress">in-progress</option>
+          <option value="done">done</option>
+          <option value="parked">parked</option>
+        </select>
+        <select id="t_cat"><option value="">Task-Kategorie: (toplevel / unkategorisiert)</option></select>
+      </div>
       <div class="actions"><button onclick="taskNew()">Erfassen</button></div>
     </div>
     <div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
@@ -204,7 +217,7 @@
         <option value="parked">parked</option>
       </select>
       <select id="tf_ship" onchange="taskFilterChange()"><option value="">Schiff: alle</option></select>
-      <select id="tf_cat" onchange="taskFilterChange()"><option value="">Kategorie: alle</option></select>
+      <select id="tf_cat" onchange="taskFilterChange()"><option value="">Kategorie: alle (inkl. toplevel)</option></select>
       <span class="muted">Sortieren:</span>
       <select id="tf_sort" onchange="taskFilterChange()">
         <option value="status" selected>Status</option>
@@ -387,9 +400,23 @@
         <span class="muted" id="files_viewer_size"></span>
         <span style="flex:1"></span>
         <button class="sec" onclick="fileDownload()" style="width:auto;padding:6px 12px">Download</button>
+        <button class="sec" onclick="fileEdit()" style="width:auto;padding:6px 12px">Bearbeiten</button>
         <button class="sec" onclick="fileCloseViewer()" style="width:auto;padding:6px 12px">×</button>
       </div>
       <pre id="files_viewer_content" style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow-y:auto;font:13px/1.4 ui-monospace,monospace;background:var(--chip);padding:10px;border-radius:8px;border:1px solid var(--line)"></pre>
+    </div>
+
+    <!-- File editor modal -->
+    <div id="file_editor_modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)fileCloseEditor()">
+      <div class="modal" style="max-width:900px;max-height:90vh">
+        <div class="row" style="align-items:center;margin-bottom:8px">
+          <b id="file_editor_name"></b>
+          <span style="flex:1"></span>
+          <button class="sec" onclick="fileSave()" style="width:auto;padding:6px 12px">Speichern</button>
+          <button class="sec" onclick="fileCloseEditor()" style="width:auto;padding:6px 12px">Abbrechen</button>
+        </div>
+        <textarea id="file_editor_content" style="width:100%;height:70vh;box-sizing:border-box;font:13px/1.4 ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical"></textarea>
+      </div>
     </div>
   </section>
 
@@ -471,13 +498,13 @@
       <div id="ship_hist_tab" style="display:none">
         <div id="ship_hist"></div>
       </div>
-      <div id="ship_screen_tab" style="display:none">
-        <div class="terminal-controls">
+      <div id="ship_screen_tab" style="display:none;flex:1;display:flex;flex-direction:column;min-height:0">
+        <div class="terminal-controls" style="flex-shrink:0">
           <span class="pill active" id="term_auto" onclick="termAutoToggle()">Auto-Update: an</span>
           <span class="pill" id="term_scrollback" onclick="termShowScrollback()">Scrollback</span>
           <span class="muted" id="term_status"></span>
         </div>
-        <div class="terminal" id="term_content">Lade Terminal...</div>
+        <div class="terminal" id="term_content" style="flex:1;min-height:0;resize:none">Lade Terminal...</div>
       </div>
     </div>
     <div class="compose">
@@ -643,6 +670,38 @@ function fileCloseViewer() {
 function fileDownload() {
   if (!filesViewingPath) return;
   window.open('/api/files/raw?path=' + encodeURIComponent(filesViewingPath) + '&download=1', '_blank');
+}
+
+function fileEdit() {
+  if (!filesViewingPath) return;
+  document.getElementById('file_editor_name').textContent = filesViewingPath;
+  document.getElementById('file_editor_content').value = document.getElementById('files_viewer_content').textContent;
+  document.getElementById('file_editor_modal').style.display = 'flex';
+}
+
+function fileCloseEditor() {
+  document.getElementById('file_editor_modal').style.display = 'none';
+  document.getElementById('file_editor_content').value = '';
+}
+
+async function fileSave() {
+  const path = filesViewingPath;
+  const content = document.getElementById('file_editor_content').value;
+  if (!path) return;
+  try {
+    const res = await api('/api/files/save', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({path, content})});
+    if (res.ok) {
+      toast('Gespeichert: ' + path);
+      fileCloseEditor();
+      fileCloseViewer();
+      loadFiles(); // refresh file list
+    } else {
+      toast('Fehler: ' + (res.error || 'unbekannt'), true);
+    }
+  } catch(e) {
+    toast('Fehler: ' + esc(e.message), true);
+  }
 }
 
 async function loadIdentity(){
@@ -906,6 +965,13 @@ async function loadScreen(){
       el.innerHTML = '<span class="muted">kein Terminal-Inhalt verfügbar</span>';
       statusEl.textContent = '';
     }
+    // Load dimensions
+    try {
+      const dim = await api('/api/ship/' + encodeURIComponent(shipCurrent) + '/dimensions');
+      if (dim.rows && dim.cols) {
+        statusEl.textContent += ' · ' + dim.cols + '×' + dim.rows;
+      }
+    } catch(e) { /* ignore */ }
   } catch(e) {
     el.innerHTML = '<span class="muted">Fehler: ' + esc(e.message) + '</span>';
     statusEl.textContent = '';
@@ -975,8 +1041,11 @@ function renderTasks(){
   const catSel = document.getElementById('tf_cat');
   const cats = [...new Set(rows.map(r=>taskPrefix(r.slug)))].sort();
   if (!cats.includes(taskState.cat)) taskState.cat = '';
-  catSel.innerHTML = '<option value="">Kategorie: alle</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  catSel.innerHTML = '<option value="">Kategorie: alle (inkl. toplevel)</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   catSel.value = taskState.cat;
+  // Populate create-form category dropdown (same categories, with toplevel option).
+  const createCatSel = document.getElementById('t_cat');
+  createCatSel.innerHTML = '<option value="">Task-Kategorie: (toplevel / unkategorisiert)</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   // Apply filters.
   let filtered = rows;
   if (taskState.status) filtered = filtered.filter(r=>r.status===taskState.status);
@@ -1003,7 +1072,7 @@ function renderTasks(){
     const assignOpts = '<option value="__auto__">auto — Flagschiff (delegiert)</option>' +
       ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
     return `<div class="card">
-      <div class="row"><b class="grow">${esc(r.title)}</b>
+      <div class="row"><b class="grow"><span class="task-title-link" onclick="taskDetail('${esc(r.slug)}')">${esc(r.title)}</span></b>
         <span class="pill ${cls}">${esc(r.status)}</span></div>
       <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)} bearbeitet gerade`:''}</div>
       <div class="actions">
@@ -1029,9 +1098,11 @@ async function taskNew(){
   if (assignSel==='auto') assign='__auto__';
   else if (assignSel==='name') assign=document.getElementById('t_ship').value.trim();
   else assign=document.getElementById('t_ship').value.trim();
+  const status = document.getElementById('t_status').value;
+  const cat = document.getElementById('t_cat').value;
   try {
     await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({title, desc, assign})});
+      body: JSON.stringify({title, desc, assign, status, category: cat})});
     toast(assign==='__auto__' ? 'Task erfasst — an Flagschiff zur Delegation' : 'Task erfasst'); document.getElementById('t_title').value=''; document.getElementById('t_desc').value='';
     loadTasks();
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
@@ -1071,7 +1142,7 @@ function closeTaskModal(){
 function showTaskBody(){
   document.getElementById('task_m_edit').style.display = 'none';
   const el = document.getElementById('task_m_body');
-  el.textContent = document.getElementById('task_m_text').value || '(leer)';
+  el.innerHTML = '<div class="md-body">'+mdHtml(document.getElementById('task_m_text').value || '(leer)')+'</div>';
   el.style.display = '';
 }
 function taskDetailEdit(){

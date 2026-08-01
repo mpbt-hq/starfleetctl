@@ -271,3 +271,43 @@ func ScreenDump(pipePath string) ([]string, error) {
 func ScreenDumpScrollback(pipePath string, n int) ([]string, error) {
 	return screenDumpScrollback(pipePath, n)
 }
+
+// ScreenDimensions returns the terminal's row and column count.
+func ScreenDimensions(pipePath string) (rows, cols int, err error) {
+	rem, err := termctl.OpenPipe(pipePath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("open pipe: %w", err)
+	}
+
+	// Send dimensions command and read response
+	tmpFile, err := os.CreateTemp("", "screen-dimensions-*.json")
+	if err != nil {
+		return 0, 0, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	os.Remove(tmpPath)
+	defer os.Remove(tmpPath)
+
+	if err := rem.Send(fmt.Sprintf("dimensions %s", tmpPath)); err != nil {
+		return 0, 0, fmt.Errorf("send dimensions command: %w", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(tmpPath)
+		if err == nil && len(data) > 0 {
+			var dim struct {
+				Rows int `json:"rows"`
+				Cols int `json:"cols"`
+			}
+			if err := json.Unmarshal(data, &dim); err != nil {
+				return 0, 0, fmt.Errorf("parse response: %w", err)
+			}
+			return dim.Rows, dim.Cols, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return 0, 0, fmt.Errorf("timeout waiting for dimensions response")
+}
