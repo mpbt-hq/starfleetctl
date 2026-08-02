@@ -132,6 +132,8 @@ Claims are **cooperative** — they don't block git at filesystem level, but all
 
 Markdown-based topic tracking in `.starfleet-ai/var/DASHBOARD.md` + `.starfleet-ai/dashboard/topics/*.md`. Managed via `starfleetctl dashboard topic <cmd>`.
 
+**⚠️ Correct command:** `starfleetctl dashboard topic list` — NOT `starfleetctl dashboard list` (does not exist).
+
 ### SOP Instruction Fragments
 
 Per-topic Markdown files that become the agent's system prompt. Two sources:

@@ -13,6 +13,13 @@ starfleetctl dashboard topic <command> [args...]
 
 The dashboard is a thin index (`.starfleet-ai/var/DASHBOARD.md`) that links to per-topic files under `.starfleet-ai/dashboard/topics/`. Each topic tracks one initiative or topic. The index is regenerated from topic file frontmatter — two agents racing a `reindex` converge to the same output.
 
+## ⚠️ Common Mistake
+
+**WRONG:** `starfleetctl dashboard list`  
+**CORRECT:** `starfleetctl dashboard topic list`
+
+The `dashboard` subcommand itself has no `list` — all topic operations are under `dashboard topic`.
+
 ## Commands
 
 ### Index Management
