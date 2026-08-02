@@ -29,17 +29,27 @@ import (
 const usage = `task <command> [args…]
 
   capture --title "<t>" [options]   capture a task into the dashboard (as a
-                                     dashboard/topics/<slug>.md topic) and
-                                     optionally commission a ship to work
-                                     it. Never executes the task itself.
+                                      dashboard/topics/<slug>.md topic) and
+                                      optionally commission a ship to work
+                                      it. Never executes the task itself.
   assign <slug> [<ship>]            assign an existing task to a ship (or,
-                                     with no ship, to the flagship, which
-                                     delegates or executes it). Updates status
-                                     + assigned-to via the sanctioned
-                                     dashboard path and commissions the ship.
+                                      with no ship, to the flagship, which
+                                      delegates or executes it). Updates status
+                                      + assigned-to via the sanctioned
+                                      dashboard path and commissions the ship.
   unassign <slug>                   clear a task's assignment (status ->
-                                     open, assigned-to -> —).
+                                      open, assigned-to -> —).
   status <slug> <status>            set an existing task's status field.
+  begin <slug>                      start working on a task: verifies
+                                      assignment to this ship, sets status
+                                      in-progress, logs timestamp, updates
+                                      comms status (working + task + progress).
+  log <slug> <text>                 append timestamped work-log entry to task
+                                      body, commit + reindex.
+  progress <slug> <0-100> [note]    update progress in frontmatter + log +
+                                      comms status (working + task + progress).
+  done <slug>                       complete a task: status=done + log +
+                                      comms status idle.
   rm <slug>                         delete a task topic from the dashboard.
   purge [--no-push]                 delete ALL tasks with status "done".
 
@@ -65,6 +75,14 @@ func Run(root string, args []string) int {
 		return runUnassign(root, args[1:])
 	case "status":
 		return runStatus(root, args[1:])
+	case "begin":
+		return runBegin(root, args[1:])
+	case "log":
+		return runLog(root, args[1:])
+	case "progress":
+		return runProgress(root, args[1:])
+	case "done":
+		return runDone(root, args[1:])
 	case "rm", "remove", "delete":
 		return runRm(root, args[1:])
 	case "purge":
@@ -775,6 +793,393 @@ func RunCaptureStatus(root, slug, status string, noPush bool) (int, error) {
 	code := runStatus(root, args)
 	if code != 0 {
 		return code, fmt.Errorf("task status exited with code %d", code)
+	}
+	return 0, nil
+}
+
+// --- Task lifecycle commands (begin/log/progress/done) ---
+
+const beginUsage = `task begin <slug> [--no-push]
+
+Start working on a task. Verifies the task is assigned to this ship (or unassigned
+and this ship claims it), sets status=in-progress, appends a timestamped log
+entry, and updates comms status to working with --task and --progress 0.
+
+Exit codes:
+  0  task started
+  2  bad arguments
+  3  no such task / not assigned to this ship
+`
+
+func runBegin(root string, args []string) int {
+	noPush := false
+	slug := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(beginUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "task begin: too many arguments")
+				return 2
+			}
+		}
+	}
+	if slug == "" {
+		fmt.Fprintln(os.Stderr, "task begin: <slug> required")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task begin:", err)
+		return 1
+	}
+
+	m, body, err := d.DoTopicLoad(slug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task begin: no such task: %s\n", slug)
+		return 3
+	}
+
+	shipID := os.Getenv("STARFLEET_SHIP_ID")
+	if shipID == "" {
+		fmt.Fprintln(os.Stderr, "task begin: STARFLEET_SHIP_ID not set")
+		return 1
+	}
+
+	if m.AssignedTo == "" || m.AssignedTo == "—" {
+		// Unassigned: this ship claims it
+		m.AssignedTo = shipID
+	} else if m.AssignedTo != shipID {
+		fmt.Fprintf(os.Stderr, "task begin: task assigned to %s, not %s\n", m.AssignedTo, shipID)
+		return 3
+	}
+
+	m.Status = "in-progress"
+	now := time.Now().UTC().Format(time.RFC3339)
+	body = fmt.Sprintf("%s\n- %s %s: began work\n", body, now, shipID)
+
+	if err := d.DoTopicUpdate(slug, m, body); err != nil {
+		fmt.Fprintln(os.Stderr, "task begin:", err)
+		return 1
+	}
+	commitAndReindex(d, slug, "task: begin "+slug, !noPush)
+
+	// Update comms status
+	b, err := comms.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task begin: comms:", err)
+		return 1
+	}
+	if err := b.DoStatus("working", "task: "+m.Title, comms.StatusPatch{
+		Task:       slug,
+		Progress:   0,
+		LaunchType: "task",
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "task begin: comms status:", err)
+		return 1
+	}
+
+	fmt.Printf("task-begin: slug=%s status=in-progress ship=%s\n", slug, shipID)
+	return 0
+}
+
+const logUsage = `task log <slug> <text> [--no-push]
+
+Append a timestamped work-log entry to the task body. Commits and reindexes.
+
+Exit codes:
+  0  log entry added
+  2  bad arguments
+  3  no such task
+`
+
+func runLog(root string, args []string) int {
+	noPush := false
+	slug := ""
+	text := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(logUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else if text == "" {
+				text = args[i]
+			} else {
+				text += " " + args[i]
+			}
+		}
+	}
+	if slug == "" || text == "" {
+		fmt.Fprintln(os.Stderr, "task log: <slug> and <text> required")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task log:", err)
+		return 1
+	}
+
+	m, body, err := d.DoTopicLoad(slug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task log: no such task: %s\n", slug)
+		return 3
+	}
+
+	shipID := os.Getenv("STARFLEET_SHIP_ID")
+	if shipID == "" {
+		shipID = "unknown"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	body = fmt.Sprintf("%s\n- %s %s: %s\n", body, now, shipID, text)
+
+	if err := d.DoTopicUpdate(slug, m, body); err != nil {
+		fmt.Fprintln(os.Stderr, "task log:", err)
+		return 1
+	}
+	commitAndReindex(d, slug, "task: log "+slug, !noPush)
+
+	fmt.Printf("task-log: slug=%s\n", slug)
+	return 0
+}
+
+const progressUsage = `task progress <slug> <0-100> [note] [--no-push]
+
+Update progress percentage in frontmatter, append log entry, update comms status.
+
+Exit codes:
+  0  progress updated
+  2  bad arguments
+  3  no such task
+`
+
+func runProgress(root string, args []string) int {
+	noPush := false
+	slug := ""
+	progress := ""
+	note := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(progressUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else if progress == "" {
+				progress = args[i]
+			} else {
+				if note == "" {
+					note = args[i]
+				} else {
+					note += " " + args[i]
+				}
+			}
+		}
+	}
+	if slug == "" || progress == "" {
+		fmt.Fprintln(os.Stderr, "task progress: <slug> <0-100> required")
+		return 2
+	}
+
+	prog, err := strconv.Atoi(progress)
+	if err != nil || prog < 0 || prog > 100 {
+		fmt.Fprintln(os.Stderr, "task progress: progress must be 0-100")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task progress:", err)
+		return 1
+	}
+
+	m, body, err := d.DoTopicLoad(slug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task progress: no such task: %s\n", slug)
+		return 3
+	}
+
+	shipID := os.Getenv("STARFLEET_SHIP_ID")
+	if shipID == "" {
+		shipID = "unknown"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	logEntry := fmt.Sprintf("- %s %s: progress %d%%", now, shipID, prog)
+	if note != "" {
+		logEntry += " (" + note + ")"
+	}
+	body = fmt.Sprintf("%s\n%s\n", body, logEntry)
+
+	if err := d.DoTopicUpdate(slug, m, body); err != nil {
+		fmt.Fprintln(os.Stderr, "task progress:", err)
+		return 1
+	}
+	commitAndReindex(d, slug, fmt.Sprintf("task: progress %s %d%%", slug, prog), !noPush)
+
+	// Update comms status
+	b, err := comms.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task progress: comms:", err)
+		return 1
+	}
+	if err := b.DoStatus("working", "task: "+m.Title, comms.StatusPatch{
+		Task:       slug,
+		Progress:   prog,
+		LaunchType: "task",
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "task progress: comms status:", err)
+		return 1
+	}
+
+	fmt.Printf("task-progress: slug=%s progress=%d%%\n", slug, prog)
+	return 0
+}
+
+const doneUsage = `task done <slug> [--no-push]
+
+Complete a task: sets status=done, appends completion log, updates comms status to idle.
+
+Exit codes:
+  0  task completed
+  2  bad arguments
+  3  no such task
+`
+
+func runDone(root string, args []string) int {
+	noPush := false
+	slug := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(doneUsage)
+			return 0
+		default:
+			if slug == "" {
+				slug = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "task done: too many arguments")
+				return 2
+			}
+		}
+	}
+	if slug == "" {
+		fmt.Fprintln(os.Stderr, "task done: <slug> required")
+		return 2
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task done:", err)
+		return 1
+	}
+
+	m, body, err := d.DoTopicLoad(slug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task done: no such task: %s\n", slug)
+		return 3
+	}
+
+	shipID := os.Getenv("STARFLEET_SHIP_ID")
+	if shipID == "" {
+		shipID = "unknown"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	body = fmt.Sprintf("%s\n- %s %s: completed\n", body, now, shipID)
+
+	m.Status = "done"
+	if err := d.DoTopicUpdate(slug, m, body); err != nil {
+		fmt.Fprintln(os.Stderr, "task done:", err)
+		return 1
+	}
+	commitAndReindex(d, slug, "task: done "+slug, !noPush)
+
+	// Update comms status to idle
+	b, err := comms.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task done: comms:", err)
+		return 1
+	}
+	if err := b.DoStatus("idle", "task done: "+m.Title, comms.StatusPatch{
+		Task:       "",
+		Progress:   -1,
+		LaunchType: "task",
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "task done: comms status:", err)
+		return 1
+	}
+
+	fmt.Printf("task-done: slug=%s status=done\n", slug)
+	return 0
+}
+
+// RunBeginOnly starts working on a task.
+func RunBeginOnly(root, slug string, noPush bool) (int, error) {
+	args := []string{slug}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runBegin(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task begin exited with code %d", code)
+	}
+	return 0, nil
+}
+
+// RunLogOnly appends a log entry to a task.
+func RunLogOnly(root, slug, text string, noPush bool) (int, error) {
+	args := []string{slug, text}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runLog(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task log exited with code %d", code)
+	}
+	return 0, nil
+}
+
+// RunProgressOnly updates task progress.
+func RunProgressOnly(root, slug string, progress int, note string, noPush bool) (int, error) {
+	args := []string{slug, strconv.Itoa(progress)}
+	if note != "" {
+		args = append(args, note)
+	}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runProgress(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task progress exited with code %d", code)
+	}
+	return 0, nil
+}
+
+// RunDoneOnly completes a task.
+func RunDoneOnly(root, slug string, noPush bool) (int, error) {
+	args := []string{slug}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runDone(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task done exited with code %d", code)
 	}
 	return 0, nil
 }
