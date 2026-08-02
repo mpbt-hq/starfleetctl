@@ -13,14 +13,14 @@ import (
 )
 
 // EnsureBootstrapped ensures the auto-generated index file
-// (.starfleet-ai/var/agents.d/index.md) exists. Creates it with a bare
+// (.starfleet-ai/var/sop.d/index.md) exists. Creates it with a bare
 // header if absent.
-func (a *Agents) EnsureBootstrapped() (created bool, err error) {
-	if err := os.MkdirAll(filepath.Dir(a.IndexFile()), 0o755); err != nil {
+func (s *SOP) EnsureBootstrapped() (created bool, err error) {
+	if err := os.MkdirAll(filepath.Dir(s.IndexFile()), 0o755); err != nil {
 		return false, err
 	}
-	if _, err := os.Stat(a.IndexFile()); err != nil {
-		if err := os.WriteFile(a.IndexFile(), []byte(indexHeader), 0o644); err != nil {
+	if _, err := os.Stat(s.IndexFile()); err != nil {
+		if err := os.WriteFile(s.IndexFile(), []byte(indexHeader), 0o644); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -30,8 +30,8 @@ func (a *Agents) EnsureBootstrapped() (created bool, err error) {
 
 // DoList prints every fragment's slug/title/order (or, with jsonOut, a JSON
 // array).
-func (a *Agents) DoList(jsonOut bool) error {
-	metas, err := a.loadAllFragments()
+func (s *SOP) DoList(jsonOut bool) error {
+	metas, err := s.loadAllFragments()
 	if err != nil {
 		return err
 	}
@@ -64,8 +64,8 @@ func (a *Agents) DoList(jsonOut bool) error {
 }
 
 // DoShow prints one fragment file's full content (frontmatter + body).
-func (a *Agents) DoShow(slug string) error {
-	data, err := os.ReadFile(a.fragmentPath(slug))
+func (s *SOP) DoShow(slug string) error {
+	data, err := os.ReadFile(s.fragmentPath(slug))
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (a *Agents) DoShow(slug string) error {
 
 // DoWrite replaces one fragment file's content (raw, frontmatter and all)
 // from src ("-" for stdin), then reindexes. Does NOT commit.
-func (a *Agents) DoWrite(slug, src string) error {
+func (s *SOP) DoWrite(slug, src string) error {
 	var r io.Reader
 	if src == "-" {
 		r = os.Stdin
@@ -91,25 +91,25 @@ func (a *Agents) DoWrite(slug, src string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(a.FragmentsDir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.FragmentsDir(), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.fragmentPath(slug), data, 0o644); err != nil {
+	if err := os.WriteFile(s.fragmentPath(slug), data, 0o644); err != nil {
 		return err
 	}
-	return a.DoReindex()
+	return s.DoReindex()
 }
 
 // DoNew scaffolds a new fragment file with frontmatter, refusing to clobber
 // an existing one, then reindexes (and bootstraps the index first if this is
 // the very first fragment ever created). Slugs may contain "/" to place the
 // fragment in a subdirectory (e.g. "starfleet/my-topic").
-func (a *Agents) DoNew(slug, title string, order int, owner string) error {
-	path := a.fragmentPath(slug)
+func (s *SOP) DoNew(slug, title string, order int, owner string) error {
+	path := s.fragmentPath(slug)
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("fragment already exists: %s", path)
 	}
-	if _, err := a.EnsureBootstrapped(); err != nil {
+	if _, err := s.EnsureBootstrapped(); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -119,23 +119,23 @@ func (a *Agents) DoNew(slug, title string, order int, owner string) error {
 	if err := writeFragmentFile(path, m, "(fill in)\n"); err != nil {
 		return err
 	}
-	if err := a.DoReindex(); err != nil {
+	if err := s.DoReindex(); err != nil {
 		return err
 	}
 	fmt.Println(path)
 	return nil
 }
 
-// DoReindex regenerates the fragment index (.starfleet-ai/agents.d/index.md)
+// DoReindex regenerates the fragment index (.starfleet-ai/var/sop.d/index.md)
 // and CLAUDE.md with every fragment's body inlined (frontmatter stripped).
 // Pure function of the current fragment set — two ships racing a reindex
 // converge to the same byte-identical output. Bootstraps the index first
 // if it doesn't exist yet.
-func (a *Agents) DoReindex() error {
-	if _, err := a.EnsureBootstrapped(); err != nil {
+func (s *SOP) DoReindex() error {
+	if _, err := s.EnsureBootstrapped(); err != nil {
 		return err
 	}
-	metas, err := a.loadAllFragments()
+	metas, err := s.loadAllFragments()
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (a *Agents) DoReindex() error {
 	b.WriteString(indexHeader)
 
 	for _, m := range metas {
-		data, rerr := os.ReadFile(a.fragmentPath(m.Slug))
+		data, rerr := os.ReadFile(s.fragmentPath(m.Slug))
 		if rerr != nil {
 			return rerr
 		}
@@ -159,13 +159,13 @@ func (a *Agents) DoReindex() error {
 	}
 	indexContent := b.String()
 
-	if err := os.WriteFile(a.IndexFile(), []byte(indexContent), 0o644); err != nil {
+	if err := os.WriteFile(s.IndexFile(), []byte(indexContent), 0o644); err != nil {
 		return err
 	}
 
 	// CLAUDE.md is the entry point for agents that don't resolve @-imports
 	// (e.g. opencode). Write the full inlined content directly into it.
-	claudePath := filepath.Join(a.Root, "CLAUDE.md")
+	claudePath := filepath.Join(s.Root, "CLAUDE.md")
 	claude := claudeHeader + indexContent
 	if err := os.WriteFile(claudePath, []byte(claude), 0o644); err != nil {
 		return err
@@ -177,8 +177,8 @@ func (a *Agents) DoReindex() error {
 // DoCommit stages, commits, and (unless push is false) pushes ONE fragment
 // file (or, with slug == "", both CLAUDE.md and the index file).
 // Same shared clone lock as every other Go git-mutating command here.
-func (a *Agents) DoCommit(slug, msg string, push bool) error {
-	lh, err := a.lock()
+func (s *SOP) DoCommit(slug, msg string, push bool) error {
+	lh, err := s.lock()
 	if err != nil {
 		return err
 	}
@@ -186,32 +186,32 @@ func (a *Agents) DoCommit(slug, msg string, push bool) error {
 
 	var paths []string
 	if slug == "" {
-		paths = []string{"CLAUDE.md", a.IndexFile()}
+		paths = []string{"CLAUDE.md", s.IndexFile()}
 	} else {
-		paths = []string{a.fragmentPath(slug)}
+		paths = []string{s.fragmentPath(slug)}
 	}
 
 	addArgs := append([]string{"add"}, paths...)
-	if err := run(a.Root, "git", addArgs...); err != nil {
+	if err := run(s.Root, "git", addArgs...); err != nil {
 		return err
 	}
 	diffArgs := append([]string{"diff", "--cached", "--quiet", "--"}, paths...)
-	if err := run(a.Root, "git", diffArgs...); err == nil {
+	if err := run(s.Root, "git", diffArgs...); err == nil {
 		fmt.Println("agents: nothing staged — nothing to commit")
 		return nil
 	}
-	if err := run(a.Root, "git", "commit", "-m", msg); err != nil {
+	if err := run(s.Root, "git", "commit", "-m", msg); err != nil {
 		return err
 	}
 	if !push {
 		return nil
 	}
-	branch, err := a.branch()
+	branch, err := s.branch()
 	if err != nil {
 		return err
 	}
-	if err := run(a.Root, "git", "pull", "--rebase", "--autostash"); err != nil {
+	if err := run(s.Root, "git", "pull", "--rebase", "--autostash"); err != nil {
 		return fmt.Errorf("agents: pull --rebase failed, NOT pushing (local state may be stale): %w", err)
 	}
-	return run(a.Root, "git", "push", "origin", branch)
+	return run(s.Root, "git", "push", "origin", branch)
 }

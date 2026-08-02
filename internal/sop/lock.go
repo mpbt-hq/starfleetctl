@@ -17,8 +17,8 @@ import (
 // scripts/with-clone-lock / internal/dashboard / internal/wscommit use, so a
 // Go agents commit and a concurrent bash/Go actor on this clone serialize
 // against each other instead of both mutating the index/HEAD at once.
-func (a *Agents) lock() (*flock.Handle, error) {
-	path := filepath.Join(a.GitDir, "mpbt-clone.lock")
+func (s *SOP) lock() (*flock.Handle, error) {
+	path := filepath.Join(s.GitDir, "mpbt-clone.lock")
 
 	wait := 600 * time.Second
 	if v := os.Getenv("LOCK_WAIT"); v != "" {
@@ -29,6 +29,6 @@ func (a *Agents) lock() (*flock.Handle, error) {
 
 	return flock.Lock(path, flock.Options{
 		Timeout:     wait,
-		HolderLabel: "starfleetctl-agents",
+		HolderLabel: "starfleetctl-sop",
 	})
 }

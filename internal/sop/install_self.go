@@ -28,17 +28,17 @@ const SelfSlug = "starfleet/starfleetctl"
 
 // DoInstallSelf installs the consolidated starfleet skill to
 // .claude/skills/starfleet/ (via DoInstallStarfleetSkills) and cleans up
-// the legacy agents.d/starfleet/starfleetctl.md fragment if present.
-func (a *Agents) DoInstallSelf(order int) error {
+// the legacy sop.d/starfleet/starfleetctl.md fragment if present.
+func (s *SOP) DoInstallSelf(order int) error {
 	// Install skills (the new home for starfleetctl instructions)
-	if err := a.DoInstallStarfleetSkills(); err != nil {
+	if err := s.DoInstallStarfleetSkills(); err != nil {
 		return fmt.Errorf("install starfleet skills: %w", err)
 	}
-	// Clean up legacy agents.d fragment if present
-	legacyPath := filepath.Join(a.FragmentsDir(), SelfSlug+".md")
+	// Clean up legacy sop.d fragment if present
+	legacyPath := filepath.Join(s.FragmentsDir(), SelfSlug+".md")
 	if _, err := os.Stat(legacyPath); err == nil {
 		os.Remove(legacyPath)
-		return a.DoReindex()
+		return s.DoReindex()
 	}
 	return nil
 }
@@ -78,10 +78,10 @@ func RenderStarfleetFragment(subdir, name string) ([]byte, error) {
 }
 
 // DoInstallStarfleet installs every .md file from the embedded
-// fragments/<subdir>/ directory into .starfleet-ai/agents.d/<slug>.md, always
+// fragments/<subdir>/ directory into .starfleet-ai/sop.d/<slug>.md, always
 // overwriting existing files (they are tool-owned). Then reindexes.
 // Used by both the CLI command and genesis-init.
-func (a *Agents) DoInstallStarfleet(subdir string) error {
+func (s *SOP) DoInstallStarfleet(subdir string) error {
 	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, subdir))
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func (a *Agents) DoInstallStarfleet(subdir string) error {
 		if err != nil {
 			return err
 		}
-		path := a.fragmentPath(meta.Slug)
+		path := s.fragmentPath(meta.Slug)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (a *Agents) DoInstallStarfleet(subdir string) error {
 			return err
 		}
 	}
-	return a.DoReindex()
+	return s.DoReindex()
 }
 
 // StarfleetSkillsSubdir is the subdirectory inside fragments/ that holds
@@ -110,8 +110,8 @@ func (a *Agents) DoInstallStarfleet(subdir string) error {
 const StarfleetSkillsSubdir = "starfleet-skills"
 
 // SkillsDir returns the absolute path to .claude/skills/ in the workspace.
-func (a *Agents) SkillsDir() string {
-	return filepath.Join(a.Root, ".claude", "skills")
+func (s *SOP) SkillsDir() string {
+	return filepath.Join(s.Root, ".claude", "skills")
 }
 
 // oldStarfleetSkillDirs lists legacy skill directory names that should be
@@ -121,14 +121,14 @@ var oldStarfleetSkillDirs = []string{"concurrency", "starfleetctl", "task-captur
 // DoInstallStarfleetSkills installs the single starfleet skill from the
 // embedded fragments/starfleet-skills/starfleet/ to .claude/skills/starfleet/,
 // always overwriting (tool-owned). Also cleans up legacy skill directories.
-func (a *Agents) DoInstallStarfleetSkills() error {
+func (s *SOP) DoInstallStarfleetSkills() error {
 	skillName := "starfleet"
 	skillDir := filepath.Join(starfleetctl.FragmentsRoot, StarfleetSkillsSubdir, skillName)
 	skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
 	if err != nil {
 		return err
 	}
-	destDir := filepath.Join(a.SkillsDir(), skillName)
+	destDir := filepath.Join(s.SkillsDir(), skillName)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (a *Agents) DoInstallStarfleetSkills() error {
 
 	// Clean up legacy skill directories (concurrency, starfleetctl, task-capture)
 	for _, old := range oldStarfleetSkillDirs {
-		os.RemoveAll(filepath.Join(a.SkillsDir(), old))
+		os.RemoveAll(filepath.Join(s.SkillsDir(), old))
 	}
 
 	return nil

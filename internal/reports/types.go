@@ -2,7 +2,8 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Report data model. Each report is a structured JSON document
-// submitted by a ship, stored under .starfleet-ai/var/reports/.
+// submitted by a ship, stored under .starfleet-ai/reports/ (persisted to git
+// like dashboard topics).
 package reports
 
 // ReportRecord is a single structured report submitted by a ship.

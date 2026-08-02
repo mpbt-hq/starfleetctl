@@ -13,8 +13,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/metux/starfleetctl/internal/config"
 )
 
 // Store provides file-based report CRUD.
@@ -23,8 +21,10 @@ type Store struct {
 }
 
 // NewStore returns a store rooted at the reports directory, creating it.
+// Reports are stored under .starfleet-ai/reports/ (not under var/) so they
+// are persisted to git like dashboard topics, not treated as ephemeral runtime state.
 func NewStore(root string) (*Store, error) {
-	dir := filepath.Join(config.BusDir(root), "reports")
+	dir := filepath.Join(root, ".starfleet-ai", "reports")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("reports store: mkdir %s: %w", dir, err)
 	}

@@ -108,13 +108,13 @@ Use the **Filter** fields to narrow the list by ship name or tag.
 
 ## Storage
 
-Reports are stored as individual JSON files on disk:
+Reports are stored as individual JSON files on disk (persisted to git like dashboard topics):
 
 ```
-.starfleet-ai/var/comms/reports/<id>.json
+.starfleet-ai/reports/<id>.json
 ```
 
-Attachments are stored separately in the filestore:
+Attachments are stored separately in the filestore (ephemeral, not git-tracked):
 
 ```
 .starfleet-ai/var/files/<name>
