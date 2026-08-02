@@ -12,6 +12,7 @@ package comms
 import (
 	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -216,6 +217,10 @@ func (b *Bus) ConversationWithViewer(ship, viewer string) []msgEntryJSON {
 			Type:       m.Type,
 		})
 	}
+	// Sort by age (newest first)
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].AgeSeconds < out[j].AgeSeconds
+	})
 	return out
 }
 

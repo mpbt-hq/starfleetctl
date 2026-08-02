@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -111,11 +110,9 @@ func parseStatusFile(path string) (StatusRecord, bool) {
 }
 
 func parseMsgFile(id, path string) (msgRecord, bool) {
-	// Try JSON first (new format)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// Fallback to TSV (legacy format)
-		return parseMsgFileTSV(id, path)
+		return msgRecord{}, false
 	}
 
 	var msg msgRecord
@@ -123,23 +120,7 @@ func parseMsgFile(id, path string) (msgRecord, bool) {
 		return msg, true
 	}
 
-	// If JSON parsing failed, try TSV fallback
-	return parseMsgFileTSV(id, path)
-}
-
-// parseMsgFileTSV parses the legacy TSV format
-func parseMsgFileTSV(id, path string) (msgRecord, bool) {
-	line, err := readFirstLine(path)
-	if err != nil {
-		return msgRecord{}, false
-	}
-	f := strings.SplitN(line, "\t", 6)
-	for len(f) < 6 {
-		f = append(f, "")
-	}
-	epoch, _ := strconv.ParseInt(f[0], 10, 64)
-	// TSV format doesn't have Type field, default to "ship"
-	return msgRecord{ID: id, Epoch: epoch, ISO: f[1], From: f[2], Target: f[3], Text: f[4], ReplyTo: f[5], Type: "ship"}, true
+	return msgRecord{}, false
 }
 
 // globSortedFiles lists <dir>/<prefix>*.ext basenames (without extension),

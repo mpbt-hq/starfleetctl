@@ -856,9 +856,11 @@ async function loadShipChat(name){
         <div class="meta">${meta}</div>
         <pre>${esc(m.text)}</pre>
       </div>`);
+      // Children are already in correct order (newest first from API)
       (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
     };
-    roots.reverse().forEach(r=>walk(r, 0));
+    // API returns newest first, no need to reverse
+    roots.forEach(r=>walk(r, 0));
     el.innerHTML = out.join('') || '<div class="empty">keine Nachrichten</div>';
     el.scrollTop = 0;
   } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }

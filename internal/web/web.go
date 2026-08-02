@@ -203,7 +203,16 @@ func (s *Server) apiMsgs(w http.ResponseWriter, r *http.Request) {
 	// (sent by it, addressed to it, or a broadcast to all). Used by the
 	// per-ship conversation view in the frontend.
 	if ship := strings.TrimSpace(r.URL.Query().Get("ship")); ship != "" {
-		writeJSON(w, s.bus.ConversationWithViewer(ship, s.bus.ShipID))
+		// Optional sort parameter: "age" (default, newest first), "age-asc" (oldest first)
+		sortBy := r.URL.Query().Get("sort")
+		msgs := s.bus.ConversationWithViewer(ship, s.bus.ShipID)
+		if sortBy == "age-asc" {
+			// Reverse the default (newest first) to get oldest first
+			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+				msgs[i], msgs[j] = msgs[j], msgs[i]
+			}
+		}
+		writeJSON(w, msgs)
 		return
 	}
 	writeJSON(w, s.bus.AllMsgRecordsJSON())
