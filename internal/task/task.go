@@ -26,6 +26,25 @@ import (
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
+// quoteYAML produces a double-quoted YAML scalar for an arbitrary string.
+func quoteYAML(v string) string {
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `"`, `\"`)
+	return `"` + v + `"`
+}
+
+// unquoteYAML strips a double-quoted YAML scalar's quoting/escaping; a bare
+// (unquoted) value is returned unchanged.
+func unquoteYAML(v string) string {
+	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+		inner := v[1 : len(v)-1]
+		inner = strings.ReplaceAll(inner, `\"`, `"`)
+		inner = strings.ReplaceAll(inner, `\\`, `\`)
+		return inner
+	}
+	return v
+}
+
 const usage = `task <command> [args…]
 
   capture --title "<t>" [options]   capture a task into the dashboard (as a
@@ -278,8 +297,7 @@ func deriveSlug(title string) string {
 	return "task-" + s
 }
 
-// buildTopicFile renders the topic file content (frontmatter + body), matching
-// scripts/task-capture's output exactly.
+// buildTopicFile renders the topic file content (frontmatter + body) in RFC2822-style.
 func buildTopicFile(slug, title, status, assignedTo, desc, category string) string {
 	createdBy := os.Getenv("STARFLEET_SHIP_ID")
 	if createdBy == "" {
@@ -292,17 +310,16 @@ func buildTopicFile(slug, title, status, assignedTo, desc, category string) stri
 	}
 
 	var b strings.Builder
-	b.WriteString("---\n")
-	fmt.Fprintf(&b, "slug: %s\n", slug)
-	fmt.Fprintf(&b, "title: \"%s\"\n", title)
-	fmt.Fprintf(&b, "category: %s\n", category)
-	b.WriteString("kind: task\n")
-	fmt.Fprintf(&b, "status: %s\n", status)
-	fmt.Fprintf(&b, "created-by: %s\n", createdBy)
-	fmt.Fprintf(&b, "created: %s\n", created)
-	fmt.Fprintf(&b, "assigned-to: %s\n", assignedTo)
-	b.WriteString("doc_ref: \"—\"\n")
-	b.WriteString("---\n\n")
+	fmt.Fprintf(&b, "Title: %s\n", quoteYAML(title))
+	fmt.Fprintf(&b, "Category: %s\n", category)
+	fmt.Fprintf(&b, "Kind: task\n")
+	fmt.Fprintf(&b, "Status: %s\n", quoteYAML(status))
+	fmt.Fprintf(&b, "Created-By: %s\n", quoteYAML(createdBy))
+	fmt.Fprintf(&b, "Created: %s\n", quoteYAML(created))
+	fmt.Fprintf(&b, "Assigned-To: %s\n", quoteYAML(assignedTo))
+	fmt.Fprintf(&b, "Doc-Ref: \"—\"\n")
+	fmt.Fprintf(&b, "Slug: %s\n", slug)
+	b.WriteString("\n")
 	b.WriteString(desc)
 	b.WriteString("\n")
 	return b.String()
