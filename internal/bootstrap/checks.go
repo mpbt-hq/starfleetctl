@@ -13,10 +13,10 @@ import (
 	"strings"
 
 	starfleetctl "github.com/metux/starfleetctl"
-	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/projectconfig"
+	"github.com/metux/starfleetctl/internal/sop"
 	"github.com/metux/starfleetctl/internal/templates"
 )
 
@@ -80,16 +80,17 @@ const opencodeConfigRel = ".opencode/opencode.json"
 // lacks a $schema key). Existing $schema values are never overwritten.
 const opencodeConfigSchema = "https://opencode.ai/config.json"
 
-// opencodeInstructionsPath is the generated agents index bootstrap registers
+// opencodeInstructionsPath is the generated SOP index bootstrap registers
 // in the opencode config's "instructions" array — same file that the
-// verifyAgentsIndex/fixAgentsIndex pair maintains.
-const opencodeInstructionsPath = ".starfleet-ai/var/agents.d/index.md"
+// verifySopIndex/fixSopIndex pair maintains.
+const opencodeInstructionsPath = ".starfleet-ai/var/sop.d/index.md"
 
 // opencodeStaleInstructionsPaths are legacy instruction entries that older
 // starfleetctl versions registered under a different location. fix drops them
 // so agents load the current index instead of a path that no longer exists.
 var opencodeStaleInstructionsPaths = []string{
 	".starfleet-ai/agents.d/index.md",
+	".starfleet-ai/var/agents.d/index.md",
 }
 
 // opencodePlanCommands are the starfleetctl top-level verbs the built-in
@@ -137,9 +138,9 @@ func Checks() []Check {
 			Fix:    fixSettingsPermissionHook,
 		},
 		{
-			Name:   ".starfleet-ai/var/agents.d/index.md",
-			Verify: verifyAgentsIndex,
-			Fix:    fixAgentsIndex,
+			Name:   ".starfleet-ai/var/sop.d/index.md",
+			Verify: verifySopIndex,
+			Fix:    fixSopIndex,
 		},
 		{
 			Name:   "DASHBOARD.md",
@@ -148,7 +149,7 @@ func Checks() []Check {
 		},
 
 		{
-			Name:   "starfleet fragments (agents.d/starfleet/)",
+			Name:   "starfleet fragments (sop.d/starfleet-instructions/)",
 			Verify: verifyStarfleetFragments,
 			Fix:    fixStarfleetFragments,
 		},
@@ -210,17 +211,20 @@ func Checks() []Check {
 	}
 }
 
-// verifyAgentsIndex/fixAgentsIndex ensure .starfleet-ai/var/agents.d/index.md exists.
-func verifyAgentsIndex(b *Bootstrap) (bool, string) {
-	path := filepath.Join(b.Root, ".starfleet-ai", "var", "agents.d", "index.md")
-	if _, err := os.Stat(path); err == nil {
+// verifySopIndex/fixSopIndex ensure .starfleet-ai/var/sop.d/index.md exists.
+func verifySopIndex(b *Bootstrap) (bool, string) {
+	a, err := sop.New(b.Root)
+	if err != nil {
+		return false, err.Error()
+	}
+	if _, err := os.Stat(a.IndexFile()); err == nil {
 		return true, "present"
 	}
-	return false, "missing (no .starfleet-ai/var/agents.d/index.md)"
+	return false, "missing (no .starfleet-ai/var/sop.d/index.md)"
 }
 
-func fixAgentsIndex(b *Bootstrap) error {
-	a, err := agents.New(b.Root)
+func fixSopIndex(b *Bootstrap) error {
+	a, err := sop.New(b.Root)
 	if err != nil {
 		return err
 	}
@@ -446,16 +450,16 @@ func fixSettingsAllowlist(b *Bootstrap) error {
 }
 
 // verifyStarfleetFragments checks that every .md file embedded under
-// fragments/starfleet/ in the starfleetctl binary is installed to
-// .starfleet-ai/var/agents.d/starfleet/<slug>.md and byte-identical to what the
+// fragments/starfleet-instructions/ in the starfleetctl binary is installed to
+// .starfleet-ai/var/sop.d/starfleet-instructions/<slug>.md and byte-identical to what the
 // current binary would write. This is a bulk, always-overwrite check like the
 // self-fragment.
 func verifyStarfleetFragments(b *Bootstrap) (bool, string) {
-	a, err := agents.New(b.Root)
+	a, err := sop.New(b.Root)
 	if err != nil {
 		return false, err.Error()
 	}
-	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, agents.StarfleetSubdir))
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, sop.StarfleetSubdir))
 	if err != nil {
 		return false, err.Error()
 	}
@@ -464,16 +468,16 @@ func verifyStarfleetFragments(b *Bootstrap) (bool, string) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		current, err := agents.RenderStarfleetFragment(agents.StarfleetSubdir, e.Name())
+		current, err := sop.RenderStarfleetFragment(sop.StarfleetSubdir, e.Name())
 		if err != nil {
 			return false, err.Error()
 		}
 		// Derive slug to find the installed path.
-		meta, _, err := agents.ParseEmbeddedFragment(starfleetctl.Fragments, agents.StarfleetSubdir, e.Name())
+		meta, _, err := sop.ParseEmbeddedFragment(starfleetctl.Fragments, sop.StarfleetSubdir, e.Name())
 		if err != nil {
 			return false, err.Error()
 		}
-		// slug is "starfleet/<name>" — installed under StarfleetFragmentsDir()
+		// slug is "starfleet-instructions/<name>" — installed under StarfleetFragmentsDir()
 		fname := meta.Slug
 		if i := strings.LastIndex(fname, "/"); i >= 0 {
 			fname = fname[i+1:]
@@ -502,11 +506,11 @@ func verifyStarfleetFragments(b *Bootstrap) (bool, string) {
 }
 
 func fixStarfleetFragments(b *Bootstrap) error {
-	a, err := agents.New(b.Root)
+	a, err := sop.New(b.Root)
 	if err != nil {
 		return err
 	}
-	return a.DoInstallStarfleet(agents.StarfleetSubdir)
+	return a.DoInstallStarfleet(sop.StarfleetSubdir)
 }
 
 // verifyStarfleetSkills checks that the consolidated starfleet skill
@@ -514,11 +518,11 @@ func fixStarfleetFragments(b *Bootstrap) error {
 // .claude/skills/starfleet/ and byte-identical to what the current
 // binary would write.
 func verifyStarfleetSkills(b *Bootstrap) (bool, string) {
-	a, err := agents.New(b.Root)
+	a, err := sop.New(b.Root)
 	if err != nil {
 		return false, err.Error()
 	}
-	skillDir := filepath.Join(starfleetctl.FragmentsRoot, agents.StarfleetSkillsSubdir, "starfleet")
+	skillDir := filepath.Join(starfleetctl.FragmentsRoot, sop.StarfleetSkillsSubdir, "starfleet")
 	skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
 	if err != nil {
 		return true, "no embedded starfleet skill"
@@ -556,7 +560,7 @@ func verifyStarfleetSkills(b *Bootstrap) (bool, string) {
 }
 
 func fixStarfleetSkills(b *Bootstrap) error {
-	a, err := agents.New(b.Root)
+	a, err := sop.New(b.Root)
 	if err != nil {
 		return err
 	}

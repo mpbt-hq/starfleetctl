@@ -5,7 +5,7 @@ order: 13
 owner: "starfleetctl"
 ---
 
-<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet/fleet-autonomous.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+<!-- Auto-installed by `starfleetctl sop install-starfleet` into sop.d/starfleet-instructions/fleet-autonomous.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
 
 ## Fleet-wide autonomy — execute and delegate tasks independently
 

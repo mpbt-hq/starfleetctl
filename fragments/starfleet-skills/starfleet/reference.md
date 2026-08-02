@@ -60,7 +60,7 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 | `web start/stop/restart/autostart` | Fleet web console (mobile-first) |
 | `genesis-init [dir]` | Bootstrap a workspace from nothing |
 | `self-install` | Clone/pull + build + symlink starfleetctl |
-| `agents install-starfleet` | Install/update agent fragments and skills |
+| `sop install-starfleet` | Install/update SOP fragments and skills |
 
 ## GitHub interaction (read-only)
 

@@ -16,7 +16,7 @@
 #      `go` toolchain) and symlink the binary to .starfleet-ai/bin/starfleetctl.
 #   3. Hand off to its own `genesis-init` subcommand, which writes the
 #      starfleet-bootstrap script (for later updates) and then runs the same
-#      checks `bootstrap --fix` does (AGENTS.md/agents.d, DASHBOARD.md,
+#      checks `bootstrap --fix` does (AGENTS.md/sop.d, DASHBOARD.md,
 #      _WORK_ dirs, .claude/settings.json allowlist, the self-documenting
 #      skill, opencode plugins/scripts, claude hooks).
 #

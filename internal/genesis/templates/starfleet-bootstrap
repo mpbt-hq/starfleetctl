@@ -98,7 +98,7 @@ SB="$ROOT/.starfleet-ai/bin/starfleetctl"
 echo "-- starfleetctl bootstrap --fix --"
 "$SB" bootstrap --fix
 
-echo "-- starfleetctl agents reindex --"
-MPBT_WORKSPACE_ROOT="$ROOT" "$SB" agents reindex
+echo "-- starfleetctl sop reindex --"
+MPBT_WORKSPACE_ROOT="$ROOT" "$SB" sop reindex
 
 echo "starfleet-bootstrap: done — starfleetctl at .starfleet-ai/bin/starfleetctl"

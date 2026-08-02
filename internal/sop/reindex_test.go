@@ -6,6 +6,7 @@ package sop
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -98,5 +99,33 @@ func TestReindexStripsFrontmatter(t *testing.T) {
 	// inlined-fragment markers must be present
 	if !strings.Contains(s2, "begin inlined fragment: my-topic") {
 		t.Errorf("inline reindex missing inlined-fragment markers:\n%s", s2)
+	}
+}
+
+func TestInstallSelfCleansLegacyFragments(t *testing.T) {
+	s := newTestSOP(t)
+	// Simulate a workspace still carrying the old agents.d/ fragment layout.
+	legacyPath := filepath.Join(s.Root, "agents.d", "starfleet", "starfleetctl.md")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DoInstallSelf(10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Errorf("legacy agents.d fragment not removed: %v", err)
+	}
+	// The cleanup must have triggered a reindex so the index no longer
+	// references the removed fragment.
+	idx, err := os.ReadFile(s.IndexFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(idx), "starfleet/starfleetctl") {
+		t.Errorf("index still references removed legacy fragment:\n%s", idx)
 	}
 }

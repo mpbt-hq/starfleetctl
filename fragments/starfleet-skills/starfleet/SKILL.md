@@ -170,6 +170,6 @@ Full reference: **`reference.md`** in this skill's directory.
 | **Timer** | `timer set/list/cancel` |
 | **Web** | `web start/stop/restart/autostart` |
 | **Reports** | `reports submit/list/show/delete` |
-| **Setup** | `genesis-init`, `self-install`, `agents install-starfleet` |
+| **Setup** | `genesis-init`, `self-install`, `sop install-starfleet` |
 | **GitHub (read)** | `github pr view/ci/file-on-branch/wait-green/show-branch-file`, `github backport applies` |
 | **GitHub (write)** | `github pr comment/label/set-body/checkout/amend-push/make`, `github backport commit` |

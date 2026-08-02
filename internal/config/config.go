@@ -27,9 +27,6 @@ type FleetConfig struct {
 	// ShipNames is the worker ship-name pool. When empty, the compiled-in
 	// Star Trek ship roster is used. The flagship name is always excluded.
 	ShipNames []string `yaml:"ship_names"`
-	// FragmentsDir is the directory for user-maintained SOP fragments.
-	// Defaults to "sop.d" when unset.
-	FragmentsDir string `yaml:"fragments_dir"`
 }
 
 // WebConfig holds web server configuration.

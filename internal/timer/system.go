@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/sop"
 )
 
 // runSystemCommand dispatches a system timer command by verb.
@@ -34,14 +34,14 @@ func runSystemCommand(root string, cmd []string) error {
 	}
 }
 
-// runReindex refreshes both the agent instructions index and the dashboard index.
+// runReindex refreshes both the SOP instructions index and the dashboard index.
 func runReindex(root string) error {
-	a, err := agents.New(root)
+	a, err := sop.New(root)
 	if err != nil {
-		return fmt.Errorf("reindex agents: %w", err)
+		return fmt.Errorf("reindex sop: %w", err)
 	}
 	if err := a.DoReindex(); err != nil {
-		return fmt.Errorf("reindex agents: %w", err)
+		return fmt.Errorf("reindex sop: %w", err)
 	}
 	d, err := dashboard.New(root)
 	if err != nil {

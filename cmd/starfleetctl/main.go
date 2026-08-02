@@ -4,7 +4,7 @@
 // starfleetctl consolidates the flock/race-prone mpbt-workspace
 // fleet-coordination scripts (comms, pr-claim, ws-commit — in that
 // order) into one Go CLI, one subcommand per script. See
-// mpbt-workspace/DASHBOARD.md ("mpbtctl" row) and .starfleet-ai/agents.d/index.md for the full
+// mpbt-workspace/DASHBOARD.md ("mpbtctl" row) and .starfleet-ai/var/sop.d/index.md for the full
 // rationale and rollout plan. Lives in its own repo (metux/starfleetctl),
 // built as an mpbt-workspace solution like go-x11proto/flyingtux, since it
 // coordinates sessions across the workspace rather than shipping as part of
@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/bootstrap"
 	"github.com/metux/starfleetctl/internal/bridged"
 	"github.com/metux/starfleetctl/internal/comms"
@@ -31,6 +30,7 @@ import (
 	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/session"
 	"github.com/metux/starfleetctl/internal/shipnames"
+	"github.com/metux/starfleetctl/internal/sop"
 	"github.com/metux/starfleetctl/internal/task"
 	"github.com/metux/starfleetctl/internal/telemetry"
 	"github.com/metux/starfleetctl/internal/timer"
@@ -66,7 +66,7 @@ Fleet management:
 Bootstrap & setup:
   genesis-init      bootstrap a workspace from nothing (writes starfleet-bootstrap + runs bootstrap --fix)
   self-install      clone/pull starfleetctl source, build, and symlink into .starfleet-ai/bin/
-  agents            install/update starfleet agent fragments and skills
+  sop               install/update starfleet SOP fragments and skills (legacy alias: agents)
 
 GitHub commands (grouped under 'github'):
   github pr          view|ci|job-logs|comment|label|request-reviewers|
@@ -104,7 +104,7 @@ func main() {
 	// with-clone-lock operates on whatever git working tree the CALLER's cwd
 	// is in — an agent clone, a driver clone, anywhere — not just
 	// mpbt-workspace, so it must NOT go through workspaceRoot()'s
-	// .starfleet-ai/agents.d/index.md+scripts/ discovery (which would fail outside this checkout).
+	// .starfleet-ai/var/sop.d/index.md+scripts/ discovery (which would fail outside this checkout).
 	if os.Args[1] == "with-clone-lock" {
 		dir, err := os.Getwd()
 		if err != nil {
@@ -127,7 +127,7 @@ func main() {
 	}
 
 	// genesis-init is the "stand up the whole fleet from nothing" entry
-	// point — by definition it runs BEFORE .starfleet-ai/agents.d/index.md/scripts/ exist, so it
+	// point — by definition it runs BEFORE .starfleet-ai/var/sop.d/index.md/scripts/ exist, so it
 	// must NOT go through workspaceRoot() either; it takes its target
 	// directory as an explicit argument (default cwd) instead.
 	if os.Args[1] == "genesis-init" {
@@ -135,7 +135,7 @@ func main() {
 	}
 
 	// bootstrap verifies/fixes workspace structure — by definition it may
-	// run BEFORE .starfleet-ai/agents.d/index.md exists (that's what it creates), so it must NOT
+	// run BEFORE .starfleet-ai/var/sop.d/index.md exists (that's what it creates), so it must NOT
 	// go through workspaceRoot(); cwd is the workspace root.
 	if os.Args[1] == "bootstrap" {
 		dir, err := os.Getwd()
@@ -230,8 +230,11 @@ func main() {
 		os.Exit(shipnames.Run(root, os.Args[2:]))
 	case "telemetry":
 		os.Exit(telemetry.Run(root, os.Args[2:]))
+	case "sop":
+		os.Exit(sop.Run(root, os.Args[2:]))
 	case "agents":
-		os.Exit(agents.Run(root, os.Args[2:]))
+		// legacy alias — the `sop` command's previous name
+		os.Exit(sop.Run(root, os.Args[2:]))
 	case "bridged":
 		os.Exit(bridged.Run(root, os.Args[2:]))
 	case "hook":
@@ -268,7 +271,7 @@ func main() {
 // workspaceRoot resolves the mpbt-workspace root: MPBT_WORKSPACE_ROOT if set
 // (e.g. for an installed binary that no longer lives under any checkout),
 // otherwise walk up from the current directory looking for the same
-// landmarks a human would (.starfleet-ai/agents.d/index.md + scripts/), so `starfleetctl` behaves
+// landmarks a human would (.starfleet-ai/var/sop.d/index.md + scripts/), so `starfleetctl` behaves
 // sensibly run from the repo root or any subdirectory — unlike the bash
 // scripts (which resolve relative to their own on-disk path via
 // dirname "$0"), an installed Go binary has no fixed path relative to the

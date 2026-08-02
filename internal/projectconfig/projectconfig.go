@@ -26,6 +26,10 @@ type ProjectConfig struct {
 
 	// Solutions maps release line names to solution-specific paths
 	Solutions map[string]SolutionConfig `yaml:"solutions"`
+
+	// FragmentsDir is the project-local SOP fragments directory name.
+	// Defaults to "sop.d" when unset.
+	FragmentsDir string `yaml:"fragments_dir"`
 }
 
 // WorktreeLayout describes the directory structure for release worktrees
@@ -76,6 +80,7 @@ func DefaultProjectConfig() *ProjectConfig {
 		},
 		ReleaseLines: []string{},
 		Solutions:    map[string]SolutionConfig{},
+		FragmentsDir: "sop.d",
 	}
 }
 
@@ -108,6 +113,9 @@ func Load(root string) (*ProjectConfig, error) {
 	}
 	if cfg.PathRemapping.Prefix == "" {
 		cfg.PathRemapping.Prefix = def.PathRemapping.Prefix
+	}
+	if cfg.FragmentsDir == "" {
+		cfg.FragmentsDir = def.FragmentsDir
 	}
 
 	return &cfg, nil

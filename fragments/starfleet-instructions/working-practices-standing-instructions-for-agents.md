@@ -5,7 +5,7 @@ order: 20
 owner: "starfleetctl"
 ---
 
-<!-- Auto-installed by `starfleetctl agents install-starfleet` into agents.d/starfleet-instructions/working-practices-standing-instructions-for-agents.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+<!-- Auto-installed by `starfleetctl sop install-starfleet` into sop.d/starfleet-instructions/working-practices-standing-instructions-for-agents.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
 
 ## Working practices (standing instructions for agents)
 
@@ -23,7 +23,7 @@ cleared:
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
 - **Project knowledge lives in the repo, not in per-user agent memory.** Lessons, CI gotchas,
-  failure modes, and workflow quirks go into `.starfleet-ai/agents.d/index.md` or topic docs —
+  failure modes, and workflow quirks go into `.starfleet-ai/var/sop.d/index.md` or topic docs —
   version-controlled and shared with the whole team. A machine-local agent memory store is private
   and invisible to teammates, so it must **not** hold project facts. Never create a `memory/`
   directory inside a source clone.

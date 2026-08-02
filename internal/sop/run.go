@@ -9,21 +9,21 @@ import (
 	"strconv"
 )
 
-const usage = `agents <command> [args…]
+const usage = `sop <command> [args…]
 
   list [--json]                              every fragment's slug/title/order
   show <slug>                                print one fragment file
   write <slug> <file|->                      replace one fragment file (no commit), then reindex
   new <slug> --title "<t>" [--order <n>] [--owner "<tool>"]
                                               scaffold a new fragment file
-  reindex                                  regenerate agents.d/index.md from agents.d/**/*.md
+  reindex                                  regenerate sop.d/index.md from sop.d/**/*.md
                                            (inlines all fragment bodies, strips frontmatter)
   commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) CLAUDE.md+index.md
   install-self [--order <n>]                 install/refresh the consolidated starfleet skill and
                                                clean up legacy agent fragments
   install-starfleet [<subdir>]               install all embedded starfleet fragments from the binary
                                                (default subdir: "starfleet-instructions") — writes to
-                                               agents.d/<slug>.md for each, always overwrites, then
+                                               sop.d/<slug>.md for each, always overwrites, then
                                                reindexes
   install-starfleet-skills                   install the consolidated starfleet skill from the binary
                                                (fragments/starfleet-skills/starfleet/) — writes to
@@ -31,12 +31,12 @@ const usage = `agents <command> [args…]
                                                up legacy skill directories
 `
 
-// Run dispatches an `agents` invocation, given the resolved workspace root.
+// Run dispatches a `sop` invocation, given the resolved workspace root.
 // Returns the process exit code.
 func Run(root string, args []string) int {
 	a, err := New(root)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "agents:", err)
+		fmt.Fprintln(os.Stderr, "sop:", err)
 		return 1
 	}
 
@@ -78,7 +78,7 @@ func Run(root string, args []string) int {
 		slug := args[1]
 		title, order, owner, perr := parseNewArgs(args[2:])
 		if perr != nil {
-			fmt.Fprintln(os.Stderr, "agents new:", perr)
+			fmt.Fprintln(os.Stderr, "sop new:", perr)
 			return 2
 		}
 		cmdErr = a.DoNew(slug, title, order, owner)
@@ -106,16 +106,16 @@ func Run(root string, args []string) int {
 	case "commit":
 		slug, msg, push, perr := parseCommitArgs(args[1:])
 		if perr != nil {
-			fmt.Fprintln(os.Stderr, "agents commit:", perr)
+			fmt.Fprintln(os.Stderr, "sop commit:", perr)
 			return 2
 		}
 		cmdErr = a.DoCommit(slug, msg, push)
 	default:
-		fmt.Fprintf(os.Stderr, "agents: unknown command: %s\n\n%s", args[0], usage)
+		fmt.Fprintf(os.Stderr, "sop: unknown command: %s\n\n%s", args[0], usage)
 		return 2
 	}
 	if cmdErr != nil {
-		fmt.Fprintln(os.Stderr, "agents:", cmdErr)
+		fmt.Fprintln(os.Stderr, "sop:", cmdErr)
 		return 1
 	}
 	return 0

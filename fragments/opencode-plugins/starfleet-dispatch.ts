@@ -648,7 +648,7 @@ export const plugin = async ({ client, $ }: any) => {
         const target = process.env.STARFLEET_TARGET || ''
         const parts = [`You are ${role} ${shipId}.`]
         if (target) parts.push(`Report to ${target}.`)
-        parts.push('Re-read and follow the agent instructions in agents.d/index.md.')
+        parts.push('Re-read and follow the agent instructions in sop.d/index.md.')
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 

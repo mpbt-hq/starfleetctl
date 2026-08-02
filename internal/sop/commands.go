@@ -197,7 +197,7 @@ func (s *SOP) DoCommit(slug, msg string, push bool) error {
 	}
 	diffArgs := append([]string{"diff", "--cached", "--quiet", "--"}, paths...)
 	if err := run(s.Root, "git", diffArgs...); err == nil {
-		fmt.Println("agents: nothing staged — nothing to commit")
+		fmt.Println("sop: nothing staged — nothing to commit")
 		return nil
 	}
 	if err := run(s.Root, "git", "commit", "-m", msg); err != nil {
@@ -211,7 +211,7 @@ func (s *SOP) DoCommit(slug, msg string, push bool) error {
 		return err
 	}
 	if err := run(s.Root, "git", "pull", "--rebase", "--autostash"); err != nil {
-		return fmt.Errorf("agents: pull --rebase failed, NOT pushing (local state may be stale): %w", err)
+		return fmt.Errorf("sop: pull --rebase failed, NOT pushing (local state may be stale): %w", err)
 	}
 	return run(s.Root, "git", "push", "origin", branch)
 }

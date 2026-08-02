@@ -7,7 +7,7 @@
 // it got built — `genesis-init` writes the small, project-independent set
 // of files a consuming workspace needs to bootstrap starfleetctl itself
 // (the starfleet-bootstrap script), then hands
-// off to `bootstrap --fix` for everything else (CLAUDE.md/agents.d,
+// off to `bootstrap --fix` for everything else (CLAUDE.md/sop.d,
 // DASHBOARD.md, allowlist entries, _WORK_ dirs, the self-documenting
 // fragment, opencode plugins/scripts). None of the embedded templates
 // below reference any project-specific detail (no XLibre/xserver literal
@@ -21,8 +21,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/metux/starfleetctl/internal/agents"
 	"github.com/metux/starfleetctl/internal/bootstrap"
+	"github.com/metux/starfleetctl/internal/sop"
 )
 
 //go:embed all:templates
@@ -93,15 +93,15 @@ func Init(root string) (created []string, err error) {
 		}
 	}
 
-	// Install the generic starfleet-wide agent fragments from the embedded
+	// Install the generic starfleet-wide SOP fragments from the embedded
 	// binary, so a brand-new project gets the full fleet-coordination
 	// instructions automatically. Always runs (idempotent — overwrites
 	// only what it itself wrote before).
-	a, err := agents.New(root)
+	a, err := sop.New(root)
 	if err != nil {
-		return created, fmt.Errorf("agents: %w", err)
+		return created, fmt.Errorf("sop: %w", err)
 	}
-	if err := a.DoInstallStarfleet(agents.StarfleetSubdir); err != nil {
+	if err := a.DoInstallStarfleet(sop.StarfleetSubdir); err != nil {
 		return created, fmt.Errorf("install starfleet fragments: %w", err)
 	}
 	// Install starfleet skill (combined: comms, concurrency, task-capture, CLI)

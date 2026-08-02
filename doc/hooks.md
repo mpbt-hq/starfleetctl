@@ -28,7 +28,7 @@ Safe to run multiple times. Verifies and repairs everything:
 |---|---|---|
 | `./.starfleet-ai/var/...` dirs | `./.starfleet-ai/var/comms`, `./.starfleet-ai/var/agent-claims/` | Bus storage, claim files |
 | Allowlist | `.claude/settings.json` | Permits `starfleetctl` commands without prompts |
-| Agent fragments | `.starfleet-ai/var/agents.d/` | Fleet coordination instructions ([docs](agents.md)) |
+| SOP fragments | `.starfleet-ai/var/sop.d/` | Fleet coordination instructions ([docs](sop.md)) |
 | Skills | `.claude/skills/` | On-demand reference docs (concurrency, starfleetctl, etc.) |
 | opencode plugins | `.opencode/plugins/` | Agent-bus polling, inbox injection |
 | Launcher scripts | `.starfleet-ai/bin/` | `run-opencode.ship`, `run-opencode.flagship`, `run-claude.*` |

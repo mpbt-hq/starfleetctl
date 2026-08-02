@@ -15,7 +15,7 @@ Bootstraps a workspace that has NOTHING fleet-related yet — no CLAUDE.md, no
 .starfleet-ai/, no scripts/ — from just this one already-built starfleetctl
 binary. Writes the small set of project-independent files that bootstrap
 starfleetctl itself (starfleet-bootstrap), skipping any that already exist,
-then runs the same checks as 'bootstrap --fix' (CLAUDE.md + agents.d/index.md,
+then runs the same checks as 'bootstrap --fix' (CLAUDE.md + sop.d/index.md,
 DASHBOARD.md, fleet directory tree, .claude/settings.json allowlist entries,
 the starfleetctl self-fragment, opencode plugins & scripts).
 

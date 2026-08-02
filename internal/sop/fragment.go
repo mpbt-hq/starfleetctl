@@ -12,13 +12,13 @@ import (
 	"strings"
 )
 
-// FragmentMeta is one agents.d/<slug>.md file's frontmatter.
+// FragmentMeta is one sop.d/<slug>.md file's frontmatter.
 type FragmentMeta struct {
 	Slug        string
 	Title       string
-	Order       int    // controls .starfleet-ai/agents.d/index.md's import order
+	Order       int    // controls .starfleet-ai/var/sop.d/index.md's import order
 	Owner       string // optional: which tool/component maintains this fragment
-	IsStarfleet bool   // true if fragment lives under .starfleet-ai/agents.d/starfleet-instructions/
+	IsStarfleet bool   // true if fragment lives under .starfleet-ai/var/sop.d/starfleet-instructions/
 }
 
 // unquoteYAML/quoteYAML: same minimal hand-rolled scheme as
@@ -106,12 +106,15 @@ func writeFragmentFile(path string, m FragmentMeta, body string) error {
 	return os.WriteFile(path, renderFragmentFile(m, body), 0o644)
 }
 
-// loadAllFragments reads every fragment file from both user-maintained
-// (sop.d/) and auto-rolled starfleet (.starfleet-ai/sop.d/starfleet-instructions/)
+// loadAllFragments reads every fragment file from the user-maintained
+// (sop.d/) and auto-rolled starfleet (.starfleet-ai/var/sop.d/starfleet-instructions/)
 // directories, sorted by (Order, Slug). Walks subdirectories recursively.
 // The slug is the relative path from the respective root with .md stripped.
+// The legacy agents.d/ directory is still read too (kept as legacy-supported),
+// but a fragment with the same slug in sop.d/ takes precedence.
 func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
 	var metas []FragmentMeta
+	seen := map[string]bool{}
 
 	dirs := []struct {
 		dir         string
@@ -120,6 +123,7 @@ func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
 	}{
 		{s.FragmentsDir(), "", false},
 		{s.StarfleetFragmentsDir(), "starfleet-instructions/", true},
+		{filepath.Join(s.Root, "agents.d"), "", false}, // legacy
 	}
 
 	for _, d := range dirs {
@@ -129,7 +133,7 @@ func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
 			}
 			if info.IsDir() {
 				// Skip sop.d/starfleet/ — legacy directory, auto-installed
-				// fragments now live under .starfleet-ai/sop.d/starfleet-instructions/
+				// fragments now live under .starfleet-ai/var/sop.d/starfleet-instructions/
 				if d.dir == s.FragmentsDir() && info.Name() == "starfleet" {
 					return filepath.SkipDir
 				}
@@ -154,7 +158,12 @@ func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
 			if m.Slug == "" {
 				m.Slug = slug
 			}
+			// sop.d/ wins over the legacy agents.d/ for the same slug.
+			if seen[m.Slug] {
+				return nil
+			}
 			m.IsStarfleet = d.isStarfleet
+			seen[m.Slug] = true
 			metas = append(metas, m)
 			return nil
 		})

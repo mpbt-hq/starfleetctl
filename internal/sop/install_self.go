@@ -28,16 +28,23 @@ const SelfSlug = "starfleet/starfleetctl"
 
 // DoInstallSelf installs the consolidated starfleet skill to
 // .claude/skills/starfleet/ (via DoInstallStarfleetSkills) and cleans up
-// the legacy sop.d/starfleet/starfleetctl.md fragment if present.
+// the legacy starfleet/starfleetctl.md fragment if present (both the old
+// agents.d/ and the current sop.d/ locations).
 func (s *SOP) DoInstallSelf(order int) error {
 	// Install skills (the new home for starfleetctl instructions)
 	if err := s.DoInstallStarfleetSkills(); err != nil {
 		return fmt.Errorf("install starfleet skills: %w", err)
 	}
-	// Clean up legacy sop.d fragment if present
-	legacyPath := filepath.Join(s.FragmentsDir(), SelfSlug+".md")
-	if _, err := os.Stat(legacyPath); err == nil {
-		os.Remove(legacyPath)
+	// Clean up legacy fragments if present
+	removed := false
+	for _, dir := range []string{s.FragmentsDir(), filepath.Join(s.Root, "agents.d")} {
+		legacyPath := filepath.Join(dir, SelfSlug+".md")
+		if _, err := os.Stat(legacyPath); err == nil {
+			os.Remove(legacyPath)
+			removed = true
+		}
+	}
+	if removed {
 		return s.DoReindex()
 	}
 	return nil
@@ -78,7 +85,7 @@ func RenderStarfleetFragment(subdir, name string) ([]byte, error) {
 }
 
 // DoInstallStarfleet installs every .md file from the embedded
-// fragments/<subdir>/ directory into .starfleet-ai/sop.d/<slug>.md, always
+// fragments/<subdir>/ directory into .starfleet-ai/var/sop.d/<slug>.md, always
 // overwriting existing files (they are tool-owned). Then reindexes.
 // Used by both the CLI command and genesis-init.
 func (s *SOP) DoInstallStarfleet(subdir string) error {
