@@ -81,6 +81,7 @@ GitHub commands (grouped under 'github'):
 
 Utilities:
   json              JSON helper (validate/pretty/get) — no python3 needed
+  models            sync models.yaml from opencode's model catalog
 
 Run 'starfleetctl <subcommand> --help' for subcommand-specific help.
 `

@@ -347,6 +347,7 @@ starfleetctl worktree remove <branch>
 | `self-install` | Clone/build/install updates |
 | `agents` | Manage instruction fragments ([docs](doc/agents.md)) |
 | `json` | JSON validate/pretty/get |
+| `models` | Sync models.yaml from opencode catalog |
 | `web` | Fleet web UI (start/stop/autostart/restart) |
 
 ---
