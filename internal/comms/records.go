@@ -48,6 +48,9 @@ type StatusRecord struct {
 	Parent     string `json:"parent,omitempty"`
 	Provider   string `json:"provider,omitempty"`
 	Updated    string `json:"updated,omitempty"`
+	// Unattached indicates a working/building status without a task reference.
+	// Set when a ship reports working/building but provides neither --task nor --note.
+	Unattached bool `json:"unattached,omitempty"`
 }
 
 // StatusPatch carries the fields a `status report` invocation wants to
@@ -68,6 +71,7 @@ type StatusPatch struct {
 	ToastVariant string
 	ToastTitle   string
 	ToastMessage string
+	Unattached   bool
 }
 
 // msgRecord mirrors one msgs/<id>.json line (new format) or legacy .tsv line.

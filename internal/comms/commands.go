@@ -199,13 +199,18 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 		Parent:          prev.Parent,
 		Provider:        prev.Provider,
 		Updated:         prev.Updated,
+		// Auto-set Unattached: working/building without task or note
+		Unattached: (state == "working" || state == "building") && prev.Task == "" && clean(note) == "",
 	}
 
 	// Merge structured detail fields from patch.
 	if patch.TaskSet {
 		rec.Task = patch.Task
+		// Task assigned -> not unattached
+		rec.Unattached = false
 	} else if patch.Task != "" {
 		rec.Task = patch.Task
+		rec.Unattached = false
 	}
 	if patch.Progress >= 0 {
 		rec.Progress = patch.Progress
@@ -221,6 +226,8 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	}
 	if patch.Note != "" {
 		rec.Note = clean(patch.Note)
+		// Explicit note -> not unattached
+		rec.Unattached = false
 	}
 	if patch.LaunchType != "" {
 		rec.LaunchType = patch.LaunchType
@@ -855,6 +862,77 @@ func (b *Bus) DoPrune() error {
 
 	b.LogEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
 	fmt.Printf("comms: pruned %d stale heartbeat(s), %d spent directive(s)\n", statusCnt, msgCnt)
+	return nil
+}
+
+// DoPurgeOld implements `comms purge [--older-than <dur>] [--all]`.
+// Removes old directives from dead ships, optionally filtered by age.
+// --all: removes all messages from dead ships (regardless of age)
+// --older-than <dur>: removes messages older than the given duration (e.g. "7d", "30d")
+func (b *Bus) DoPurgeOld(olderThan string, all bool) error {
+	lock, err := b.lockBus()
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	var cutoff int64
+	if olderThan != "" {
+		// Support "d" suffix for days (e.g., "7d", "30d")
+		durStr := olderThan
+		if strings.HasSuffix(durStr, "d") {
+			daysStr := strings.TrimSuffix(durStr, "d")
+			if days, err := strconv.Atoi(daysStr); err == nil {
+				cutoff = time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+			} else {
+				return fmt.Errorf("purge: invalid duration: %s", olderThan)
+			}
+		} else {
+			d, err := time.ParseDuration(durStr)
+			if err != nil {
+				return fmt.Errorf("purge: invalid duration: %w", err)
+			}
+			cutoff = time.Now().Add(-d).Unix()
+		}
+	}
+
+	// First, find live ships (non-stale heartbeats)
+	live := make(map[string]bool)
+	for _, r := range b.AllStatusRecords() {
+		if !b.stale(r.Epoch, r.State) {
+			live[r.Agent] = true
+		}
+	}
+
+	msgCnt := 0
+	for _, m := range b.allMsgRecords() {
+		// Only consider messages from/to dead ships
+		isDeadShip := m.From != "" && !live[m.From] && m.From != b.ShipID
+		isTargetDead := m.Target != "all" && m.Target != "" && !live[m.Target]
+
+		if !isDeadShip && !isTargetDead {
+			continue
+		}
+
+		// If all=true, remove all from dead ships; otherwise check age
+		if !all && cutoff > 0 && m.Epoch >= cutoff {
+			continue
+		}
+
+		if mpath, err := b.mfile(m.ID, m.Target); err == nil {
+			os.Remove(mpath)
+		}
+		// Also remove from seen/ if it exists
+		for agent := range live {
+			if seenPath, err := b.mfileSeen(agent, m.ID); err == nil {
+				os.Remove(seenPath)
+			}
+		}
+		msgCnt++
+	}
+
+	b.LogEvent("purge", fmt.Sprintf("%d old directives from dead ships (all=%v, olderThan=%s)", msgCnt, all, olderThan))
+	fmt.Printf("comms: purged %d old directive(s) from dead ships\n", msgCnt)
 	return nil
 }
 

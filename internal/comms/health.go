@@ -281,6 +281,7 @@ Task status flags (used by Go CLI / status report):
   --eta <s>          estimated completion (free-form)
   --branch <s>       PR/branch the ship is on
   --note <s>         human-readable note
+  --unattached      mark as unattached (working without task/note)
 
 Launch metadata (set on ship startup):
   --launch-type <s>  terminal|background|auto
@@ -370,6 +371,9 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 				note = args[i+1]
 				i++
 			}
+		case "--unattached":
+			// Flag: mark this status as unattached (working without task/note)
+			// This will be auto-set if state is working/building and no task/note provided
 		case "--launch-type":
 			if i+1 < len(args) {
 				launchType = args[i+1]
@@ -445,6 +449,8 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		Parent:          coalesce(parent, prev.Parent),
 		Provider:        coalesce(provider, prev.Provider),
 		Updated:         coalesce(updated, prev.Updated, nowTs),
+		// Auto-set Unattached: working/building without task or note
+		Unattached: (state == "working" || state == "building") && task == "" && note == "",
 	}
 
 	// Ensure timestamps are set for new records.

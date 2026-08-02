@@ -183,22 +183,15 @@ export const plugin = async ({ client, $ }: any) => {
     }
 
     // Check for model-switch directives in ship/user/control messages.
-    // Both "setmodel <model>" and "model <model>" are accepted: the former is
-    // an explicit directive, the latter is a command-style shorthand that
+    // "model <model>" is accepted as a command-style shorthand that
     // some senders (e.g. McKinley/Enterprise) use via `comms tell` with
     // type="ship" — without this, those messages fall through to the
     // case 'ship' → return false branch and get injected as a directive
     // instead of being executed as a model-switch command.
     if (msg.type === 'ship' || msg.type === 'user' || msg.type === 'control') {
       const lower = text.toLowerCase()
-      let prefix = ''
-      if (lower.startsWith('setmodel ')) {
-        prefix = 'setmodel '
-      } else if (lower.startsWith('model ')) {
-        prefix = 'model '
-      }
-      if (prefix) {
-        const targetModel = text.slice(prefix.length).trim()
+      if (lower.startsWith('model ')) {
+        const targetModel = text.slice(6).trim()
         if (!targetModel) { tickLog(`model-switch from=${msg.from}: missing model name`); return true }
         const src = `[model-switch from=${msg.from}]`
         tickLog(`${src}: switching to ${targetModel}`)

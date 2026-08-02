@@ -728,6 +728,7 @@ async function loadBoard(){
       if (r.branch) detail.push(`<span class="pill dim">${esc(r.branch)}</span>`);
       if (r.blocker) detail.push(`<span class="pill bad">⛔ ${esc(r.blocker)}</span>`);
       if (r.eta) detail.push(`<span class="muted">ETA ${esc(r.eta)}</span>`);
+      if (r.unattached) detail.push(`<span class="pill bad">⚠ kein Task</span>`);
       const meta = [];
       if (r.model) meta.push(`<span class="pill dim">🧠 ${esc(r.model)}</span>`);
       else if (r.provider) meta.push(`<span class="pill dim">🧠 ${esc(r.provider)}</span>`);

@@ -39,6 +39,7 @@ type boardEntryJSON struct {
 	Server     string `json:"server,omitempty"`
 	ErrorTag   string `json:"error_tag,omitempty"`
 	Updated    string `json:"updated,omitempty"`
+	Unattached bool   `json:"unattached,omitempty"`
 }
 
 // BoardEntries returns the same board data that `comms board --json`
@@ -94,6 +95,9 @@ func (b *Bus) BoardEntries() []boardEntryJSON {
 		}
 		if r.Updated != "" {
 			e.Updated = r.Updated
+		}
+		if r.Unattached {
+			e.Unattached = r.Unattached
 		}
 		out = append(out, e)
 	}

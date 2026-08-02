@@ -38,6 +38,7 @@ Control agent:
   msgs [--json]             list all directives with ack status
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
+  purge [--older-than <dur>] [--all]  remove old directives (by age or all from dead ships)
   health [--json] [--loop]  fleet liveness watchdog (Go port of fleet-health)
   dispatch --stdin          JSON-RPC entry point for the opencode plugin
                             (reads dispatchRequest, returns dispatchResponse)
@@ -162,6 +163,27 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoEvents(n)
 	case "prune":
 		cmdErr = b.DoPrune()
+	case "purge":
+		olderThan := ""
+		all := false
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--older-than":
+				if i+1 < len(args) {
+					olderThan = args[i+1]
+					i++
+				} else {
+					cmdErr = usageErr("comms purge: --older-than requires a duration")
+				}
+			case "--all":
+				all = true
+			default:
+				cmdErr = usageErr(fmt.Sprintf("comms purge: unknown option: %s", args[i]))
+			}
+		}
+		if cmdErr == nil {
+			cmdErr = b.DoPurgeOld(olderThan, all)
+		}
 	case "health":
 		if len(args) > 1 && args[1] == "update" {
 			cmdErr = b.DoHealthUpdate(args[2:])
