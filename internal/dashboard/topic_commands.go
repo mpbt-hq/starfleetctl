@@ -179,7 +179,7 @@ func (d *Dashboard) DoTopicNew(slug, title, status, category string) error {
 	if category == "" {
 		category = "active"
 	}
-	path := d.topicPath(slug)
+	path := d.topicPathWithCategory(slug, category)
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("topic already exists: %s", path)
 	}

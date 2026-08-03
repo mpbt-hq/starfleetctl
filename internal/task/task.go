@@ -154,8 +154,13 @@ func runCapture(root string, args []string) int {
 	}
 
 	// Reserve the slug (refuses if it already exists — collision guard).
-	if err := d.DoTopicNew(slug, title, "open", ""); err != nil {
-		fmt.Fprintf(os.Stderr, "task capture: slug already exists: %s\n", slug)
+	// For categories other than "active", prepend category to slug (e.g., "starfleet/task-foo")
+	fullSlug := slug
+	if category != "" && category != "active" {
+		fullSlug = category + "/" + slug
+	}
+	if err := d.DoTopicNew(fullSlug, title, "open", category); err != nil {
+		fmt.Fprintf(os.Stderr, "task capture: slug already exists: %s\n", fullSlug)
 		return 3
 	}
 
@@ -179,14 +184,14 @@ func runCapture(root string, args []string) int {
 
 	// Build the topic file content (frontmatter + body) and write it via the
 	// sanctioned dashboard path (never hand-edit the file directly).
-	content := buildTopicFile(slug, title, status, assignedTo, desc, category)
-	if err := writeTopicContent(d, slug, content); err != nil {
+	content := buildTopicFile(fullSlug, title, status, assignedTo, desc, category)
+	if err := writeTopicContent(d, fullSlug, content); err != nil {
 		fmt.Fprintln(os.Stderr, "task capture:", err)
 		return 1
 	}
 
 	push := !noPush
-	if err := d.DoTopicCommit(slug, "task: "+title, push); err != nil {
+	if err := d.DoTopicCommit(fullSlug, "task: "+title, push); err != nil {
 		fmt.Fprintln(os.Stderr, "task capture:", err)
 		return 1
 	}
@@ -197,20 +202,20 @@ func runCapture(root string, args []string) int {
 	// fleet-wide; the task itself is already captured + committed, so don't
 	// fail the whole command on a reindex/commit problem — just warn.
 	if err := d.DoReindex(); err != nil {
-		fmt.Fprintf(os.Stderr, "task capture: dashboard reindex failed (%v) — task %s is captured but not yet in DASHBOARD.md index\n", err, slug)
-	} else if err := d.DoCommit("reindex: add task "+slug, push); err != nil {
-		fmt.Fprintf(os.Stderr, "task capture: dashboard reindex commit failed (%v) — task %s is captured but DASHBOARD.md index not updated\n", err, slug)
+		fmt.Fprintf(os.Stderr, "task capture: dashboard reindex failed (%v) — task %s is captured but not yet in DASHBOARD.md index\n", err, fullSlug)
+	} else if err := d.DoCommit("reindex: add task "+fullSlug, push); err != nil {
+		fmt.Fprintf(os.Stderr, "task capture: dashboard reindex commit failed (%v) — task %s is captured but DASHBOARD.md index not updated\n", err, fullSlug)
 	}
 
 	// Commission the ship (after the dashboard state is durable).
 	if assignMode != "" && assign != "" {
-		if cerr := commissionShip(root, slug, title, assign, false); cerr != nil {
+		if cerr := commissionShip(root, fullSlug, title, assign, false); cerr != nil {
 			fmt.Fprintln(os.Stderr, "task capture:", cerr)
 			return 1
 		}
 	}
 
-	fmt.Printf("task-captured: slug=%s status=%s assigned-to=%s\n", slug, status, assignedTo)
+	fmt.Printf("task-captured: slug=%s status=%s assigned-to=%s\n", fullSlug, status, assignedTo)
 	if assignMode != "" && assign != "" {
 		fmt.Printf("commissioned-ship: %s\n", assign)
 	}

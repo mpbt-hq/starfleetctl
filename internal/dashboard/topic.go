@@ -54,6 +54,18 @@ func (d *Dashboard) topicPath(slug string) string {
 	return filepath.Join(d.TopicsDir(), slug+".md")
 }
 
+// topicPathWithCategory returns the topic path with category as subdirectory.
+func (d *Dashboard) topicPathWithCategory(slug, category string) string {
+	if category != "" && category != "active" {
+		// If slug already starts with category/, don't prepend again
+		if strings.HasPrefix(slug, category+"/") {
+			return filepath.Join(d.TopicsDir(), slug+".md")
+		}
+		return filepath.Join(d.TopicsDir(), category, slug+".md")
+	}
+	return filepath.Join(d.TopicsDir(), slug+".md")
+}
+
 // TopicPath returns the absolute filesystem path for a topic slug — exported
 // so task rm etc. can access it without duplicating the path logic.
 func (d *Dashboard) TopicPath(slug string) string {
