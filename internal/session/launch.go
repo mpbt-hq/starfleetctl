@@ -593,7 +593,9 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	// Inject the local model-proxy providers (nim-proxy, zen-proxy, ...) so
 	// ships prefer the resilient local endpoint in front of the flaky
 	// upstreams. Only applies when model-proxy.yaml exists with providers.
-	if proxyProviders := modelproxy.ProviderConfigs(root); proxyProviders != nil {
+	// The per-ship apiKey (ShipKey) lets the proxy attribute requests to
+	// this ship.
+	if proxyProviders := modelproxy.ProviderConfigs(root, shipID); proxyProviders != nil {
 		provs, _ := shipConfig["provider"].(map[string]any)
 		if provs == nil {
 			provs = map[string]any{}

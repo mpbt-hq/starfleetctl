@@ -4,6 +4,8 @@
 package modelproxy
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,11 +19,19 @@ func jsonDecode(resp *http.Response, v any) error {
 	return json.NewDecoder(resp.Body).Decode(v)
 }
 
-// proxyDummyKey is the API key written into the per-ship opencode provider
-// config. The proxy itself holds the real upstream keys (from model-proxy.yaml
-// + env) and does not authenticate local clients, so the per-ship config never
-// carries a real secret.
-const proxyDummyKey = "starfleet-model-proxy"
+// ShipKey returns the per-ship API key written into a ship's opencode
+// provider config (format "mp-<shipID>-<token>"). The proxy derives the ship
+// identity from it, so per-ship usage/status tracking works even though all
+// ships connect from 127.0.0.1. The token is random per generated config.
+func ShipKey(shipID string) string {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failing is virtually impossible; fall back to a fixed
+		// suffix so config generation never hard-fails on it.
+		return "mp-" + shipID + "-insecure"
+	}
+	return "mp-" + shipID + "-" + hex.EncodeToString(b[:])
+}
 
 // proxyBaseURL returns the baseURL that should be written into the opencode
 // provider config, i.e. the proxy's own OpenAI endpoint.
@@ -72,7 +82,9 @@ func (c *Config) modelListFor(prov Provider) []string {
 // pointing at the local proxy and enumerating the discovered models. It
 // returns nil when no model-proxy configuration exists. The returned map can
 // be merged directly into a generated opencode config's "provider" section.
-func ProviderConfigs(root string) map[string]any {
+// shipID is embedded into each provider's apiKey (see ShipKey) so the proxy
+// can attribute requests to the ship.
+func ProviderConfigs(root, shipID string) map[string]any {
 	cfg, err := Load(root)
 	if err != nil {
 		return nil
@@ -81,6 +93,7 @@ func ProviderConfigs(root string) map[string]any {
 		return nil
 	}
 	base := cfg.proxyBaseURL()
+	key := ShipKey(shipID)
 	out := map[string]any{}
 	for _, prov := range cfg.Providers {
 		entry := map[string]any{
@@ -88,7 +101,7 @@ func ProviderConfigs(root string) map[string]any {
 			"name": prov.Name,
 			"options": map[string]any{
 				"baseURL": base,
-				"apiKey":  proxyDummyKey,
+				"apiKey":  key,
 			},
 		}
 		if models := cfg.modelListFor(prov); len(models) > 0 {

@@ -25,6 +25,7 @@ type Proxy struct {
 	cacheMu   sync.RWMutex
 	modelSets map[string]map[string]bool
 	cacheAt   map[string]time.Time
+	tracker   *shipTracker
 	mux       *http.ServeMux
 }
 
@@ -35,10 +36,12 @@ func New(cfg *Config) *Proxy {
 		logger:    log.Default(),
 		modelSets: map[string]map[string]bool{},
 		cacheAt:   map[string]time.Time{},
+		tracker:   newShipTracker(),
 	}
 	p.mux = http.NewServeMux()
 	p.mux.HandleFunc("/v1/models", p.handleModels)
 	p.mux.HandleFunc("/v1/chat/completions", p.handleChat)
+	p.mux.HandleFunc("/v1/ships", p.handleShips)
 	p.mux.HandleFunc("/healthz", p.handleHealth)
 	return p
 }
@@ -211,6 +214,15 @@ func (p *Proxy) routeModel(model string) (*Provider, string) {
 	return nil, model
 }
 
+// handleShips serves GET /v1/ships — the per-ship usage/status statistics.
+func (p *Proxy) handleShips(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	writeJSON(w, map[string]any{"ships": p.tracker.snapshot()})
+}
+
 // handleChat serves POST /v1/chat/completions. It routes to the provider that
 // serves the requested model, retries transient upstream failures, and pipes
 // the SSE stream through (catching mid-stream breaks with a clean error event).
@@ -236,11 +248,13 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Sprintf("model %q not served by any configured model-proxy provider", req.Model))
 		return
 	}
-	p.forwardChat(w, r, prov, upstreamModel, body, isStreamingRequest(body))
+	ship := shipFromRequest(r.Header.Get("Authorization"))
+	p.forwardChat(w, r, prov, upstreamModel, body, isStreamingRequest(body), ship, req.Model)
 }
 
-// forwardChat performs the (possibly retried) upstream chat request.
-func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool) {
+// forwardChat performs the (possibly retried) upstream chat request and
+// records the outcome in the per-ship tracker.
+func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string) {
 	client := &http.Client{Timeout: 0} // streaming needs no client-side deadline; server read deadline governs
 	attempts := prov.MaxRetries + 1
 
@@ -272,6 +286,7 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 	}
 
 	var lastErr error
+	retries := 0
 	for attempt := 1; attempt <= attempts; attempt++ {
 		upstreamReq, _, err := buildReq()
 		if err != nil {
@@ -282,10 +297,12 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		if err != nil {
 			lastErr = err
 			if attempt < attempts && retryableError(err) {
-				p.logf("%s: transport error (attempt %d/%d): %v — retrying", prov.ID, attempt, attempts, err)
+				p.logf("%s/%s: transport error (attempt %d/%d): %v — retrying", ship, prov.ID, attempt, attempts, err)
+				retries++
 				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
 				continue
 			}
+			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 			writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, err))
 			return
 		}
@@ -295,10 +312,12 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
 			if transientStatus(resp.StatusCode) && attempt < attempts {
-				p.logf("%s: transient HTTP %d (attempt %d/%d): %.300s — retrying", prov.ID, resp.StatusCode, attempt, attempts, string(errBody))
+				p.logf("%s/%s: transient HTTP %d (attempt %d/%d): %.300s — retrying", ship, prov.ID, resp.StatusCode, attempt, attempts, string(errBody))
+				retries++
 				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
 				continue
 			}
+			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(resp.StatusCode)
 			if len(errBody) > 0 {
@@ -310,23 +329,53 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		}
 
 		if streaming {
-			p.pipeSSE(w, resp)
+			usage, failed := p.pipeSSE(w, resp)
+			p.tracker.record(ship, prov.ID, requestedModel, usage, retries, failed)
 		} else {
+			bodyBytes, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
+				writeErr(w, 502, fmt.Sprintf("upstream %s: read response: %v", prov.ID, err))
+				return
+			}
+			usage := extractUsage(bodyBytes)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(resp.StatusCode)
-			_, _ = io.Copy(w, resp.Body)
-			resp.Body.Close()
+			_, _ = w.Write(bodyBytes)
+			p.tracker.record(ship, prov.ID, requestedModel, usage, retries, false)
 		}
 		return
 	}
+	p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 	writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, lastErr))
+}
+
+// extractUsage parses the usage object from a non-stream chat response body.
+func extractUsage(body []byte) *Usage {
+	var parsed struct {
+		Usage Usage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil
+	}
+	if parsed.Usage.PromptTokens == 0 && parsed.Usage.CompletionTokens == 0 {
+		return nil
+	}
+	return &parsed.Usage
+}
+
+// extractStreamUsage parses the usage object from a single SSE data payload.
+func extractStreamUsage(payload []byte) *Usage {
+	return extractUsage(payload)
 }
 
 // pipeSSE copies an SSE stream from the upstream response to the client,
 // forwarding headers and catching a premature close (EOF without a [DONE]
 // sentinel) with a clean error event so the client sees a structured failure
-// instead of a truncated stream.
-func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) {
+// instead of a truncated stream. It returns the accumulated token usage (from
+// trailing usage chunks) and whether the stream failed.
+func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) (*Usage, bool) {
 	defer resp.Body.Close()
 	for k, vv := range resp.Header {
 		for _, v := range vv {
@@ -340,15 +389,10 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) {
 	sawDone := false
 	sawError := false
 	flusher, _ := w.(http.Flusher)
-	prevWritten := false
+	var usage *Usage
 
 	for sc.Scan() {
 		line := sc.Text()
-		if !prevWritten {
-			// First write: mark that we started producing output. Any error
-			// after this point is a mid-stream break (unrecoverable).
-			prevWritten = true
-		}
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "data:") {
 			payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
@@ -363,6 +407,14 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) {
 					flusher.Flush()
 				}
 				continue
+			} else if strings.HasPrefix(payload, "{") {
+				if u := extractStreamUsage([]byte(payload)); u != nil {
+					if usage == nil {
+						usage = &Usage{}
+					}
+					usage.PromptTokens += u.PromptTokens
+					usage.CompletionTokens += u.CompletionTokens
+				}
 			}
 		}
 		_, _ = io.WriteString(w, line+"\n")
@@ -390,7 +442,9 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) {
 		if flusher != nil {
 			flusher.Flush()
 		}
+		return usage, true
 	}
+	return usage, false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

@@ -51,12 +51,33 @@ func modelsHandler(models ...string) http.Handler {
 }
 
 func postChat(t *testing.T, p *Proxy, model string, stream bool) *http.Response {
+	return postChatAuth(t, p, model, stream, "")
+}
+
+func postChatAuth(t *testing.T, p *Proxy, model string, stream bool, auth string) *http.Response {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"model": model, "messages": []any{}, "stream": stream})
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
+	if auth != "" {
+		req.Header.Set("Authorization", "Bearer "+auth)
+	}
 	w := httptest.NewRecorder()
 	p.ServeHTTP(w, req)
 	return w.Result()
+}
+
+func getShips(t *testing.T, p *Proxy) []ShipStats {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/ships", nil)
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	var out struct {
+		Ships []ShipStats `json:"ships"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode ships: %v", err)
+	}
+	return out.Ships
 }
 
 func TestModelsConsolidated(t *testing.T) {
@@ -260,6 +281,146 @@ func TestHealth(t *testing.T) {
 	p.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestShipKeyFormat(t *testing.T) {
+	k := ShipKey("Phoenix")
+	if !strings.HasPrefix(k, "mp-Phoenix-") || len(k) <= len("mp-Phoenix-") {
+		t.Fatalf("ShipKey = %q, want mp-Phoenix-<token>", k)
+	}
+	if k == ShipKey("Phoenix") {
+		t.Fatalf("ShipKey must be unique per call")
+	}
+}
+
+func TestShipFromRequest(t *testing.T) {
+	cases := []struct {
+		auth string
+		want string
+	}{
+		{"Bearer mp-Phoenix-aabbcc", "Phoenix"},
+		{"mp-Phoenix-aabbcc", "Phoenix"},
+		{"Bearer starfleet-model-proxy", "unknown"},
+		{"", "unknown"},
+		{"Bearer mp-", "unknown"},
+	}
+	for _, c := range cases {
+		if got := shipFromRequest(c.auth); got != c.want {
+			t.Errorf("shipFromRequest(%q) = %q, want %q", c.auth, got, c.want)
+		}
+	}
+}
+
+// TestShipsTracking verifies that chat requests carrying a per-ship apiKey are
+// attributed to that ship in /v1/ships, including token usage from the
+// response.
+func TestShipsTracking(t *testing.T) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "resp",
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "hi"}}},
+			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
+		})
+	})
+	p, _ := testProxy(t, upstream)
+
+	resp := postChatAuth(t, p, "m1", false, ShipKey("Phoenix"))
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	ships := getShips(t, p)
+	if len(ships) != 1 {
+		t.Fatalf("ships = %d, want 1: %+v", len(ships), ships)
+	}
+	s := ships[0]
+	if s.ShipID != "Phoenix" {
+		t.Fatalf("ship = %q, want Phoenix", s.ShipID)
+	}
+	if s.TotalRequests != 1 || s.Successes != 1 || s.Failures != 0 {
+		t.Fatalf("counters = %+v", s)
+	}
+	if s.PromptTokens != 10 || s.CompletionTokens != 5 {
+		t.Fatalf("tokens = %d/%d, want 10/5", s.PromptTokens, s.CompletionTokens)
+	}
+	if s.ByProvider["test"] != 1 || s.ByModel["m1"] != 1 {
+		t.Fatalf("by provider/model = %+v / %+v", s.ByProvider, s.ByModel)
+	}
+}
+
+// TestShipsTrackingStreaming verifies usage is picked up from the trailing
+// usage chunk of a streaming response.
+func TestShipsTrackingStreaming(t *testing.T) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		f, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		f.Flush()
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n")
+		f.Flush()
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		f.Flush()
+	})
+	p, _ := testProxy(t, upstream)
+
+	resp := postChatAuth(t, p, "m1", true, ShipKey("Voyager"))
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	ships := getShips(t, p)
+	if len(ships) != 1 {
+		t.Fatalf("ships = %d, want 1", len(ships))
+	}
+	s := ships[0]
+	if s.ShipID != "Voyager" {
+		t.Fatalf("ship = %q, want Voyager", s.ShipID)
+	}
+	if s.PromptTokens != 3 || s.CompletionTokens != 2 {
+		t.Fatalf("tokens = %d/%d, want 3/2", s.PromptTokens, s.CompletionTokens)
+	}
+	if s.Failures != 0 || s.Successes != 1 {
+		t.Fatalf("counters = %+v", s)
+	}
+}
+
+// TestShipsTrackingFailure verifies failed requests increment the failure
+// counter (and no token usage is recorded).
+func TestShipsTrackingFailure(t *testing.T) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":{"message":"down"}}`)
+	})
+	p, _ := testProxy(t, upstream)
+
+	resp := postChatAuth(t, p, "m1", false, ShipKey("Reliant"))
+	// After exhausting retries (test provider MaxRetries=2 → 3 attempts),
+	// the proxy answers 503.
+	if resp.StatusCode != 503 {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	ships := getShips(t, p)
+	if len(ships) != 1 {
+		t.Fatalf("ships = %d, want 1", len(ships))
+	}
+	s := ships[0]
+	if s.Failures != 1 || s.Successes != 0 {
+		t.Fatalf("counters = %+v, want failures=1", s)
+	}
+	if s.Retries != 2 {
+		t.Fatalf("retries = %d, want 2", s.Retries)
 	}
 }
 
