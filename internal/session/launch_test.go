@@ -121,12 +121,10 @@ func TestGenerateOpencodeConfigWorkspaceTools(t *testing.T) {
 				t.Errorf("%s: %s ** = %q, want allow", launchType, tool, got)
 			}
 		}
-		// bash: starfleetctl always allowed; catch-all ask (terminal) /
-		// allow (background+auto).
-		if got := permRule(t, cfg, "bash", "**"); got != "ask" && launchType == "terminal" {
-			t.Errorf("terminal: bash ** = %q, want ask", got)
-		}
-		if got := permRule(t, cfg, "bash", "**"); got != "allow" && launchType != "terminal" {
+		// bash: allowed for every launch type (mirrors opencode's permissive
+		// default — the fleet ran without bash prompts before per-ship
+		// configs, and terminal "ask" regressed that).
+		if got := permRule(t, cfg, "bash", "**"); got != "allow" {
 			t.Errorf("%s: bash ** = %q, want allow", launchType, got)
 		}
 		if got := permRule(t, cfg, "bash", "starfleetctl **"); got != "allow" {

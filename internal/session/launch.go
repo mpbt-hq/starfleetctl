@@ -606,17 +606,18 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 		shipConfig["provider"] = provs
 	}
 
-	// Permission rules based on launch type and unrestricted flag
+	// Permission rules based on launch type and unrestricted flag.
+	// bash mirrors opencode's permissive default ("allow") for every launch
+	// type: the fleet ran without bash prompts before per-ship configs, and
+	// setting "ask" for terminal ships regressed that (the human at the
+	// console had to confirm every banal command, e.g. `ls .starfleet-ai/...`).
+	// Paths outside the workspace are gated by external_directory below, not
+	// by these rules. The starfleetctl rules are kept for back-compat even
+	// though the "**" catch-all already allows them.
 	bashRules := map[string]string{
+		"**":                                   "allow",
 		"**/.starfleet-ai/bin/starfleetctl **": "allow",
 		"starfleetctl **":                      "allow",
-	}
-	if unrestricted {
-		bashRules["**"] = "allow"
-	} else if launchType == "terminal" {
-		bashRules["**"] = "ask"
-	} else {
-		bashRules["**"] = "allow"
 	}
 
 	// Base permission rules
