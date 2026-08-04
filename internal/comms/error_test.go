@@ -34,6 +34,26 @@ func TestClassifyModelError_zenRatelimit(t *testing.T) {
 	}
 }
 
+func TestClassifyModelError_transientRatelimit(t *testing.T) {
+	// Transient errors with "|transient" or "AI_APICallError" should be nim-overload
+	cases := []struct {
+		name   string
+		detail string
+	}{
+		{"transient suffix", "Too Many Requests|transient"},
+		{"ai apicallerror transient", "AI_APICallError: Too Many Requests|transient"},
+		{"ai apicallerror rate limit", "AI_APICallError: rate limit exceeded|transient"},
+		{"ai apicallerror quota", "AI_APICallError: quota exceeded|transient"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tag := ClassifyModelError(tc.detail); tag != "nim-overload" {
+				t.Errorf("ClassifyModelError(%q) = %q, want %q", tc.detail, tag, "nim-overload")
+			}
+		})
+	}
+}
+
 func TestClassifyModelError_resourceExhausted(t *testing.T) {
 	cases := []struct {
 		name   string
