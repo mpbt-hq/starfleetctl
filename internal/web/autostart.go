@@ -110,7 +110,7 @@ func Daemonize(root, addr, logFile string) (int, error) {
 	// The daemon is often spawned by cron with a minimal PATH
 	// (PATH=/usr/bin:/bin), which its children then inherit. Expand the PATH
 	// so exec'd helpers (ss, git, ...) are found regardless of the caller's
-	// environment.
+	// environment. Pass through the full parent environment.
 	cmd.Env = append(os.Environ(), "PATH="+daemonPath())
 	// Detach from parent
 	cmd.SysProcAttr = &syscall.SysProcAttr{
