@@ -4,6 +4,7 @@
 package sop
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,17 +41,31 @@ func quoteYAML(v string) string {
 	return `"` + v + `"`
 }
 
+// errFragmentNoFrontmatter / errFragmentUnterminated are the recoverable
+// parse conditions: the fragment's body is still usable (raw content), only
+// its frontmatter fields are missing/broken. loadAllFragments keeps such
+// fragments (indexed with a slug derived from the file path) and surfaces a
+// warning; callers that require well-formed fragments (e.g. the embedded
+// starfleet set) treat them as fatal.
+var (
+	errFragmentNoFrontmatter = errors.New("missing frontmatter (no leading '---')")
+	errFragmentUnterminated  = errors.New("unterminated frontmatter (no closing '---')")
+)
+
 // parseFragmentFile splits a fragment file into its frontmatter (parsed)
-// and body.
+// and body. It is lenient: a missing or malformed frontmatter block is not
+// fatal — the whole content is returned as body together with a non-nil
+// error identifying the problem. Strict callers may fail on that error;
+// lenient callers keep the body and continue.
 func parseFragmentFile(data []byte) (FragmentMeta, string, error) {
 	s := string(data)
 	if !strings.HasPrefix(s, "---\n") {
-		return FragmentMeta{}, "", fmt.Errorf("missing frontmatter (no leading '---')")
+		return FragmentMeta{}, s, errFragmentNoFrontmatter
 	}
 	rest := s[len("---\n"):]
 	idx := strings.Index(rest, "\n---\n")
 	if idx < 0 {
-		return FragmentMeta{}, "", fmt.Errorf("unterminated frontmatter (no closing '---')")
+		return FragmentMeta{}, s, errFragmentUnterminated
 	}
 	fm := rest[:idx]
 	body := strings.TrimPrefix(rest[idx+len("\n---\n"):], "\n")
@@ -112,8 +127,12 @@ func writeFragmentFile(path string, m FragmentMeta, body string) error {
 // The slug is the relative path from the respective root with .md stripped.
 // The legacy agents.d/ directory is still read too (kept as legacy-supported),
 // but a fragment with the same slug in sop.d/ takes precedence.
-func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
+// Fragments without a usable frontmatter block are kept (raw body, slug
+// derived from the path) and reported in the returned warnings slice instead
+// of failing the whole load.
+func (s *SOP) loadAllFragments() ([]FragmentMeta, []string, error) {
 	var metas []FragmentMeta
+	var warnings []string
 	seen := map[string]bool{}
 
 	dirs := []struct {
@@ -146,15 +165,23 @@ func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
 			if err != nil {
 				return err
 			}
+			slug := d.prefix + strings.TrimSuffix(rel, ".md")
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return err
 			}
-			m, _, err := parseFragmentFile(data)
-			if err != nil {
-				return fmt.Errorf("%s: %w", rel, err)
+			m, _, perr := parseFragmentFile(data)
+			if perr != nil {
+				if errors.Is(perr, errFragmentNoFrontmatter) || errors.Is(perr, errFragmentUnterminated) {
+					// Recoverable: index the raw body under the slug derived
+					// from the path, warn — one bad fragment must not break
+					// the whole index.
+					warnings = append(warnings, fmt.Sprintf("%s: %v (indexed as %q, raw body)", rel, perr, slug))
+					m = FragmentMeta{}
+				} else {
+					return fmt.Errorf("%s: %w", rel, perr)
+				}
 			}
-			slug := d.prefix + strings.TrimSuffix(rel, ".md")
 			if m.Slug == "" {
 				m.Slug = slug
 			}
@@ -168,7 +195,7 @@ func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
 			return nil
 		})
 		if err != nil && !os.IsNotExist(err) {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -178,5 +205,5 @@ func (s *SOP) loadAllFragments() ([]FragmentMeta, error) {
 		}
 		return metas[i].Slug < metas[j].Slug
 	})
-	return metas, nil
+	return metas, warnings, nil
 }

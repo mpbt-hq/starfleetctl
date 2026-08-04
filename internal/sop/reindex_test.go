@@ -102,6 +102,49 @@ func TestReindexStripsFrontmatter(t *testing.T) {
 	}
 }
 
+func TestReindexToleratesMissingFrontmatter(t *testing.T) {
+	s := newTestSOP(t)
+	fragPath := filepath.Join(s.FragmentsDir(), "broken", "no-fm.md")
+	if err := os.MkdirAll(filepath.Dir(fragPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "# Broken fragment\n\nno frontmatter here\n"
+	if err := os.WriteFile(fragPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// One fragment without frontmatter must not fail the whole reindex.
+	if err := s.DoReindex(); err != nil {
+		t.Fatalf("reindex must tolerate a fragment without frontmatter: %v", err)
+	}
+	out, err := os.ReadFile(s.IndexFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := string(out)
+	// slug derived from the path, raw body inlined
+	if !strings.Contains(s2, "begin inlined fragment: broken/no-fm") {
+		t.Errorf("broken fragment not indexed with derived slug:\n%s", s2)
+	}
+	if !strings.Contains(s2, "no frontmatter here") {
+		t.Errorf("broken fragment raw body not inlined:\n%s", s2)
+	}
+	// The warning must be reported, not silently swallowed.
+	if _, warnings, err := s.loadAllFragments(); err != nil {
+		t.Fatal(err)
+	} else {
+		found := false
+		for _, w := range warnings {
+			if strings.Contains(w, "broken/no-fm") && strings.Contains(w, "frontmatter") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected a frontmatter warning for broken/no-fm, got: %v", warnings)
+		}
+	}
+}
+
 func TestInstallSelfCleansLegacyFragments(t *testing.T) {
 	s := newTestSOP(t)
 	// Simulate a workspace still carrying the old agents.d/ fragment layout.

@@ -31,9 +31,12 @@ func (s *SOP) EnsureBootstrapped() (created bool, err error) {
 // DoList prints every fragment's slug/title/order (or, with jsonOut, a JSON
 // array).
 func (s *SOP) DoList(jsonOut bool) error {
-	metas, err := s.loadAllFragments()
+	metas, warnings, err := s.loadAllFragments()
 	if err != nil {
 		return err
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "sop: warning: %s\n", w)
 	}
 	if jsonOut {
 		type row struct {
@@ -135,9 +138,12 @@ func (s *SOP) DoReindex() error {
 	if _, err := s.EnsureBootstrapped(); err != nil {
 		return err
 	}
-	metas, err := s.loadAllFragments()
+	metas, warnings, err := s.loadAllFragments()
 	if err != nil {
 		return err
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "sop: warning: %s\n", w)
 	}
 
 	var b strings.Builder
@@ -149,12 +155,11 @@ func (s *SOP) DoReindex() error {
 			return rerr
 		}
 		fmt.Fprintf(&b, "\n<!-- begin inlined fragment: %s -->\n", m.Slug)
-		if _, body, err := parseFragmentFile(data); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %s: no frontmatter, inlining raw content\n", m.Slug)
-			b.WriteString(string(data))
-		} else {
-			b.WriteString(body)
-		}
+		// parseFragmentFile is lenient: for fragments without a usable
+		// frontmatter block it returns the raw content as body (already
+		// warned about during loadAllFragments), so nothing is dropped.
+		_, body, _ := parseFragmentFile(data)
+		b.WriteString(body)
 		fmt.Fprintf(&b, "\n<!-- end inlined fragment: %s -->\n", m.Slug)
 	}
 	indexContent := b.String()
