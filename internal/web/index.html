@@ -367,15 +367,16 @@
     <div class="modal" style="max-width:760px">
       <div class="row" style="align-items:flex-start">
         <div class="grow">
+          <div class="muted" style="font-size:12px">Subject:</div>
           <b id="task_m_title"></b>
-          <div id="task_m_meta" class="muted" style="margin-top:4px;font-size:12px"></div>
+          <div id="task_m_meta" class="muted" style="margin-top:6px;font-size:12px"></div>
         </div>
         <button class="sec" onclick="taskDetailEdit()" style="width:auto;padding:4px 10px">Bearbeiten</button>
         <button class="sec" onclick="closeTaskModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
       </div>
       <div id="task_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></div>
       <div id="task_m_edit" style="display:none;margin-top:12px">
-        <input id="task_m_t" placeholder="Titel" style="width:100%;box-sizing:border-box">
+        <input id="task_m_t" placeholder="Subject (Titel)" style="width:100%;box-sizing:border-box">
         <div class="grid2" style="margin-top:8px">
           <select id="task_m_cat"></select>
           <select id="task_m_status"></select>
@@ -1135,8 +1136,14 @@ async function taskDetail(slug){
     taskDetailSlug = slug;
     taskDetailCat = t.category || '';
     document.getElementById('task_m_title').textContent = t.title;
-    document.getElementById('task_m_meta').textContent =
-      t.slug + ' · ' + (t.kind||'task') + ' · ' + (t.status||'') + ' · 👤 ' + (t.assigned_to||'-');
+    document.getElementById('task_m_meta').innerHTML =
+      'From: ' + esc(t.created_by || '—') + '<br>' +
+      'Date: ' + esc(t.created || '—') + '<br>' +
+      'Assigned-To: ' + esc(t.assigned_to || '—') + '<br>' +
+      'Status: ' + esc(t.status || '—') + '<br>' +
+      'Category: ' + esc(t.category || '(toplevel)') + ' · ' +
+      'Kind: ' + esc(t.kind || 'task') + '<br>' +
+      esc(t.slug);
     document.getElementById('task_m_t').value = t.title;
     document.getElementById('task_m_text').value = t.body || '';
     // Category select: distinct real categories (slug prefixes) + toplevel.
