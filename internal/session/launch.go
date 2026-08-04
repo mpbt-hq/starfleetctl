@@ -450,6 +450,13 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	inner += "export STARFLEET_ROLE=" + shellQuote("ship") + "; "
 	inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
 	inner += "export STARFLEET_LAUNCH_TYPE=" + shellQuote(launchType) + "; "
+	// Select opencode config based on launch type: background/auto ships get
+	// the permissive auto-config (with provider keys), foreground gets terminal config.
+	opencodeConfig := ".opencode/opencode.auto.json"
+	if launchType == "terminal" {
+		opencodeConfig = ".opencode/opencode.terminal.json"
+	}
+	inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfig) + "; "
 	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
 		`{"username":"`+name+`","instructions":[".starfleet-ai/var/sop.d/index.md"],"plugin":["./.opencode/plugins/starfleet-dispatch.ts"]}`) + "; "
 	inner += "cd " + shellQuote(root) + "; "
