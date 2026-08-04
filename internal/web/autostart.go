@@ -6,8 +6,6 @@
 package web
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -197,13 +195,7 @@ func cleanupWrongPortProcesses(expectedAddr string) error {
 		return nil // not our problem
 	}
 
-	// Find all starfleetctl web processes and their listening ports
-	procs, err := findStarlfleetWebProcs()
-	if err != nil {
-		return err
-	}
-
-	for _, p := range procs {
+	for _, p := range webStartProcs() {
 		if p.Port != "" && p.Port != expectedPort {
 			// Kill process on wrong port
 			process, err := os.FindProcess(p.PID)
@@ -221,60 +213,58 @@ type webProcInfo struct {
 	Port string
 }
 
-// findStarlfleetWebProcs finds all starfleetctl web processes and their listening ports.
-func findStarlfleetWebProcs() ([]webProcInfo, error) {
+// webStartProcs finds all starfleetctl "web start" processes (the daemon and
+// any foreground instance) via /proc, along with the port from their
+// "--addr HOST:PORT" argument. Pure /proc scan — no external tools, so it
+// works regardless of the daemon's PATH.
+func webStartProcs() []webProcInfo {
 	var procs []webProcInfo
-
-	// Use ss to find listening processes
-	cmd := exec.Command("ss", "-ltnp")
-	out, err := cmd.Output()
+	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil, err
+		return nil
 	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(out))
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Look for starfleetctl processes
-		if strings.Contains(line, "starfleetctl") && strings.Contains(line, "web") {
-			// Parse: LISTEN 0 4096 *:8090 *:* users:(("starfleetctl",pid=1234,fd=3))
-			port := extractPort(line)
-			pid := extractPID(line)
-			if port != "" && pid > 0 {
-				procs = append(procs, webProcInfo{PID: pid, Port: port})
-			}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
 		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline"))
+		if err != nil {
+			continue
+		}
+		args := strings.Split(strings.TrimSuffix(string(cmdline), "\x00"), "\x00")
+		if !webStartArgs(args) {
+			continue
+		}
+		procs = append(procs, webProcInfo{PID: pid, Port: webAddrPort(args)})
 	}
-	return procs, scanner.Err()
+	return procs
 }
 
-func extractPort(line string) string {
-	// Find *:PORT or IP:PORT pattern
-	fields := strings.Fields(line)
-	for _, f := range fields {
-		if strings.Contains(f, ":") && !strings.HasPrefix(f, "pid=") && !strings.HasPrefix(f, "fd=") {
-			parts := strings.Split(f, ":")
-			if len(parts) == 2 {
-				return parts[1]
+// webStartArgs reports whether the /proc cmdline args belong to a
+// "starfleetctl web start" invocation.
+func webStartArgs(args []string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "web" && args[i+1] == "start" {
+			return true
+		}
+	}
+	return false
+}
+
+// webAddrPort extracts the port from a "--addr HOST:PORT" argument pair.
+func webAddrPort(args []string) string {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--addr" {
+			if _, port, err := net.SplitHostPort(args[i+1]); err == nil {
+				return port
 			}
 		}
 	}
 	return ""
-}
-
-func extractPID(line string) int {
-	// Find pid=NUMBER
-	idx := strings.Index(line, "pid=")
-	if idx < 0 {
-		return 0
-	}
-	idx += 4
-	end := idx
-	for end < len(line) && line[end] >= '0' && line[end] <= '9' {
-		end++
-	}
-	pid, _ := strconv.Atoi(line[idx:end])
-	return pid
 }
 
 // daemonPath returns the PATH the web daemon should run with: the caller's
@@ -305,11 +295,7 @@ func killWebProcOnPort(addr string) error {
 	if err != nil {
 		return nil
 	}
-	procs, err := findStarlfleetWebProcs()
-	if err != nil {
-		return err
-	}
-	for _, p := range procs {
+	for _, p := range webStartProcs() {
 		if p.Port == expectedPort {
 			if process, err := os.FindProcess(p.PID); err == nil {
 				process.Kill()

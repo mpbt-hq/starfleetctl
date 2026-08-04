@@ -237,3 +237,24 @@ func TestDaemonPath(t *testing.T) {
 		}
 	}
 }
+
+// TestWebStartArgs verifies the /proc cmdline detection for daemon processes.
+func TestWebStartArgs(t *testing.T) {
+	if !webStartArgs([]string{"./.starfleet-ai/bin/starfleetctl", "web", "start", "--addr", "0.0.0.0:8080"}) {
+		t.Error("webStartArgs: expected 'web start' to be detected")
+	}
+	if webStartArgs([]string{"starfleetctl", "web", "restart"}) {
+		t.Error("webStartArgs: 'web restart' must not be detected as 'web start'")
+	}
+	if webStartArgs([]string{"git", "status"}) {
+		t.Error("webStartArgs: unrelated process detected")
+	}
+}
+
+// TestWebAddrPort verifies --addr port extraction from cmdline args.
+func TestWebAddrPort(t *testing.T) {
+	args := []string{"./.starfleet-ai/bin/starfleetctl", "web", "start", "--addr", "0.0.0.0:8080"}
+	if port := webAddrPort(args); port != "8080" {
+		t.Errorf("webAddrPort(%v) = %q, want 8080", args, port)
+	}
+}
