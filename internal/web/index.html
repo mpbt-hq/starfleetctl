@@ -1592,6 +1592,7 @@ async function loadTargets(){
 // involving the target (or a broadcast to all) are shown, including ping
 // replies (which arrive as a tell with reply_to set). This is what makes a
 // ship's "Pong!" answer visible in the Funk tab after you ping it.
+// The API returns newest first; we render in that order (newest on top).
 async function loadTalk(){
   const el = document.getElementById('talk_body');
   if (!el) return;
@@ -1621,7 +1622,8 @@ async function loadTalk(){
       (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
     };
     roots.forEach(r=>walk(r, 0));
-    el.innerHTML = out.reverse().join('') || '<div class="empty">'+t('bus.nomsgs')+'</div>';
+    // API returns newest first; render as-is so the newest message is on top.
+    el.innerHTML = out.join('') || '<div class="empty">'+t('bus.nomsgs')+'</div>';
     el.scrollTop = 0;
   } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
