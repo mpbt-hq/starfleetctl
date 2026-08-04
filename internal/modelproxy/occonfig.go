@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,35 @@ func ShipKey(shipID string) string {
 // provider config, i.e. the proxy's own OpenAI endpoint.
 func (c *Config) proxyBaseURL() string {
 	return "http://" + c.ListenAddr + "/v1"
+}
+
+// modelInfoFor returns the full model metadata (with label/context/caps) one
+// provider serves, best-effort: first via the running local proxy, falling
+// back to a direct upstream query. Mirrors modelListFor but keeps metadata.
+func (c *Config) modelInfoFor(prov Provider) []ModelInfo {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(c.proxyBaseURL() + "/models?provider=" + prov.ID)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var out struct {
+				Data []ModelInfo `json:"data"`
+			}
+			if decodeErr := jsonDecode(resp, &out); decodeErr == nil {
+				return out.Data
+			}
+		}
+	}
+	raw, ferr := fetchModelInfo(prov)
+	if ferr != nil {
+		return nil
+	}
+	infos := make([]ModelInfo, len(raw))
+	for i, m := range raw {
+		m.OwnedBy = prov.ID
+		infos[i] = m
+	}
+	return infos
 }
 
 // modelListFor returns the model IDs served by one provider, best-effort:
@@ -104,10 +134,10 @@ func ProviderConfigs(root, shipID string) map[string]any {
 				"apiKey":  key,
 			},
 		}
-		if models := cfg.modelListFor(prov); len(models) > 0 {
+		if infos := cfg.modelInfoFor(prov); len(infos) > 0 {
 			mm := map[string]any{}
-			for _, id := range models {
-				mm[id] = map[string]any{"name": id}
+			for _, inf := range infos {
+				mm[inf.ID] = modelEntryFor(inf)
 			}
 			entry["models"] = mm
 		}
@@ -117,6 +147,59 @@ func ProviderConfigs(root, shipID string) map[string]any {
 		return nil
 	}
 	return out
+}
+
+// modelEntryFor converts a proxy ModelInfo into an opencode provider "models"
+// entry. opencode pulls per-model metadata (name, context limit, capability
+// flags, modalities) from this map — the same surface it has for direct
+// upstream providers via models.dev — so the injected config carries the
+// proxy-enriched data instead of bare ids.
+func modelEntryFor(inf ModelInfo) map[string]any {
+	entry := map[string]any{"name": inf.ID}
+	if inf.Label != "" {
+		entry["name"] = inf.Label
+	}
+	if inf.Context > 0 {
+		entry["limit"] = map[string]any{"context": inf.Context}
+	}
+	for _, c := range inf.Caps {
+		switch c {
+		case "reasoning":
+			entry["reasoning"] = true
+		case "attachment":
+			entry["attachment"] = true
+		case "temperature":
+			entry["temperature"] = true
+		case "toolcall":
+			entry["tool_call"] = true
+		}
+	}
+	if in, out := modalitiesFromCaps(inf.Caps); in != nil || out != nil {
+		m := map[string]any{}
+		if in != nil {
+			m["input"] = in
+		}
+		if out != nil {
+			m["output"] = out
+		}
+		entry["modalities"] = m
+	}
+	return entry
+}
+
+// modalitiesFromCaps maps the proxy capability tags to the opencode
+// modalities.input/output arrays.
+func modalitiesFromCaps(caps []string) ([]string, []string) {
+	var in, out []string
+	for _, c := range caps {
+		switch {
+		case strings.HasSuffix(c, "-in"):
+			in = append(in, strings.TrimSuffix(c, "-in"))
+		case strings.HasSuffix(c, "-out"):
+			out = append(out, strings.TrimSuffix(c, "-out"))
+		}
+	}
+	return in, out
 }
 
 // ProxyModelInfos returns the full model catalog (with label/context/caps)
