@@ -19,6 +19,13 @@ cleared:
    (`starfleetctl comms ask "<question>"` or `tell <sender>`), which the praetor/another ship can
    answer asynchronously. Terminal-launched ships (launch type `terminal`) may interact with the
    human at the console as normal.
+- **Always call starfleetctl as `.starfleet-ai/bin/starfleetctl`, never bare `starfleetctl`.** The
+   workspace binary lives under `.starfleet-ai/bin/` (symlink into the starfleetctl source). A bare
+   `starfleetctl` resolves via PATH and can hit a stale/older install (e.g. `~/go/bin`) that predates
+   the `agent-bus`→`comms` rename — its `--help` then teaches wrong commands and its messages land in
+   the dead `var/agent-bus/` directory where nobody reads them. If `--help` or a subcommand behaves
+   unexpectedly, check which binary you are actually invoking (`which starfleetctl`) and use the
+   workspace one.
 - **You may commit + push directly on the praetor's staging branch without asking** — lessons,
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
