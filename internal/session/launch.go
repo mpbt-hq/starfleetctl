@@ -620,43 +620,24 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	}
 
 	// Base permission rules
-	defaultRule := "deny"
-	if unrestricted {
-		defaultRule = "allow"
-	} else if launchType == "terminal" {
-		defaultRule = "ask"
-	}
+	// (the workspace tools use a fixed allow, external_directory its own
+	// explicit rules — no shared defaultRule needed)
 
-	// Use relative pattern "**" for workspace (tools pass paths relative to worktree).
-	// Absolute patterns like "/home/.../workspace/**" never match relative paths.
-	workspacePattern := "**"
-
+	// Workspace file tools (read/write/edit/glob/grep/task) receive paths
+	// relative to the worktree (the tools convert absolute paths internally),
+	// so a single relative "**" rule matches every in-workspace path. They are
+	// allowed for ALL launch types: the workspace IS the working directory,
+	// and paths outside it are gated by external_directory below, not by these
+	// rules. A defaultRule-based catch-all here would prompt for every banal
+	// read (terminal) or lock background ships out of their own tree (deny).
 	permission := map[string]any{
-		"bash": bashRules,
-		"read": map[string]string{
-			workspacePattern: "allow",
-			"**":             defaultRule,
-		},
-		"write": map[string]string{
-			workspacePattern: "allow",
-			"**":             defaultRule,
-		},
-		"edit": map[string]string{
-			workspacePattern: "allow",
-			"**":             defaultRule,
-		},
-		"glob": map[string]string{
-			workspacePattern: "allow",
-			"**":             defaultRule,
-		},
-		"grep": map[string]string{
-			workspacePattern: "allow",
-			"**":             defaultRule,
-		},
-		"task": map[string]string{
-			workspacePattern: "allow",
-			"**":             defaultRule,
-		},
+		"bash":  bashRules,
+		"read":  map[string]string{"**": "allow"},
+		"write": map[string]string{"**": "allow"},
+		"edit":  map[string]string{"**": "allow"},
+		"glob":  map[string]string{"**": "allow"},
+		"grep":  map[string]string{"**": "allow"},
+		"task":  map[string]string{"**": "allow"},
 	}
 
 	// external_directory defaults to "ask" in opencode and fires for ANY
