@@ -51,12 +51,46 @@ func (c *catalogStore) load() map[string]catalogModel {
 	return byID
 }
 
-// lookup returns the catalog metadata for a model id ("" label when unknown).
+// lookup returns the catalog metadata for a model id. It tries, in order:
+//
+//  1. an exact catalog match (same id),
+//  2. a basename match — the catalog keys vendor-prefixed ids
+//     (e.g. "deepseek-ai/deepseek-v4-flash") while zen-proxy serves the bare
+//     basename ("deepseek-v4-flash"); if exactly one catalog entry shares the
+//     basename, its metadata is used,
+//  3. a derived display label from the id itself, for models the catalog does
+//     not know at all.
+//
+// The fallbacks exist because the embedded models.dev catalog covers only the
+// mainstream models; brand-new zen models and the NIM long tail are missing
+// there and would otherwise surface as bare ids.
 func (c *catalogStore) lookup(id string) catalogModel {
-	if m, ok := c.load()[id]; ok {
+	cat := c.load()
+	if m, ok := cat[id]; ok {
 		return m
 	}
-	return catalogModel{}
+	// Basename match: vendor-prefixed catalog entry for a bare proxy id.
+	base := id
+	if strings.ContainsRune(base, '/') {
+		base = base[strings.LastIndexByte(base, '/')+1:]
+	}
+	if base != "" {
+		var cand []string
+		for key := range cat {
+			k := key
+			if strings.ContainsRune(k, '/') {
+				k = k[strings.LastIndexByte(k, '/')+1:]
+			}
+			if k == base {
+				cand = append(cand, key)
+			}
+		}
+		if len(cand) == 1 {
+			return cat[cand[0]]
+		}
+	}
+	// Fallback: lexical label derivation for catalog-unknown models.
+	return catalogModel{Label: deriveLabel(id)}
 }
 
 // parseOpencodeCatalog parses the `opencode models --verbose` listing. The
