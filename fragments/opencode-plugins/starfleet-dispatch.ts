@@ -75,7 +75,7 @@ const QUOTA_PATTERNS = [
   /billing.{0,10}limit/i,
 ]
 
-function checkLogForErrors(): string | null {
+function checkLogForErrors(sessionID: string): string | null {
   try {
     const out = execSync(
       `tail -80 "${LOG_PATH}" 2>/dev/null`,
@@ -91,16 +91,25 @@ function checkLogForErrors(): string | null {
     let match: RegExpExecArray | null
     let latest = ''
     while ((match = streamErrRe.exec(out)) !== null) {
+      // Filter: only process errors for our session
+      if (!match[0].includes(`session.id=${sessionID}`)) continue
       latest = match[1]
     }
     if (!latest) {
       while ((match = streamingFailedRe.exec(out)) !== null) {
+        if (!match[0].includes(`session.id=${sessionID}`)) continue
         latest = match[1]
       }
     }
     if (!latest && streamingFailedSimpleRe.test(out)) {
-      // No detailed error captured, but we know the error type
-      latest = 'Streaming response failed'
+      // Check if any of the matches are for our session
+      const lines = out.split('\n')
+      for (const line of lines) {
+        if (streamingFailedSimpleRe.test(line) && line.includes(`session.id=${sessionID}`)) {
+          latest = 'Streaming response failed'
+          break
+        }
+      }
     }
     if (latest && latest !== lastLogErrorSeen) {
       // Only classify as quota if it matches actual quota patterns
@@ -509,36 +518,36 @@ export const plugin = async ({ client, $ }: any) => {
 
   const retryPollTimer = setInterval(pollRetryStatus, RETRY_POLL_MS)
 
-  // Log-monitoring: detect stream errors (e.g. ResourceExhausted) that opencode
-  // doesn't surface via session.error or retry status.
-  // Cooldown prevents retry storms when the rate limit is still saturated.
-  let logMonitorCooldownUntil = 0
-  const logPollTimer = setInterval(async () => {
-    if (!currentSessionID) return
-    if (Date.now() < logMonitorCooldownUntil) return
-    const errDetail = checkLogForErrors()
-    if (!errDetail) return
-    const msg = `LOG ERROR detected: ${errDetail}`
-    appLog('warn', msg)
-    tickLog(`LOG-MONITOR: ${msg}`)
-    toastBus('warning', 'starfleet-dispatch', msg, 8000)
+// Log-monitoring: detect stream errors (e.g. ResourceExhausted) that opencode
+// doesn't surface via session.error or retry status.
+// Cooldown prevents retry storms when the rate limit is still saturated.
+let logMonitorCooldownUntil = 0
+const logPollTimer = setInterval(async () => {
+  if (!currentSessionID) return
+  if (Date.now() < logMonitorCooldownUntil) return
+  const errDetail = checkLogForErrors(currentSessionID)
+  if (!errDetail) return
+  const msg = `LOG ERROR detected: ${errDetail}`
+  appLog('warn', msg)
+  tickLog(`LOG-MONITOR: ${msg}`)
+  toastBus('warning', 'starfleet-dispatch', msg, 8000)
 
-    // Delegate policy to starfleetctl.
-    const r = bus({
-      cmd: 'error-handle', detail: errDetail, source: 'log-monitor',
-      ship: aid(), pid: process.pid, current_model: currentModel.model || '',
-      session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
-    })
-    tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
-    appLog('warn', `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}`)
-    if (r.ok && r.action) {
-      if (r.action === 'retry') {
-        logMonitorCooldownUntil = Date.now() + LOG_COOLDOWN_MS
-        tickLog(`LOG-MONITOR: retry cooldown until ${new Date(logMonitorCooldownUntil).toISOString()}`)
-      }
-      await executeAction(r.action, r.target_model || '', errDetail, client, currentSessionID, hasSwitchedToFallback)
+  // Delegate policy to starfleetctl.
+  const r = bus({
+    cmd: 'error-handle', detail: errDetail, source: 'log-monitor',
+    ship: aid(), pid: process.pid, current_model: currentModel.model || '',
+    session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
+  })
+  tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
+  appLog('warn', `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}`)
+  if (r.ok && r.action) {
+    if (r.action === 'retry') {
+      logMonitorCooldownUntil = Date.now() + LOG_COOLDOWN_MS
+      tickLog(`LOG-MONITOR: retry cooldown until ${new Date(logMonitorCooldownUntil).toISOString()}`)
     }
-  }, LOG_POLL_MS)
+    await executeAction(r.action, r.target_model || '', errDetail, client, currentSessionID, hasSwitchedToFallback)
+  }
+}, LOG_POLL_MS)
 
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
