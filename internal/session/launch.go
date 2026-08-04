@@ -257,7 +257,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		inner += ". cf/" + shellQuote(project) + "/config.sh; export PROJECT; "
 	}
 	if client == "claude" {
-		inner += "exec claude"
+		inner += "exec " + shellQuote(resolveClientPath("claude"))
 		if permissionMode != "" {
 			inner += " --permission-mode " + shellQuote(permissionMode)
 		}
@@ -453,7 +453,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
 		`{"username":"`+name+`","instructions":[".starfleet-ai/var/sop.d/index.md"],"plugin":["./.opencode/plugins/starfleet-dispatch.ts"]}`) + "; "
 	inner += "cd " + shellQuote(root) + "; "
-	inner += "exec opencode"
+	inner += "exec " + shellQuote(resolveClientPath("opencode"))
 	if model != "" {
 		inner += " --model " + shellQuote(model)
 	}

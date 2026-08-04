@@ -4,6 +4,8 @@
 package session
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +21,35 @@ func PipePath(root, shipID string) string {
 // LogPath returns the canonical log path for a ship session.
 func LogPath(root, shipID string) string {
 	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".log")
+}
+
+// resolveClientPath locates a client executable (opencode, claude, ...) by
+// name. It first consults PATH (exec.LookPath); if that fails it falls back
+// to a few well-known user binary directories. This keeps ship launches
+// working even when the launching process — e.g. the web daemon spawned from
+// cron — inherited a minimal PATH that doesn't include the user's private
+// bin dirs. Returns the bare name when nothing better could be found (the
+// inner shell will then resolve it via its own PATH as before).
+func resolveClientPath(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	dirs := []string{
+		home + "/.local/bin",
+		home + "/.bin",
+		"/usr/local/bin",
+	}
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		p := filepath.Join(d, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return name
 }
 
 // shellQuote wraps s in single quotes, escaping embedded single quotes
