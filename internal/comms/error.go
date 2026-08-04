@@ -110,7 +110,7 @@ func IsUserAbort(detail string) bool {
 var (
 	ratelimitRe         = regexp.MustCompile(`(429|rate[ -_]?limit|too many requests|usage limit|usage cap|quota|exceeded|access denied|temporarily blocked|try again later|toomanyrequests|request limit reached|request limit|subscribe|subscription|free usage)`)
 	resourceExhaustedRe = regexp.MustCompile(`(resourceexhausted|resource exhausted|request limit reached|context length|maximum context|context window|token.{0,12}(limit|quota)|too many tokens|input.{0,12}too long)`)
-	nimOverloadRe       = regexp.MustCompile(`(nim|5\d\d|overload|bad gateway|connection reset|econnreset|econnrefused|upstream)`)
+	nimOverloadRe       = regexp.MustCompile(`(nim|5\d\d|overload|bad gateway|connection reset|econnreset|econnrefused|upstream|internal server error|decode wall clock timeout)`)
 	streamingFailedRe   = regexp.MustCompile(`(?i)(streaming (response|request) failed|stream interrupted|response stream|connection closed|broken pipe|unexpected eof|stream closed)`)
 	noProviderRe        = regexp.MustCompile(`(?i)(no provider available|provider.*unavailable|no.*provider.*found)`)
 	userAbortRe         = regexp.MustCompile(`(^|\W)(abort|cancel|interrupt|signal|sigint|econnaborted|context (deadline|canceled))`)
