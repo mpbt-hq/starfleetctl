@@ -6,6 +6,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -102,6 +103,21 @@ func Daemonize(root, addr, logFile string) (int, error) {
 		return 0, err
 	}
 
+	// Start with parent environment
+	env := os.Environ()
+
+	// Ensure API keys are available for background ships launched by this web server.
+	// Cron-spawned daemons may lack NIM_API_KEY/GROQ_API_KEY in env — load from user opencode config.
+	if !hasEnv(env, "NIM_API_KEY") || !hasEnv(env, "GROQ_API_KEY") {
+		if keys, err := loadOpencodeAPIKeys(); err == nil {
+			for k, v := range keys {
+				if !hasEnv(env, k) {
+					env = append(env, k+"="+v)
+				}
+			}
+		}
+	}
+
 	cmd := exec.Command(os.Args[0], "web", "start", "--addr", addr)
 	cmd.Dir = root
 	cmd.Stdout = logF
@@ -110,8 +126,8 @@ func Daemonize(root, addr, logFile string) (int, error) {
 	// The daemon is often spawned by cron with a minimal PATH
 	// (PATH=/usr/bin:/bin), which its children then inherit. Expand the PATH
 	// so exec'd helpers (ss, git, ...) are found regardless of the caller's
-	// environment. Pass through the full parent environment.
-	cmd.Env = append(os.Environ(), "PATH="+daemonPath())
+	// environment.
+	cmd.Env = append(env, "PATH="+daemonPath())
 	// Detach from parent
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
@@ -126,6 +142,59 @@ func Daemonize(root, addr, logFile string) (int, error) {
 	logF.Close()
 	cmd.Process.Release()
 	return pid, nil
+}
+
+// hasEnv checks if an environment variable is already set.
+func hasEnv(env []string, key string) bool {
+	prefix := key + "="
+	for _, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+// loadOpencodeAPIKeys reads NIM_API_KEY and GROQ_API_KEY from the user's
+// opencode config file (~/.config/opencode/opencode.json) and returns them
+// as a map. This ensures the web server daemon (started by cron with minimal
+// env) can pass them to background ships.
+func loadOpencodeAPIKeys() (map[string]string, error) {
+	// User config location
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	configPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse JSON to extract provider API keys
+	var cfg struct {
+		Provider map[string]struct {
+			Options struct {
+				APIKey string `json:"apiKey"`
+			} `json:"options"`
+		} `json:"provider"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	keys := make(map[string]string)
+	for _, prov := range cfg.Provider {
+		apiKey := prov.Options.APIKey
+		// Resolve {env:VAR} references
+		if strings.HasPrefix(apiKey, "{env:") && strings.HasSuffix(apiKey, "}") {
+			varName := apiKey[5 : len(apiKey)-1]
+			if val := os.Getenv(varName); val != "" {
+				keys[varName] = val
+			}
+		}
+	}
+	return keys, nil
 }
 
 // Autostart checks if web server is running, starts it as daemon if not.
