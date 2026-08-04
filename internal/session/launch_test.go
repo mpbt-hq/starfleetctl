@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -158,6 +159,73 @@ func TestGenerateOpencodeConfigUsername(t *testing.T) {
 		cfg := readShipConfig(t, cfgPath)
 		if got, _ := cfg["username"].(string); got != "TestShip" {
 			t.Errorf("%s: username = %q, want TestShip", launchType, got)
+		}
+	}
+}
+
+// TestGenerateOpencodeConfigEnabledProviders verifies that in model-proxy-only
+// mode the generated per-ship config pins an `enabled_providers` allowlist of
+// just the model-proxy backends. This is what actually keeps the user's
+// globally-configured providers (~/.config/opencode/opencode.json) out of the
+// ship's /models picker: opencode MERGES config files instead of replacing
+// them, so merely omitting those providers from the ship config does not
+// remove them. Default mode ("all") must NOT set the allowlist.
+func TestGenerateOpencodeConfigEnabledProviders(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("HOME", home)
+
+	confDir := filepath.Join(root, ".starfleet-ai", "conf")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Two model-proxy backends. base_url points at a dead port so the catalog
+	// probes fail fast instead of hanging.
+	mpYaml := `model_proxy:
+  listen_addr: "127.0.0.1:1"
+  providers:
+    - id: nim-proxy
+      name: "NIM proxy"
+      base_url: "http://127.0.0.1:1/v1"
+    - id: zen-proxy
+      name: "ZEN proxy"
+      base_url: "http://127.0.0.1:1/v1"
+`
+	if err := os.WriteFile(filepath.Join(confDir, "model-proxy.yaml"), []byte(mpYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default mode ("all"): no allowlist — user providers are allowed.
+	cfgPath, err := generateOpencodeConfig(root, "TestShip", "background", false)
+	if err != nil {
+		t.Fatalf("generateOpencodeConfig(default): %v", err)
+	}
+	if _, ok := readShipConfig(t, cfgPath)["enabled_providers"]; ok {
+		t.Errorf("default mode: enabled_providers present, want absent")
+	}
+
+	// model-proxy-only mode: allowlist == the proxy provider ids.
+	fleetYaml := `fleet:
+  provider_mode: "model-proxy-only"
+`
+	if err := os.WriteFile(filepath.Join(confDir, "fleet.yaml"), []byte(fleetYaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", false)
+	if err != nil {
+		t.Fatalf("generateOpencodeConfig(model-proxy-only): %v", err)
+	}
+	got, ok := readShipConfig(t, cfgPath)["enabled_providers"].([]any)
+	if !ok {
+		t.Fatalf("model-proxy-only: enabled_providers = %v (%T), want []any", readShipConfig(t, cfgPath)["enabled_providers"], readShipConfig(t, cfgPath)["enabled_providers"])
+	}
+	want := []string{"nim-proxy", "zen-proxy"}
+	if len(got) != len(want) {
+		t.Fatalf("model-proxy-only: enabled_providers = %v, want %v", got, want)
+	}
+	for i, id := range want {
+		if got[i] != id {
+			t.Errorf("model-proxy-only: enabled_providers[%d] = %v, want %q", i, got[i], id)
 		}
 	}
 }

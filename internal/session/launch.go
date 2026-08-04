@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"syscall"
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
@@ -641,7 +642,8 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	// upstreams. Only applies when model-proxy.yaml exists with providers.
 	// The per-ship apiKey (ShipKey) lets the proxy attribute requests to
 	// this ship.
-	if proxyProviders := modelproxy.ProviderConfigs(root, shipID); proxyProviders != nil {
+	proxyProviders := modelproxy.ProviderConfigs(root, shipID)
+	if proxyProviders != nil {
 		provs, _ := shipConfig["provider"].(map[string]any)
 		if provs == nil {
 			provs = map[string]any{}
@@ -650,6 +652,22 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 			provs[id] = entry
 		}
 		shipConfig["provider"] = provs
+
+		// In model-proxy-only mode, pin an allowlist of the proxy backends.
+		// opencode MERGES config files (global ~/.config/opencode/opencode.json,
+		// project opencode.json) instead of replacing them, so merely omitting
+		// the user's providers from this file does NOT remove them — they are
+		// merged back in and still show up in the /models picker. The
+		// `enabled_providers` allowlist is the only way to actively exclude
+		// them.
+		if cfg.Fleet.ProviderMode == "model-proxy-only" {
+			ids := make([]string, 0, len(proxyProviders))
+			for id := range proxyProviders {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			shipConfig["enabled_providers"] = ids
+		}
 	}
 
 	// Permission rules based on launch type and unrestricted flag.

@@ -61,8 +61,11 @@ type FleetConfig struct {
 	// ProviderMode controls which providers are included in generated
 	// per-ship opencode configs. "all" (default) copies user providers
 	// from ~/.config/opencode/opencode.json AND injects model-proxy
-	// providers. "model-proxy-only" skips user providers entirely,
-	// exposing only the model-proxy backends (nim-proxy, zen-proxy, etc.).
+	// providers. "model-proxy-only" skips user providers entirely AND pins
+	// an `enabled_providers` allowlist of just the model-proxy backends
+	// (nim-proxy, zen-proxy, etc.) — the allowlist is what actually keeps
+	// the user's providers out, because opencode merges the global config
+	// in regardless of what the per-ship file omits.
 	ProviderMode string `yaml:"provider_mode"`
 }
 
