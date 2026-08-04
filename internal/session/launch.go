@@ -536,27 +536,64 @@ func StopShip(root string, id string) error {
 
 	// Pipe path is deterministic
 	pipePath := PipePath(root, id)
+
+	// Create "stop requested" marker BEFORE attempting to stop the shell.
+	// This marker is read by the child's OnExit to distinguish intentional
+	// stop from crash. We create it regardless of whether pipe exists,
+	// because the pipe may have already been cleaned up by a fast-exiting shell.
+	_ = setStopRequestedMarker(root, id)
+
 	if _, err := os.Stat(pipePath); err == nil {
 		if rem, err := termctl.OpenPipe(pipePath); err == nil {
 			_ = rem.Stop()
 		}
 	}
 
-	// Heartbeat cleanup + ship name release
-	shipReg := shipnames.New(root)
-	_, nameReserved := shipReg.Lookup(id)
-	_ = os.Setenv("STARFLEET_SHIP_ID", id)
-	if bus, err := comms.New(root); err == nil {
-		_ = bus.DoClear()
-	}
-	_ = shipReg.DoRelease(id)
-
-	if _, err := os.Stat(pipePath); err != nil && !nameReserved {
-		return fmt.Errorf("no such session: %s", id)
-	}
 	// Clean up per-ship temp opencode config
 	_ = os.Remove(opencodeConfigPath(root, id))
+
+	// NOTE: Heartbeat cleanup (DoClear) and ship name release (DoRelease)
+	// are done by the child process's OnExit callback AFTER it reads the
+	// stop-requested marker. This avoids race where parent clears heartbeat
+	// before child checks the marker.
+
+	if _, err := os.Stat(pipePath); err != nil {
+		// Pipe already gone - ship may have exited already. Check if name
+		// is still reserved to distinguish "already stopped" from "never existed".
+		shipReg := shipnames.New(root)
+		_, nameReserved := shipReg.Lookup(id)
+		if !nameReserved {
+			return fmt.Errorf("no such session: %s", id)
+		}
+		// Name still reserved but pipe gone: ship crashed or already stopped.
+		// OnExit will handle heartbeat/name based on marker.
+	}
 	return nil
+}
+
+// stopRequestedMarkerPath returns the path to the stop-requested marker file.
+func stopRequestedMarkerPath(root, shipID string) string {
+	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".stop-requested")
+}
+
+// setStopRequestedMarker creates the marker file for intentional stop request.
+func setStopRequestedMarker(root, shipID string) error {
+	path := stopRequestedMarkerPath(root, shipID)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	return os.WriteFile(path, []byte("stop-requested"), 0o644)
+}
+
+// clearStopRequestedMarker removes the marker file.
+func clearStopRequestedMarker(root, shipID string) error {
+	path := stopRequestedMarkerPath(root, shipID)
+	return os.Remove(path)
+}
+
+// isStopRequested checks if intentional stop was requested.
+func isStopRequested(root, shipID string) bool {
+	path := stopRequestedMarkerPath(root, shipID)
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // opencodeConfigPath returns the path to the per-ship temp opencode config file.
@@ -799,43 +836,8 @@ func runStop(root string, args []string) int {
 	}
 	id := args[0]
 
-	// Check comms for a matching agent/handle to resolve the canonical ID
-	bus, err := comms.New(root)
-	if err == nil {
-		for _, r := range bus.AllStatusRecords() {
-			if r.Agent == id || r.Handle == id {
-				id = r.Agent
-				break
-			}
-		}
-	}
-
-	// Pipe path is deterministic
-	pipePath := PipePath(root, id)
-	if _, err := os.Stat(pipePath); err == nil {
-		if rem, err := termctl.OpenPipe(pipePath); err == nil {
-			if err := rem.Stop(); err != nil {
-				fmt.Fprintf(os.Stderr, "agent-run: stop (pipe): %v\n", err)
-			}
-		}
-	}
-
-	// Heartbeat cleanup + ship name release. A session may already be dead
-	// (pipe gone) while the ship-name reservation still lingers; treat that
-	// as "already stopped" and clean up rather than erroring.
-	shipReg := shipnames.New(root)
-	_, nameReserved := shipReg.Lookup(id)
-	os.Setenv("STARFLEET_SHIP_ID", id)
-	if bus, err := comms.New(root); err == nil {
-		_ = bus.DoClear()
-	}
-	_ = shipReg.DoRelease(id)
-
-	// Clean up per-ship temp opencode config
-	_ = os.Remove(opencodeConfigPath(root, id))
-
-	if _, err := os.Stat(pipePath); err != nil && !nameReserved {
-		fmt.Fprintf(os.Stderr, "agent-run: no such session: %s\n", id)
+	if err := StopShip(root, id); err != nil {
+		fmt.Fprintf(os.Stderr, "agent-run: stop: %v\n", err)
 		return 1
 	}
 
@@ -911,11 +913,26 @@ func RunTermctl(root string, args []string) int {
 			wroot := os.Getenv("MPBT_WORKSPACE_ROOT")
 			if wroot != "" {
 				os.Setenv("STARFLEET_SHIP_ID", shipID)
+				// Check if stop was requested (intentional stop vs crash)
+				stopRequested := isStopRequested(wroot, shipID)
+				// Clear marker after reading (so repeated crashes don't look intentional)
+				_ = clearStopRequestedMarker(wroot, shipID)
 				if bus, err := comms.New(wroot); err == nil {
-					_ = bus.DoClear()
+					if stopRequested {
+						fmt.Fprintf(os.Stderr, "termctl-run: intentional stop for %s — clearing heartbeat\n", shipID)
+						_ = bus.DoClear()
+					} else {
+						fmt.Fprintf(os.Stderr, "termctl-run: CRASH for %s — setting crashed status\n", shipID)
+						_ = bus.DoStatus("crashed", "ship exited unexpectedly (crash/OOM/model error)", comms.StatusPatch{})
+						// TODO: trigger auto-restart with backoff
+					}
 				}
 				shipReg := shipnames.New(wroot)
-				_ = shipReg.DoRelease(shipID)
+				if stopRequested {
+					_ = shipReg.DoRelease(shipID)
+				} else {
+					fmt.Fprintf(os.Stderr, "termctl-run: keeping ship name %s for crash investigation/restart\n", shipID)
+				}
 			}
 			_ = os.Remove(pipePath)
 		}),
