@@ -1,13 +1,13 @@
 ---
-slug: starfleet-instructions/working-practices-standing-instructions-for-agents
-title: "Working practices (standing instructions for agents)"
+slug: starfleet-instructions/working-practices-for-ships
+title: "Working practices (standing instructions for ships)"
 order: 20
 owner: "starfleetctl"
 ---
 
-<!-- Auto-installed by `starfleetctl sop install-starfleet` into sop.d/starfleet-instructions/working-practices-standing-instructions-for-agents.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
+<!-- Auto-installed by `starfleetctl sop install-starfleet` into sop.d/starfleet-instructions/working-practices-for-ships.md — do not hand-edit the installed copy; edit this source fragment in the starfleetctl repo instead. -->
 
-## Working practices (standing instructions for agents)
+## Working practices (standing instructions for ships)
 
 These apply to **every** session — they keep knowledge and tooling from decaying as sessions are
 cleared:

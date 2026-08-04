@@ -86,13 +86,16 @@ func RenderStarfleetFragment(subdir, name string) ([]byte, error) {
 
 // DoInstallStarfleet installs every .md file from the embedded
 // fragments/<subdir>/ directory into .starfleet-ai/var/sop.d/<slug>.md, always
-// overwriting existing files (they are tool-owned). Then reindexes.
+// overwriting existing files (they are tool-owned). Installed fragments that are
+// no longer part of the embedded set (e.g. renamed) are removed so the index
+// doesn't keep stale copies. Then reindexes.
 // Used by both the CLI command and genesis-init.
 func (s *SOP) DoInstallStarfleet(subdir string) error {
 	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, subdir))
 	if err != nil {
 		return err
 	}
+	seen := map[string]bool{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
@@ -107,6 +110,20 @@ func (s *SOP) DoInstallStarfleet(subdir string) error {
 		}
 		if err := writeFragmentFile(path, meta, body); err != nil {
 			return err
+		}
+		seen[meta.Slug] = true
+	}
+	// Drop installed fragments no longer in the embedded set (renamed/removed).
+	instDir := filepath.Join(s.Root, ".starfleet-ai", "var", "sop.d", subdir)
+	if entries, err := os.ReadDir(instDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			slug := subdir + "/" + strings.TrimSuffix(e.Name(), ".md")
+			if !seen[slug] {
+				os.Remove(filepath.Join(instDir, e.Name()))
+			}
 		}
 	}
 	return s.DoReindex()
