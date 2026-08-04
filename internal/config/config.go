@@ -14,9 +14,40 @@ import (
 
 // Config holds all starfleetctl configuration.
 type Config struct {
-	Web   WebConfig   `yaml:"web"`
-	Comms CommsConfig `yaml:"comms"`
-	Fleet FleetConfig `yaml:"fleet"`
+	Web        WebConfig        `yaml:"web"`
+	Comms      CommsConfig      `yaml:"comms"`
+	Fleet      FleetConfig      `yaml:"fleet"`
+	ModelProxy ModelProxyConfig `yaml:"model_proxy"`
+}
+
+// ModelProxyConfig holds the model-proxy daemon configuration
+// (.starfleet-ai/conf/model-proxy.yaml). The proxy front-ends the real
+// model API backends (NVIDIA NIM, OpenCode Zen, ...) so ships talk to a
+// single local OpenAI-compatible server that retries transient errors and
+// catches streaming failures instead of leaking them into the agent.
+type ModelProxyConfig struct {
+	// ListenAddr is the proxy's local listen address (default 127.0.0.1:8443).
+	ListenAddr string `yaml:"listen_addr"`
+	PIDFile    string `yaml:"pid_file"`
+	LogFile    string `yaml:"log_file"`
+	// Providers is the ordered list of upstream backends to proxy.
+	Providers []ModelProxyProvider `yaml:"providers"`
+}
+
+// ModelProxyProvider describes one upstream model API backend behind the
+// proxy. ID is the opencode provider name exposed to ships (e.g. "nim-proxy",
+// "zen-proxy"); BaseURL is the upstream OpenAI-compatible endpoint; APIKey
+// supports env replacement ({env:VAR} or ${VAR}) since keys come via env.
+type ModelProxyProvider struct {
+	ID      string `yaml:"id"`
+	Name    string `yaml:"name"`
+	BaseURL string `yaml:"base_url"`
+	APIKey  string `yaml:"api_key"`
+	// MaxRetries retries a request when the upstream reports a transient
+	// error (429/5xx/conn-reset). Default 3.
+	MaxRetries int `yaml:"max_retries"`
+	// RetryDelayMS sleeps between retries. Default 1000.
+	RetryDelayMS int `yaml:"retry_delay_ms"`
 }
 
 // FleetConfig holds fleet-wide identity settings.
@@ -79,6 +110,11 @@ func DefaultConfig() *Config {
 			LogPollMS:       10_000,
 			LogCooldownMS:   10_000,
 		},
+		ModelProxy: ModelProxyConfig{
+			ListenAddr: "127.0.0.1:8443",
+			PIDFile:    ".starfleet-ai/var/model-proxy.pid",
+			LogFile:    ".starfleet-ai/var/log/model-proxy.log",
+		},
 	}
 }
 
@@ -116,6 +152,7 @@ func Load(root string) (*Config, error) {
 		{"web.yaml", "web", &cfg.Web},
 		{"comms.yaml", "comms", &cfg.Comms},
 		{"fleet.yaml", "fleet", &cfg.Fleet},
+		{"model-proxy.yaml", "model_proxy", &cfg.ModelProxy},
 	} {
 		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)
 		data, err := os.ReadFile(path)

@@ -15,6 +15,7 @@ import (
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
+	"github.com/metux/starfleetctl/internal/modelproxy"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -587,6 +588,20 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 		if providers, ok := userConfig["provider"].(map[string]any); ok {
 			shipConfig["provider"] = providers
 		}
+	}
+
+	// Inject the local model-proxy providers (nim-proxy, zen-proxy, ...) so
+	// ships prefer the resilient local endpoint in front of the flaky
+	// upstreams. Only applies when model-proxy.yaml exists with providers.
+	if proxyProviders := modelproxy.ProviderConfigs(root); proxyProviders != nil {
+		provs, _ := shipConfig["provider"].(map[string]any)
+		if provs == nil {
+			provs = map[string]any{}
+		}
+		for id, entry := range proxyProviders {
+			provs[id] = entry
+		}
+		shipConfig["provider"] = provs
 	}
 
 	// Permission rules based on launch type and unrestricted flag

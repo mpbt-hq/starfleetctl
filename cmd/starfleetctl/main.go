@@ -25,6 +25,7 @@ import (
 	"github.com/metux/starfleetctl/internal/hook"
 	"github.com/metux/starfleetctl/internal/jsonutil"
 	"github.com/metux/starfleetctl/internal/logs"
+	"github.com/metux/starfleetctl/internal/modelproxy"
 	"github.com/metux/starfleetctl/internal/models"
 	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/selfinstall"
@@ -61,6 +62,8 @@ Fleet management:
   reports           fleet report system (submit/list/show/delete)
   logs              scan ship logs + bus events, extract failures as tasks (feedback loop)
   web               minimalist mobile-first fleet web console (start/stop/autostart/restart)
+  model-proxy       local OpenAI-compatible model proxy in front of NIM/Zen
+                    (start/stop/restart/autostart/status/models)
   file              temporary file store for ships (put/list/rm/prune)
 
 Bootstrap & setup:
@@ -253,6 +256,8 @@ func main() {
 		os.Exit(reports.Run(root, os.Args[2:]))
 	case "web":
 		os.Exit(web.Run(root, os.Args[2:]))
+	case "model-proxy":
+		os.Exit(modelproxy.Run(root, os.Args[2:]))
 	case "file":
 		os.Exit(filestore.Run(root, os.Args[2:]))
 	case "logs":
