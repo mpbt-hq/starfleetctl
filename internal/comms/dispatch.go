@@ -73,7 +73,6 @@ type dispatchResponse struct {
 	RetryCooldownMS int    `json:"retry_cooldown_ms,omitempty"`
 	LogPollMS       int    `json:"log_poll_ms,omitempty"`
 	LogCooldownMS   int    `json:"log_cooldown_ms,omitempty"`
-	ErrorCooldownMS int    `json:"error_cooldown_ms,omitempty"`
 
 	// error-handle policy response
 	Action      string `json:"action,omitempty"`
@@ -173,7 +172,6 @@ func (b *Bus) dispatchConfig() dispatchResponse {
 		RetryCooldownMS: cfg.Comms.RetryCooldownMS,
 		LogPollMS:       cfg.Comms.LogPollMS,
 		LogCooldownMS:   cfg.Comms.LogCooldownMS,
-		ErrorCooldownMS: cfg.Comms.ErrorCooldownMS,
 	}
 }
 
@@ -433,16 +431,7 @@ func decideAction(tag string, hasFallback bool, source string, root string) (act
 	case "streaming-response-failed":
 		return "retry", "transient stream disconnect, retry alone should suffice"
 	case "resource-exhausted":
-		// Worker capacity / token-quota exhaustion (e.g. "ResourceExhausted:
-		// Worker local total request limit reached"). Retrying the SAME model
-		// is futile — the worker stays saturated — and previously caused an
-		// endless clear+re-prompt loop (message storm). Prefer switching to
-		// the fallback model so the ship continues on a different worker.
-		cfg, err := config.Load(root)
-		if err == nil && cfg.Comms.FallbackModel != "" {
-			return "switch-model", "worker capacity / resource exhaustion, switch to fallback model"
-		}
-		return "retry", "resource exhaustion but no fallback configured, retry with backoff"
+		return "retry", "transient resource exhaustion, retry alone should suffice"
 	case "no-provider":
 		return "retry", "no provider available for model, transient pool rotation, retry alone should suffice"
 	case "zen-ratelimit":

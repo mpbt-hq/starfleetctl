@@ -19,6 +19,7 @@ func TestDecideAction_retryTransient(t *testing.T) {
 		{"streaming-response-failed", false},
 		{"streaming-response-failed", true},
 		{"resource-exhausted", false},
+		{"resource-exhausted", true},
 		{"no-provider", false},
 		{"no-provider", true},
 	}
@@ -68,32 +69,6 @@ func TestDecideAction_zenRatelimitNoFallback(t *testing.T) {
 	action, reason := decideAction("zen-ratelimit", false, "retry-poll", "")
 	if action != "retry" {
 		t.Errorf("decideAction(\"zen-ratelimit\", false, \"retry-poll\") = %q, want \"retry\"; reason=%q",
-			action, reason)
-	}
-	if reason == "" {
-		t.Error("decideAction returned empty reason")
-	}
-}
-
-func TestDecideAction_resourceExhaustedWithFallback(t *testing.T) {
-	// ResourceExhausted (worker capacity / token quota) with a fallback model
-	// configured must switch models — retrying the same saturated worker only
-	// produced an endless clear+re-prompt storm.
-	tmpDir := t.TempDir()
-	confDir := filepath.Join(tmpDir, ".starfleet-ai", "conf")
-	if err := os.MkdirAll(confDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	commsYaml := `comms:
-  fallback_model: "zen-proxy/fallback-model"
-`
-	if err := os.WriteFile(filepath.Join(confDir, "comms.yaml"), []byte(commsYaml), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	action, reason := decideAction("resource-exhausted", false, "retry-poll", tmpDir)
-	if action != "switch-model" {
-		t.Errorf("decideAction(\"resource-exhausted\", false, \"retry-poll\", tmpDir) = %q, want \"switch-model\"; reason=%q",
 			action, reason)
 	}
 	if reason == "" {

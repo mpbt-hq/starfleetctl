@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.6.0'
+const PLUGIN_VERSION = '2.5.1'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -42,7 +42,6 @@ let RETRY_POLL_MS = 2000
 let RETRY_COOLDOWN_MS = 10000
 let LOG_POLL_MS = 10000
 let LOG_COOLDOWN_MS = 10000
-let ERROR_COOLDOWN_MS = 60000
 function loadConfig(): void {
   const r = bus({ cmd: 'config' })
   if (r.ok) {
@@ -53,7 +52,6 @@ function loadConfig(): void {
     RETRY_COOLDOWN_MS = r.retry_cooldown_ms || 10000
     LOG_POLL_MS = r.log_poll_ms || 10000
     LOG_COOLDOWN_MS = r.log_cooldown_ms || 10000
-    ERROR_COOLDOWN_MS = r.error_cooldown_ms || 60000
   }
 }
 
@@ -499,10 +497,6 @@ export const plugin = async ({ client, $ }: any) => {
       st.action?.message || st.action?.reason || st.message ||
       (st.action?.title ? `${st.action.title}: ${st.action.message || ''}` : '') || 'retry'
     if (!detail) return
-    // Shared 60s dedup: an identical detail must not re-trigger the restart
-    // loop through this poll either (a saturated worker stays in 'retry'
-    // status for a long time; the 10s cooldown below alone still storms).
-    if (!dedupError(detail)) return
     const now = Date.now()
     if (detail === lastRetryDetail && now < retryCooldownUntil) return
     lastRetryDetail = detail
@@ -523,27 +517,6 @@ export const plugin = async ({ client, $ }: any) => {
   }
 
   const retryPollTimer = setInterval(pollRetryStatus, RETRY_POLL_MS)
-
-// Error-dedup cooldown: the SAME model-API error detail raised repeatedly
-// (e.g. "ResourceExhausted: Worker local total request limit reached" while a
-// worker stays saturated) must not re-trigger the clear+re-prompt restart loop
-// each time it is surfaced — that produced a message storm (synthetic restart
-// prompts re-injected over and over). The first occurrence is handled; an
-// identical detail within ERROR_COOLDOWN_MS is recorded but not acted on
-// again. This complements the cooldowns the retry-status poll and log-monitor
-// already have for the session.error path.
-let lastErrorDetail = ''
-let errorCooldownUntil = 0
-function dedupError(detail: string): boolean {
-  const now = Date.now()
-  if (detail && detail === lastErrorDetail && now < errorCooldownUntil) {
-    tickLog(`ERROR-DEDUP: suppressing repeated "${detail.slice(0, 80)}" until ${new Date(errorCooldownUntil).toISOString()}`)
-    return false
-  }
-  lastErrorDetail = detail
-  errorCooldownUntil = now + ERROR_COOLDOWN_MS
-  return true
-}
 
 // Log-monitoring: detect stream errors (e.g. ResourceExhausted) that opencode
 // doesn't surface via session.error or retry status.
@@ -779,11 +752,6 @@ const logPollTimer = setInterval(async () => {
           tickLog(`session.error: "${candidate}" — skipping, LOG-MONITOR will handle`)
           return
         }
-
-        // Dedup: an identical error detail surfaced repeatedly within the
-        // cooldown window (e.g. a saturated worker returning ResourceExhausted
-        // on every re-prompt) must not re-trigger the restart loop each time.
-        if (!dedupError(candidate)) return
 
         // Delegate policy to starfleetctl — plugin just executes.
         const r = bus({
