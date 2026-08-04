@@ -35,6 +35,12 @@ cleared:
    investigation, every later command keeps running there until you explicitly `cd` back. Always use
    an explicit absolute path or `cd` to the workspace root before commands whose output isn't meant
    to land in a subdirectory.
+- **Never abort a task because a file access was denied.** A denied `read`/`edit`/`write`/`bash`
+  permission is a recoverable tool error, not a reason to give up. When a path is denied, fix the
+  approach and retry: use a workspace-relative path (never a root-absolute one like
+  `/.starfleet-ai/...` — that is outside the workspace and denied), access dashboard/session data via
+  `starfleetctl` commands instead of raw files, or pick an allowed alternative. Then continue the
+  task and report what you did.
 - **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
    (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,
    no dashboard scanning, no proactive work — wait for a `tell`/`ask`/`broadcast` directive.

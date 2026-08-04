@@ -640,6 +640,27 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 		},
 	}
 
+	// external_directory defaults to "ask" in opencode and fires for ANY
+	// path outside the project working directory (e.g. a wrongly-rooted
+	// "/.starfleet-ai/..." read). On background/auto ships there is nobody
+	// to answer an ask, so the ship hangs forever and then aborts on deny.
+	// Pin it explicitly: allow for unrestricted, ask only for terminal
+	// launches (a human is present), and deny everything outside the
+	// workspace for background/auto ships so the tool call fails fast and
+	// the agent can recover (retry with a workspace-relative path).
+	externalDirRules := map[string]string{
+		workspacePattern: "allow",
+		localBinPattern:  "allow",
+	}
+	if unrestricted {
+		externalDirRules["**"] = "allow"
+	} else if launchType == "terminal" {
+		externalDirRules["**"] = "ask"
+	} else {
+		externalDirRules["**"] = "deny"
+	}
+	permission["external_directory"] = externalDirRules
+
 	shipConfig["permission"] = permission
 
 	// Starfleet-specific settings
