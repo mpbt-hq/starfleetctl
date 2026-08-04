@@ -4,6 +4,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -265,6 +266,14 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 			inner += " " + shellQuote(a)
 		}
 	} else if client == "opencode" {
+		// Generate per-ship temp opencode config for local/terminal ships too.
+		// Local ships use "ask" as default (matching old terminal.json behavior),
+		// not "deny" like background ships.
+		opencodeConfigPath, err := generateOpencodeConfig(root, shipID, "terminal", false)
+		if err != nil {
+			return nil, fmt.Errorf("generate opencode config: %w", err)
+		}
+		inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
 		inner += "exec " + shellQuote(clientPath)
 		for _, a := range clientArgs {
 			inner += " " + shellQuote(a)
@@ -314,17 +323,18 @@ Returns immediately; the terminal keeps running until stopped via
 ` + "`session stop <id>`" + `.
 
 Flags:
-  --name <id>     explicit ship ID (default: next free ship name). The caller
-                   may pre-allocate the name; if given, it is reserved here.
-  --model <model> opencode model (e.g. nvidia/nvidia/nemotron-3-nano-30b-a3b).
-                   The provider is derived from the model id (the part before
-                   the first '/'); pass --provider to override.
-  --parent <ship> ship this one is launched under (default: flagship Enterprise).
-                   Auto-launches from the web GUI hang under the flagship; a ship
-                   spawned by another AI lists that ship as parent.
-  --launch-type <t>  how the ship was started: "terminal" (direct at a terminal),
-                   "background" (detached, the default here), or "auto" (web/timer).
-  --              everything after is passed verbatim to opencode
+  --name <id>         explicit ship ID (default: next free ship name). The caller
+                       may pre-allocate the name; if given, it is reserved here.
+  --model <model>     opencode model (e.g. nvidia/nvidia/nemotron-3-nano-30b-a3b).
+                       The provider is derived from the model id (the part before
+                       the first '/'); pass --provider to override.
+  --parent <ship>     ship this one is launched under (default: flagship Enterprise).
+                       Auto-launches from the web GUI hang under the flagship; a ship
+                       spawned by another AI lists that ship as parent.
+  --launch-type <t>   how the ship was started: "terminal" (direct at a terminal),
+                       "background" (detached, the default here), or "auto" (web/timer).
+  --unrestricted      unrestricted permissions (allow all, bypass ask/deny)
+  --                  everything after is passed verbatim to opencode
 
 Example:
   starfleetctl session ship-run --name Voyager --model my/model -- --workspace /foo
@@ -336,6 +346,7 @@ Example:
 	model := ""
 	parent := ""
 	launchType := "background"
+	unrestricted := false
 	var oaArgs []string
 	for len(args) > 0 {
 		switch args[0] {
@@ -367,6 +378,9 @@ Example:
 			}
 			launchType = args[1]
 			args = args[2:]
+		case "--unrestricted":
+			unrestricted = true
+			args = args[1:]
 		case "--":
 			oaArgs = args[1:]
 			args = nil
@@ -377,11 +391,12 @@ Example:
 	}
 
 	shipID, err := LaunchShip(root, LaunchShipOpts{
-		Name:       name,
-		Model:      model,
-		Parent:     parent,
-		LaunchType: launchType,
-		ExtraArgs:  oaArgs,
+		Name:         name,
+		Model:        model,
+		Parent:       parent,
+		LaunchType:   launchType,
+		ExtraArgs:    oaArgs,
+		Unrestricted: unrestricted,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "session ship-run:", err)
@@ -397,12 +412,13 @@ Example:
 
 // LaunchShipOpts are the inputs to LaunchShip.
 type LaunchShipOpts struct {
-	Name       string   // explicit ship ID; empty => next free name
-	Model      string   // opencode --model value (provider derived from it)
-	Provider   string   // explicit provider override (when the model id has none)
-	Parent     string   // ship launched under; empty => flagship
-	LaunchType string   // "terminal" | "background" | "auto"; empty => "background"
-	ExtraArgs  []string // passed verbatim to opencode after --prompt
+	Name         string   // explicit ship ID; empty => next free name
+	Model        string   // opencode --model value (provider derived from it)
+	Provider     string   // explicit provider override (when the model id has none)
+	Parent       string   // ship launched under; empty => flagship
+	LaunchType   string   // "terminal" | "background" | "auto"; empty => "background"
+	ExtraArgs    []string // passed verbatim to opencode after --prompt
+	Unrestricted bool     // unrestricted permissions (allow all)
 }
 
 // LaunchShip starts a detached opencode control-agent ship and returns its
@@ -457,23 +473,19 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if groqKey := os.Getenv("GROQ_API_KEY"); groqKey != "" {
 		inner += "export GROQ_API_KEY=" + shellQuote(groqKey) + "; "
 	}
-	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
-		`{"username":"`+name+`","instructions":[".starfleet-ai/var/sop.d/index.md"],"plugin":["./.opencode/plugins/starfleet-dispatch.ts"]}`) + "; "
 	inner += "cd " + shellQuote(root) + "; "
-	// Select opencode config based on launch type: background/auto ships get
-	// the permissive auto-config (with provider keys), foreground gets terminal config.
-	// Export AFTER cd so relative path resolves correctly.
-	opencodeConfig := ".opencode/opencode.auto.json"
-	if launchType == "terminal" {
-		opencodeConfig = ".opencode/opencode.terminal.json"
+	// Generate per-ship temp opencode config with provider settings from user config
+	// and launch-type-specific permissions. This replaces the static auto/terminal configs.
+	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted)
+	if err != nil {
+		return "", fmt.Errorf("generate opencode config: %w", err)
 	}
-	inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfig) + "; "
+	inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
 	inner += "exec " + shellQuote(resolveClientPath("opencode"))
 	if model != "" {
 		inner += " --model " + shellQuote(model)
 	}
-	shipPrompt := "You are fleet ship " + name + ", report to flagship " + flagship +
-		". Fleet identity loaded via OPENCODE_CONFIG_CONTENT."
+	shipPrompt := "You are fleet ship " + name + ", report to flagship " + flagship + "."
 	if launchType == "background" || launchType == "auto" {
 		shipPrompt += " You were launched in " + launchType + " mode (detached, no human at your " +
 			"console): never prompt for input on your console and never block waiting for stdin — " +
@@ -541,7 +553,113 @@ func StopShip(root string, id string) error {
 	if _, err := os.Stat(pipePath); err != nil && !nameReserved {
 		return fmt.Errorf("no such session: %s", id)
 	}
+	// Clean up per-ship temp opencode config
+	_ = os.Remove(opencodeConfigPath(root, id))
 	return nil
+}
+
+// opencodeConfigPath returns the path to the per-ship temp opencode config file.
+func opencodeConfigPath(root, shipID string) string {
+	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".opencode.json")
+}
+
+// generateOpencodeConfig creates a per-ship temp opencode config by merging
+// the user's provider config with launch-type-specific permissions and
+// starfleet-specific settings (plugin, instructions, username).
+func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) (string, error) {
+	// Load user config for provider definitions
+	userConfigPath := filepath.Join(os.Getenv("HOME"), ".config", "opencode", "opencode.json")
+	var userConfig map[string]any
+	if data, err := os.ReadFile(userConfigPath); err == nil {
+		_ = json.Unmarshal(data, &userConfig)
+	}
+
+	// Build the ship config
+	shipConfig := map[string]any{
+		"$schema": "https://opencode.ai/config.json",
+	}
+
+	// Copy provider config from user config
+	if userConfig != nil {
+		if providers, ok := userConfig["provider"].(map[string]any); ok {
+			shipConfig["provider"] = providers
+		}
+	}
+
+	// Permission rules based on launch type and unrestricted flag
+	bashRules := map[string]string{
+		"**/.starfleet-ai/bin/starfleetctl **": "allow",
+		"starfleetctl **":                      "allow",
+	}
+	if unrestricted {
+		bashRules["**"] = "allow"
+	} else if launchType == "terminal" {
+		bashRules["**"] = "ask"
+	} else {
+		bashRules["**"] = "allow"
+	}
+
+	// Base permission rules
+	defaultRule := "deny"
+	if unrestricted {
+		defaultRule = "allow"
+	} else if launchType == "terminal" {
+		defaultRule = "ask"
+	}
+
+	// Use workspace root for permission paths (portable across machines)
+	workspacePattern := root + "/**"
+	localBinPattern := filepath.Join(os.Getenv("HOME"), ".local", "bin", "**")
+
+	permission := map[string]any{
+		"bash": bashRules,
+		"read": map[string]string{
+			workspacePattern: "allow",
+			localBinPattern:  "allow",
+			"**":             defaultRule,
+		},
+		"write": map[string]string{
+			workspacePattern: "allow",
+			"**":             defaultRule,
+		},
+		"edit": map[string]string{
+			workspacePattern: "allow",
+			"**":             defaultRule,
+		},
+		"glob": map[string]string{
+			workspacePattern: "allow",
+			"**":             defaultRule,
+		},
+		"grep": map[string]string{
+			workspacePattern: "allow",
+			"**":             defaultRule,
+		},
+		"task": map[string]string{
+			workspacePattern: "allow",
+			"**":             defaultRule,
+		},
+	}
+
+	shipConfig["permission"] = permission
+
+	// Starfleet-specific settings
+	shipConfig["instructions"] = []string{".starfleet-ai/var/sop.d/index.md"}
+	shipConfig["plugin"] = []string{"./plugins/starfleet-dispatch.ts"}
+
+	// Write to temp file
+	configPath := opencodeConfigPath(root, shipID)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return "", err
+	}
+	data, err := json.MarshalIndent(shipConfig, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		return "", err
+	}
+	return configPath, nil
 }
 
 // spawnSession creates the termctl terminal for the given launch vars and posts
@@ -685,6 +803,9 @@ func runStop(root string, args []string) int {
 		_ = bus.DoClear()
 	}
 	_ = shipReg.DoRelease(id)
+
+	// Clean up per-ship temp opencode config
+	_ = os.Remove(opencodeConfigPath(root, id))
 
 	if _, err := os.Stat(pipePath); err != nil && !nameReserved {
 		fmt.Fprintf(os.Stderr, "agent-run: no such session: %s\n", id)

@@ -809,13 +809,14 @@ func webRestart(root string) error {
 }
 
 // apiShipLaunch POSTs a new ship (the web console's "new ship" action).
-// Body: {"name":"", "model":"provider/model", "parent":""}.
+// Body: {"name":"", "model":"provider/model", "parent":"", "unrestricted":false}.
 //
-//	name   — optional; empty => next free ship name
-//	model  — optional opencode model id (provider derived from it)
-//	parent — optional ship to hang under; empty => flagship (Enterprise),
-//	         since a web-GUI launch is treated as an auto-launch under the
-//	         flagship. The launch_type is always "auto" for web launches.
+//	name         — optional; empty => next free ship name
+//	model        — optional opencode model id (provider derived from it)
+//	parent       — optional ship to hang under; empty => flagship (Enterprise),
+//	               since a web-GUI launch is treated as an auto-launch under the
+//	               flagship. The launch_type is always "auto" for web launches.
+//	unrestricted — optional; unrestricted permissions (allow all, bypass ask/deny)
 //
 // Delegates to session.LaunchShip — the same code path as `session ship-run`,
 // so the detached termctl terminal, registry, and heartbeat are identical.
@@ -825,10 +826,11 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p struct {
-		Name     string `json:"name"`
-		Model    string `json:"model"`
-		Provider string `json:"provider"`
-		Parent   string `json:"parent"`
+		Name         string `json:"name"`
+		Model        string `json:"model"`
+		Provider     string `json:"provider"`
+		Parent       string `json:"parent"`
+		Unrestricted bool   `json:"unrestricted"`
 	}
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -840,13 +842,15 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		p.Model = r.FormValue("model")
 		p.Provider = r.FormValue("provider")
 		p.Parent = r.FormValue("parent")
+		p.Unrestricted = r.FormValue("unrestricted") == "true" || r.FormValue("unrestricted") == "on"
 	}
 	shipID, err := session.LaunchShip(s.Root, session.LaunchShipOpts{
-		Name:       p.Name,
-		Model:      p.Model,
-		Provider:   p.Provider,
-		Parent:     p.Parent,
-		LaunchType: "auto",
+		Name:         p.Name,
+		Model:        p.Model,
+		Provider:     p.Provider,
+		Parent:       p.Parent,
+		LaunchType:   "auto",
+		Unrestricted: p.Unrestricted,
 	})
 	if err != nil {
 		writeErr(w, 409, err.Error())
