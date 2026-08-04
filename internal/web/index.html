@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -143,34 +143,38 @@
 </head>
 <body>
 <header>
-  <h1>★ Fleet Console</h1>
+  <h1 data-i18n="h1.title">★ Fleet Console</h1>
   <span class="me" id="me"></span>
+  <select id="lang_sel" onchange="setLang(this.value)" title="Language / Sprache" style="width:auto;font-size:12px;padding:4px 8px">
+    <option value="de">DE</option>
+    <option value="en">EN</option>
+  </select>
   <button class="sec refresh" onclick="refresh()">↻</button>
 </header>
 
 <div class="tabs" id="tabs">
-  <div class="tab on" data-p="status" onclick="show('status', true)">Flotte</div>
-  <div class="tab" data-p="tasks" onclick="show('tasks', true)">Tasks</div>
-  <div class="tab" data-p="bus" onclick="show('bus', true)">Bus</div>
-  <div class="tab" data-p="talk" onclick="show('talk', true)">Funk</div>
-  <div class="tab" data-p="log" onclick="show('log', true)">Log</div>
-  <div class="tab" data-p="sessions" onclick="show('sessions', true);loadSessions()">Sitzungen</div>
-  <div class="tab" data-p="timers" onclick="show('timers', true)">Timer</div>
-  <div class="tab" data-p="reports" onclick="show('reports', true);loadReports()">Berichte</div>
-  <div class="tab" data-p="files" onclick="show('files', true)">Files</div>
+  <div class="tab on" data-p="status" onclick="show('status', true)" data-i18n="tab.fleet">Flotte</div>
+  <div class="tab" data-p="tasks" onclick="show('tasks', true)" data-i18n="tab.tasks">Tasks</div>
+  <div class="tab" data-p="bus" onclick="show('bus', true)" data-i18n="tab.bus">Bus</div>
+  <div class="tab" data-p="talk" onclick="show('talk', true)" data-i18n="tab.talk">Funk</div>
+  <div class="tab" data-p="log" onclick="show('log', true)" data-i18n="tab.log">Log</div>
+  <div class="tab" data-p="sessions" onclick="show('sessions', true);loadSessions()" data-i18n="tab.sessions">Sitzungen</div>
+  <div class="tab" data-p="timers" onclick="show('timers', true)" data-i18n="tab.timers">Timer</div>
+  <div class="tab" data-p="reports" onclick="show('reports', true);loadReports()" data-i18n="tab.reports">Berichte</div>
+  <div class="tab" data-p="files" onclick="show('files', true)" data-i18n="tab.files">Files</div>
 </div>
 
 <main>
   <section class="page on" id="status">
     <div class="card">
-      <b>Neues Schiff</b>
+      <b data-i18n="ship.new">Neues Schiff</b>
       <div class="grid2" style="margin-top:8px">
-        <input id="ns_name" placeholder="Name (leer = freier)">
-        <select id="ns_model"><option value="">Modell wählen...</option></select>
+        <input id="ns_name" data-i18n-ph="ns_name.ph" placeholder="Name (leer = freier)">
+        <select id="ns_model"><option value="" data-i18n="ns_model.ph">Modell wählen...</option></select>
       </div>
       <div class="grid2" style="margin-top:8px">
-        <input id="ns_parent" placeholder="Übergeordnet (leer = Flagship)">
-        <select id="ns_provider"><option value="">Provider (aus Modell)</option>
+        <input id="ns_parent" data-i18n-ph="ns_parent.ph" placeholder="Übergeordnet (leer = Flagship)">
+        <select id="ns_provider"><option value="" data-i18n="ns_provider.ph">Provider (aus Modell)</option>
           <option value="openai">openai</option>
           <option value="anthropic">anthropic</option>
           <option value="google">google</option>
@@ -178,83 +182,83 @@
           <option value="mistral">mistral</option>
           <option value="meta">meta</option></select>
       </div>
-      <div class="actions"><button onclick="shipLaunch()">Starten</button></div>
+      <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start">Starten</button></div>
     </div>
     <div class="card" id="board"></div>
   </section>
 
   <section class="page" id="tasks">
     <div class="card">
-      <b>Neue Aufgabe</b>
-      <input id="t_title" placeholder="Titel" style="margin-top:8px">
-      <textarea id="t_desc" placeholder="Beschreibung (optional)" style="margin-top:8px"></textarea>
+      <b data-i18n="task.new">Neue Aufgabe</b>
+      <input id="t_title" data-i18n-ph="t_title.ph" placeholder="Titel" style="margin-top:8px">
+      <textarea id="t_desc" data-i18n-ph="t_desc.ph" placeholder="Beschreibung (optional)" style="margin-top:8px"></textarea>
       <div class="grid2" style="margin-top:8px">
-        <input id="t_ship" placeholder="Ship (leer=offen, 'auto'=freier)">
-        <select id="t_assign"><option value="">nicht zuweisen</option>
-          <option value="auto">an Flagschiff (delegiert)</option>
-          <option value="name">explizit (oben)</option></select>
+        <input id="t_ship" data-i18n-ph="t_ship.ph" placeholder="Ship (leer=offen, &apos;auto&apos;=freier)">
+        <select id="t_assign"><option value="" data-i18n="t_assign.none">nicht zuweisen</option>
+          <option value="auto" data-i18n="t_assign.flagship">an Flagschiff (delegiert)</option>
+          <option value="name" data-i18n="t_assign.explicit">explizit (oben)</option></select>
       </div>
       <div class="grid2" style="margin-top:8px">
-        <select id="t_status"><option value="open">Status: open (Standard)</option>
+        <select id="t_status"><option value="open" data-i18n="t_status.label">Status: open (Standard)</option>
           <option value="open">open</option>
           <option value="assigned">assigned</option>
           <option value="in-progress">in-progress</option>
           <option value="done">done</option>
           <option value="parked">parked</option>
         </select>
-        <select id="t_cat"><option value="">Task-Kategorie: (toplevel / unkategorisiert)</option></select>
+        <select id="t_cat"><option value="" data-i18n="t_cat.ph">Task-Kategorie: (toplevel / unkategorisiert)</option></select>
       </div>
-      <div class="actions"><button onclick="taskNew()">Erfassen</button></div>
+      <div class="actions"><button onclick="taskNew()" data-i18n="task.capture">Erfassen</button></div>
     </div>
     <div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-      <span class="muted">Filter:</span>
+      <span class="muted" data-i18n="filter.label">Filter:</span>
       <select id="tf_status" onchange="taskFilterChange()">
-        <option value="">Status: alle</option>
+        <option value="" data-i18n="tf_status.all">Status: alle</option>
         <option value="open">open</option>
         <option value="assigned">assigned</option>
         <option value="in-progress">in-progress</option>
         <option value="done">done</option>
         <option value="parked">parked</option>
       </select>
-      <select id="tf_ship" onchange="taskFilterChange()"><option value="">Schiff: alle</option></select>
-      <select id="tf_cat" onchange="taskFilterChange()"><option value="">Kategorie: alle (inkl. toplevel)</option></select>
-      <span class="muted">Sortieren:</span>
+      <select id="tf_ship" onchange="taskFilterChange()"><option value="" data-i18n="tf_ship.all">Schiff: alle</option></select>
+      <select id="tf_cat" onchange="taskFilterChange()"><option value="" data-i18n="tf_cat.all">Kategorie: alle (inkl. toplevel)</option></select>
+      <span class="muted" data-i18n="sort.label">Sortieren:</span>
       <select id="tf_sort" onchange="taskFilterChange()">
-        <option value="status" selected>Status</option>
-        <option value="ship">Schiff</option>
-        <option value="cat">Kategorie</option>
-        <option value="title">Titel</option>
-        <option value="created">Erstellt</option>
+        <option value="status" selected data-i18n="sort.status">Status</option>
+        <option value="ship" data-i18n="sort.ship">Schiff</option>
+        <option value="cat" data-i18n="sort.cat">Kategorie</option>
+        <option value="title" data-i18n="sort.title">Titel</option>
+        <option value="created" data-i18n="sort.created">Erstellt</option>
       </select>
       <button class="sec" id="tf_dir" onclick="taskToggleDir()" style="width:auto;padding:6px 10px">↑</button>
-      <button class="sec" onclick="taskReindex()" title="DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)" style="margin-left:auto;width:auto;padding:6px 12px">↻ Reindex</button>
+      <button class="sec" onclick="taskReindex()" data-i18n-title="reindex.title" title="DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)" data-i18n="reindex.btn" style="margin-left:auto;width:auto;padding:6px 12px">↻ Reindex</button>
     </div>
     <div class="card" id="tasklist"></div>
   </section>
 
   <section class="page" id="bus">
     <div class="tabs" style="border:0;padding:0 0 8px;margin:0">
-      <div class="tab on" data-b="msgs" onclick="busTab('msgs', true)">Direktiven</div>
-      <div class="tab" data-b="inbox" onclick="busTab('inbox', true)">Inbox</div>
-      <div class="tab" data-b="asks" onclick="busTab('asks', true)">Fragen</div>
+      <div class="tab on" data-b="msgs" onclick="busTab('msgs', true)" data-i18n="bus.directives">Direktiven</div>
+      <div class="tab" data-b="inbox" onclick="busTab('inbox', true)" data-i18n="bus.inbox">Inbox</div>
+      <div class="tab" data-b="asks" onclick="busTab('asks', true)" data-i18n="bus.asks">Fragen</div>
     </div>
     <div class="row" style="margin-bottom:8px">
-      <span class="muted">Ansicht:</span>
-      <button class="sec" id="btn_thread" onclick="toggleThread()" style="width:auto;padding:6px 12px">💬 Threads: aus</button>
+      <span class="muted" data-i18n="view.label">Ansicht:</span>
+      <button class="sec" id="btn_thread" onclick="toggleThread()" style="width:auto;padding:6px 12px" data-i18n="threads.off">💬 Threads: aus</button>
     </div>
     <div class="card" id="busbody"></div>
   </section>
 
   <section class="page" id="talk">
     <div class="card">
-      <b>Nachricht an</b>
+      <b data-i18n="talk.to">Nachricht an</b>
       <div class="grid2" style="margin-top:8px">
-        <select id="talk_target" onchange="loadTalk()"><option value="all">📡 ganze Flotte (all)</option></select>
-        <input id="talk_text" placeholder="Text…">
+        <select id="talk_target" onchange="loadTalk()"><option value="all" data-i18n="talk.all">📡 ganze Flotte (all)</option></select>
+        <input id="talk_text" data-i18n-ph="talk.text.ph" placeholder="Text…">
       </div>
-      <div class="actions"><button onclick="sendTell()">Senden</button></div>
+      <div class="actions"><button onclick="sendTell()" data-i18n="talk.send">Senden</button></div>
     </div>
-    <div class="card muted" id="talk_hint">Hinweis: Nachrichten gehen über comms (comms tell / broadcast). Ships holen sie via inbox ab.</div>
+    <div class="card muted" id="talk_hint" data-i18n="talk.hint">Hinweis: Nachrichten gehen über comms (comms tell / broadcast). Ships holen sie via inbox ab.</div>
     <div class="card" id="talk_body"></div>
   </section>
 
@@ -265,54 +269,54 @@
   <section class="page" id="timers">
     <div class="card">
       <div class="row" style="align-items:center">
-        <b>Timer Worker</b>
+        <b data-i18n="timer.worker">Timer Worker</b>
         <span id="tw_status" class="muted">…</span>
         <span style="margin-left:auto"></span>
-        <button class="sec" id="tw_btn" onclick="timerWorkerToggle()" style="width:auto;padding:6px 14px">Start</button>
+        <button class="sec" id="tw_btn" onclick="timerWorkerToggle()" style="width:auto;padding:6px 14px" data-i18n="timers.worker.start">Start</button>
       </div>
     </div>
     <div class="card">
       <div class="row" style="align-items:center">
-        <b>Web Server</b>
+        <b data-i18n="timer.web">Web Server</b>
         <span class="muted" id="ws_info">…</span>
         <span style="margin-left:auto"></span>
-        <button class="sec" onclick="webRestart()" style="width:auto;padding:6px 14px">Neu starten</button>
+        <button class="sec" onclick="webRestart()" style="width:auto;padding:6px 14px" data-i18n="timer.restart">Neu starten</button>
       </div>
     </div>
     <div class="card">
-      <b>Neuer Timer</b>
+      <b data-i18n="timer.new">Neuer Timer</b>
       <div class="grid2" style="margin-top:8px">
         <select id="tf_type" onchange="timerFormUpdate()">
-          <option value="once">Einmalig (--at)</option>
-          <option value="interval">Intervall (--every)</option>
-          <option value="cron">Cron (--cron)</option>
+          <option value="once" data-i18n="tf_type.once">Einmalig (--at)</option>
+          <option value="interval" data-i18n="tf_type.interval">Intervall (--every)</option>
+          <option value="cron" data-i18n="tf_type.cron">Cron (--cron)</option>
         </select>
         <select id="tf_target" onchange="timerTargetUpdate()">
-          <option value="fleet">Fleet (einen freien)</option>
-          <option value="fleet-all">Fleet-alle (alle freien)</option>
-          <option value="ship">Eigenes Schiff</option>
-          <option value="system">System (direkt)</option>
+          <option value="fleet" data-i18n="tf_target.fleet">Fleet (einen freien)</option>
+          <option value="fleet-all" data-i18n="tf_target.fleetall">Fleet-alle (alle freien)</option>
+          <option value="ship" data-i18n="tf_target.ship">Eigenes Schiff</option>
+          <option value="system" data-i18n="tf_target.system">System (direkt)</option>
         </select>
       </div>
       <div id="tf_at_row" class="grid2" style="margin-top:8px">
-        <input id="tf_at" placeholder="z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00">
+        <input id="tf_at" data-i18n-ph="tf_at.ph" placeholder="z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00">
       </div>
       <div id="tf_every_row" class="grid2" style="margin-top:8px;display:none">
-        <input id="tf_every" placeholder="z.B. 10m / 1h / 30s">
+        <input id="tf_every" data-i18n-ph="tf_every.ph" placeholder="z.B. 10m / 1h / 30s">
       </div>
       <div id="tf_cron_row" class="grid2" style="margin-top:8px;display:none">
-        <input id="tf_cron" placeholder="z.B. 0 4 * * *">
+        <input id="tf_cron" data-i18n-ph="tf_cron.ph" placeholder="z.B. 0 4 * * *">
       </div>
       <div id="tf_cmd_row" style="margin-top:8px;display:none">
         <select id="tf_cmd">
-          <option value="reindex">reindex — Agent- und Dashboard-Indices aktualisieren</option>
-          <option value="web">web — Webserver starten (idempotent)</option>
-          <option value="web restart">web restart — Webserver neustarten (erzwungen)</option>
+          <option value="reindex" data-i18n="tf_cmd.reindex">reindex — Agent- und Dashboard-Indices aktualisieren</option>
+          <option value="web" data-i18n="tf_cmd.web">web — Webserver starten (idempotent)</option>
+          <option value="web restart" data-i18n="tf_cmd.webrestart">web restart — Webserver neustarten (erzwungen)</option>
         </select>
       </div>
-      <input id="tf_msg" placeholder="Nachricht…" style="margin-top:8px">
+      <input id="tf_msg" data-i18n-ph="tf_msg.ph" placeholder="Nachricht…" style="margin-top:8px">
       <div class="actions">
-        <button onclick="timerCreate()">Erstellen</button>
+        <button onclick="timerCreate()" data-i18n="timer.create">Erstellen</button>
       </div>
     </div>
     <div class="card" id="timerlist"></div>
@@ -320,28 +324,28 @@
 
   <section class="page" id="reports">
     <div class="card">
-      <b>Bericht einreichen</b>
-      <input id="rep_title" placeholder="Titel (erforderlich)" style="margin-top:8px">
-      <input id="rep_subtitle" placeholder="Untertitel (Kurzansicht)" style="margin-top:8px">
-      <textarea id="rep_body" placeholder="Berichtstext (optional, Markdown)" style="margin-top:8px;min-height:80px"></textarea>
+      <b data-i18n="rep.submit">Bericht einreichen</b>
+      <input id="rep_title" data-i18n-ph="rep_title.ph" placeholder="Titel (erforderlich)" style="margin-top:8px">
+      <input id="rep_subtitle" data-i18n-ph="rep_subtitle.ph" placeholder="Untertitel (Kurzansicht)" style="margin-top:8px">
+      <textarea id="rep_body" data-i18n-ph="rep_body.ph" placeholder="Berichtstext (optional, Markdown)" style="margin-top:8px;min-height:80px"></textarea>
       <div class="row" style="margin-top:8px;gap:8px">
-        <input id="rep_tags" placeholder="Tags (Komma getrennt)" style="flex:1">
-        <input id="rep_taskref" placeholder="Task-Slug (optional)" style="flex:1">
+        <input id="rep_tags" data-i18n-ph="rep_tags.ph" placeholder="Tags (Komma getrennt)" style="flex:1">
+        <input id="rep_taskref" data-i18n-ph="rep_taskref.ph" placeholder="Task-Slug (optional)" style="flex:1">
       </div>
       <div class="row" style="margin-top:8px;gap:8px;align-items:center">
         <input type="file" id="rep_file_input" style="flex:1">
-        <button class="sec" onclick="reportUploadFile()" style="width:auto">Anhängen</button>
+        <button class="sec" onclick="reportUploadFile()" style="width:auto" data-i18n="rep.attach">Anhängen</button>
       </div>
       <div id="rep_attachments" style="margin-top:6px;font-size:13px"></div>
       <div class="actions" style="margin-top:8px">
-        <button onclick="reportSubmit()">Bericht einreichen</button>
+        <button onclick="reportSubmit()" data-i18n="rep.submit">Bericht einreichen</button>
       </div>
     </div>
     <div class="card" id="reports_filters">
       <div class="row" style="gap:8px">
-        <input id="rep_filter_ship" placeholder="Filter: Schiff" style="flex:1">
-        <input id="rep_filter_tag" placeholder="Filter: Tag" style="flex:1">
-        <button class="sec" onclick="loadReports()">Filtern</button>
+        <input id="rep_filter_ship" data-i18n-ph="rep_filter_ship.ph" placeholder="Filter: Schiff" style="flex:1">
+        <input id="rep_filter_tag" data-i18n-ph="rep_filter_tag.ph" placeholder="Filter: Tag" style="flex:1">
+        <button class="sec" onclick="loadReports()" data-i18n="rep.filter.btn">Filtern</button>
       </div>
     </div>
     <div class="card" id="reports_list"></div>
@@ -367,25 +371,25 @@
     <div class="modal" style="max-width:760px">
       <div class="row" style="align-items:flex-start">
         <div class="grow">
-          <div class="muted" style="font-size:12px">Subject:</div>
+          <div class="muted" style="font-size:12px" data-i18n="task.subject">Subject:</div>
           <b id="task_m_title"></b>
           <div id="task_m_meta" class="muted" style="margin-top:6px;font-size:12px"></div>
         </div>
-        <button class="sec" onclick="taskDetailEdit()" style="width:auto;padding:4px 10px">Bearbeiten</button>
+        <button class="sec" onclick="taskDetailEdit()" style="width:auto;padding:4px 10px" data-i18n="task.edit">Bearbeiten</button>
         <button class="sec" onclick="closeTaskModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
       </div>
       <div id="task_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></div>
       <div id="task_m_edit" style="display:none;margin-top:12px">
-        <input id="task_m_t" placeholder="Subject (Titel)" style="width:100%;box-sizing:border-box">
+        <input id="task_m_t" data-i18n-ph="task_m_t.ph" placeholder="Subject (Titel)" style="width:100%;box-sizing:border-box">
         <div class="grid2" style="margin-top:8px">
           <select id="task_m_cat"></select>
           <select id="task_m_status"></select>
         </div>
         <select id="task_m_assign" style="width:100%;margin-top:8px"></select>
-        <textarea id="task_m_text" placeholder="Task-Volltext (Markdown-Body)..." style="width:100%;min-height:280px;margin-top:8px;box-sizing:border-box;font:13px/1.5 ui-monospace,monospace"></textarea>
+        <textarea id="task_m_text" data-i18n-ph="task_m_text.ph" placeholder="Task-Volltext (Markdown-Body)..." style="width:100%;min-height:280px;margin-top:8px;box-sizing:border-box;font:13px/1.5 ui-monospace,monospace"></textarea>
         <div class="row" style="margin-top:8px;gap:8px">
-          <button onclick="taskDetailSave()">Speichern</button>
-          <button class="sec" onclick="showTaskBody()">Abbrechen</button>
+          <button onclick="taskDetailSave()" data-i18n="save">Speichern</button>
+          <button class="sec" onclick="showTaskBody()" data-i18n="cancel">Abbrechen</button>
         </div>
       </div>
     </div>
@@ -394,7 +398,7 @@
   <section class="page" id="files">
     <div class="card">
       <div class="row" style="align-items:center">
-        <b>Dateien</b>
+        <b data-i18n="files.title">Dateien</b>
         <span class="muted" id="files_path"></span>
       </div>
       <div id="files_breadcrumb" style="margin-top:8px"></div>
@@ -405,8 +409,8 @@
         <b id="files_viewer_name"></b>
         <span class="muted" id="files_viewer_size"></span>
         <span style="flex:1"></span>
-        <button class="sec" onclick="fileDownload()" style="width:auto;padding:6px 12px">Download</button>
-        <button class="sec" onclick="fileEdit()" style="width:auto;padding:6px 12px">Bearbeiten</button>
+        <button class="sec" onclick="fileDownload()" style="width:auto;padding:6px 12px" data-i18n="file.download">Download</button>
+        <button class="sec" onclick="fileEdit()" style="width:auto;padding:6px 12px" data-i18n="file.edit">Bearbeiten</button>
         <button class="sec" onclick="fileCloseViewer()" style="width:auto;padding:6px 12px">×</button>
       </div>
       <pre id="files_viewer_content" style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow-y:auto;font:13px/1.4 ui-monospace,monospace;background:var(--chip);padding:10px;border-radius:8px;border:1px solid var(--line)"></pre>
@@ -418,8 +422,8 @@
         <div class="row" style="align-items:center;margin-bottom:8px">
           <b id="file_editor_name"></b>
           <span style="flex:1"></span>
-          <button class="sec" onclick="fileSave()" style="width:auto;padding:6px 12px">Speichern</button>
-          <button class="sec" onclick="fileCloseEditor()" style="width:auto;padding:6px 12px">Abbrechen</button>
+          <button class="sec" onclick="fileSave()" style="width:auto;padding:6px 12px" data-i18n="file.save">Speichern</button>
+          <button class="sec" onclick="fileCloseEditor()" style="width:auto;padding:6px 12px" data-i18n="file.cancel">Abbrechen</button>
         </div>
         <textarea id="file_editor_content" style="width:100%;height:70vh;box-sizing:border-box;font:13px/1.4 ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical"></textarea>
       </div>
@@ -429,29 +433,29 @@
   <section class="page" id="sessions">
     <div class="card">
       <div class="row" style="align-items:center;gap:8px">
-        <b>opencode-Sitzungen</b>
+        <b data-i18n="sess.title">opencode-Sitzungen</b>
         <span style="flex:1"></span>
-        <input id="sess_filter" placeholder="Filter: Schiff" style="width:auto" onchange="loadSessions()">
+        <input id="sess_filter" data-i18n-ph="sess_filter.ph" placeholder="Filter: Schiff" style="width:auto" onchange="loadSessions()">
         <select id="sess_agent" style="width:auto" onchange="loadSessions()">
-          <option value="">alle Modes</option>
+          <option value="" data-i18n="sess.agent.all">alle Modes</option>
           <option>build</option><option>plan</option><option>explore</option><option>general</option>
         </select>
       </div>
-      <div class="muted" style="font-size:12px;margin-top:4px">opencode-DB wird read-only gelesen — auch Sessions ohne termctl-Terminal</div>
+      <div class="muted" style="font-size:12px;margin-top:4px" data-i18n="sess.note">opencode-DB wird read-only gelesen — auch Sessions ohne termctl-Terminal</div>
     </div>
     <div class="card" id="sess_list"></div>
     <div class="card">
       <div class="row" style="align-items:center">
-        <b>opencode.log</b>
+        <b data-i18n="sess.log">opencode.log</b>
         <span style="flex:1"></span>
         <select id="oclog_n" style="width:auto" onchange="loadOCLog()">
           <option value="100">100</option>
           <option value="200" selected>200</option>
           <option value="1000">1000</option>
         </select>
-        <button class="sec" onclick="loadOCLog()" style="width:auto;padding:4px 10px">Aktualisieren</button>
+        <button class="sec" onclick="loadOCLog()" style="width:auto;padding:4px 10px" data-i18n="sess.refresh">Aktualisieren</button>
       </div>
-      <pre id="oclog_content" style="margin:8px 0 0;max-height:40vh;overflow-y:auto;font:12px/1.4 ui-monospace,monospace;background:var(--chip);padding:8px;border-radius:6px;border:1px solid var(--line)">Lade…</pre>
+      <pre id="oclog_content" style="margin:8px 0 0;max-height:40vh;overflow-y:auto;font:12px/1.4 ui-monospace,monospace;background:var(--chip);padding:8px;border-radius:6px;border:1px solid var(--line)" data-i18n="sess.loading">Lade…</pre>
     </div>
   </section>
 
@@ -462,8 +466,8 @@
         <div class="grow"><b id="sess_m_title"></b> <span class="pill" id="sess_m_state"></span></div>
         <div class="row" style="gap:8px;align-items:center">
           <select id="sess_m_window" style="width:auto;font-size:12px" onchange="loadSessTranscript()">
-            <option value="50">letzte 50</option>
-            <option value="200">letzte 200</option>
+            <option value="50" data-i18n="sess.last50">letzte 50</option>
+            <option value="200" data-i18n="sess.last200">letzte 200</option>
           </select>
           <button class="sec" onclick="loadSessTranscript()" style="width:auto;padding:4px 10px;font-size:14px">↻</button>
           <button class="sec" onclick="closeSessModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
@@ -484,9 +488,9 @@
       <span class="pill" id="ship_state"></span>
       <span class="pill" id="ship_model" style="font-size:11px"></span>
       <select id="ship_model_switch" style="font-size:11px;width:auto;max-width:160px;margin-left:6px;display:none"></select>
-      <button class="sec" id="ship_model_btn" style="font-size:11px;padding:3px 8px;display:none" onclick="shipSwitchModel()">Switch</button>
+      <button class="sec" id="ship_model_btn" style="font-size:11px;padding:3px 8px;display:none" onclick="shipSwitchModel()" data-i18n="ship.switch">Switch</button>
       <span style="flex:1"></span>
-      <span class="pill" style="background:#c33;color:#fff;cursor:pointer" onclick="shipStop()">Stop</span>
+      <span class="pill" style="background:#c33;color:#fff;cursor:pointer" onclick="shipStop()" data-i18n="ship.stop">Stop</span>
       <button class="x" onclick="history.back()">×</button>
     </header>
     <div class="body">
@@ -494,9 +498,9 @@
         <div class="kv" id="ship_detail"></div>
       </div>
       <div class="tabs" style="border:0;padding:0 0 8px;margin:0">
-        <div class="tab on" data-s="chat" onclick="shipTab('chat')">Chat</div>
-        <div class="tab" data-s="screen" onclick="shipTab('screen')">Terminal</div>
-        <div class="tab" data-s="hist" onclick="shipTab('hist')">Verlauf</div>
+        <div class="tab on" data-s="chat" onclick="shipTab('chat')" data-i18n="ship.chat">Chat</div>
+        <div class="tab" data-s="screen" onclick="shipTab('screen')" data-i18n="ship.screen">Terminal</div>
+        <div class="tab" data-s="hist" onclick="shipTab('hist')" data-i18n="ship.hist">Verlauf</div>
       </div>
       <div id="ship_chat_tab">
         <div id="ship_chat"></div>
@@ -506,16 +510,16 @@
       </div>
       <div id="ship_screen_tab" style="display:none;flex:1;display:flex;flex-direction:column;min-height:0">
         <div class="terminal-controls" style="flex-shrink:0">
-          <span class="pill active" id="term_auto" onclick="termAutoToggle()">Auto-Update: an</span>
-          <span class="pill" id="term_scrollback" onclick="termShowScrollback()">Scrollback</span>
+          <span class="pill active" id="term_auto" onclick="termAutoToggle()" data-i18n="term.auto">Auto-Update: an</span>
+          <span class="pill" id="term_scrollback" onclick="termShowScrollback()" data-i18n="term.scrollback">Scrollback</span>
           <span class="muted" id="term_status"></span>
         </div>
-        <div class="terminal" id="term_content" style="flex:1;min-height:0;resize:none">Lade Terminal...</div>
+        <div class="terminal" id="term_content" style="flex:1;min-height:0;resize:none" data-i18n="term.loading">Lade Terminal...</div>
       </div>
     </div>
     <div class="compose">
-      <textarea id="ship_msg" placeholder="Nachricht an Schiff…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();shipSend()}"></textarea>
-      <button onclick="shipSend()">Senden</button>
+      <textarea id="ship_msg" data-i18n-ph="ship_msg.ph" placeholder="Nachricht an Schiff…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();shipSend()}"></textarea>
+      <button onclick="shipSend()" data-i18n="ship.send">Senden</button>
     </div>
   </div>
 </div>
@@ -534,6 +538,242 @@ const api = async (p, opt) => {
   return r.json();
 };
 let identity = { ship_id: "" };
+
+// --- i18n ---
+// The whole UI is German-first (default). The dictionary keeps every string
+// in both languages; the effective language is stored in localStorage and
+// defaults to the browser/system locale (de when available, else en).
+const I18N = {
+  de: {
+    'app.title': 'Starfleet — Fleet Console',
+    'h1.title': '★ Fleet Console',
+    'tab.fleet': 'Flotte', 'tab.tasks': 'Tasks', 'tab.bus': 'Bus', 'tab.talk': 'Funk',
+    'tab.log': 'Log', 'tab.sessions': 'Sitzungen', 'tab.timers': 'Timer',
+    'tab.reports': 'Berichte', 'tab.files': 'Files',
+    'ship.new': 'Neues Schiff', 'ns_name.ph': 'Name (leer = freier)',
+    'ns_model.ph': 'Modell wählen...', 'ns_parent.ph': 'Übergeordnet (leer = Flagship)',
+    'ns_provider.ph': 'Provider (aus Modell)', 'ship.start': 'Starten',
+    'task.new': 'Neue Aufgabe', 't_title.ph': 'Titel', 't_desc.ph': 'Beschreibung (optional)',
+    't_ship.ph': "Ship (leer=offen, 'auto'=freier)",
+    't_assign.none': 'nicht zuweisen', 't_assign.flagship': 'an Flagschiff (delegiert)',
+    't_assign.explicit': 'explizit (oben)', 't_status.label': 'Status: open (Standard)',
+    't_cat.ph': 'Task-Kategorie: (toplevel / unkategorisiert)', 'task.capture': 'Erfassen',
+    'filter.label': 'Filter:', 'tf_status.all': 'Status: alle', 'tf_ship.all': 'Schiff: alle',
+    'tf_cat.all': 'Kategorie: alle (inkl. toplevel)', 'sort.label': 'Sortieren:',
+    'sort.status': 'Status', 'sort.ship': 'Schiff', 'sort.cat': 'Kategorie',
+    'sort.title': 'Titel', 'sort.created': 'Erstellt',
+    'reindex.title': 'DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)',
+    'reindex.btn': '↻ Reindex',
+    'bus.directives': 'Direktiven', 'bus.inbox': 'Inbox', 'bus.asks': 'Fragen',
+    'view.label': 'Ansicht:', 'threads.off': '💬 Threads: aus', 'threads.on': '💬 Threads: an',
+    'talk.to': 'Nachricht an', 'talk.all': '📡 ganze Flotte (all)', 'talk.text.ph': 'Text…',
+    'talk.send': 'Senden',
+    'talk.hint': 'Hinweis: Nachrichten gehen über comms (comms tell / broadcast). Ships holen sie via inbox ab.',
+    'timer.worker': 'Timer Worker', 'timer.web': 'Web Server', 'timer.restart': 'Neu starten',
+    'timer.new': 'Neuer Timer', 'tf_type.once': 'Einmalig (--at)',
+    'tf_type.interval': 'Intervall (--every)', 'tf_type.cron': 'Cron (--cron)',
+    'tf_target.fleet': 'Fleet (einen freien)', 'tf_target.fleetall': 'Fleet-alle (alle freien)',
+    'tf_target.ship': 'Eigenes Schiff', 'tf_target.system': 'System (direkt)',
+    'tf_at.ph': 'z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00',
+    'tf_every.ph': 'z.B. 10m / 1h / 30s', 'tf_cron.ph': 'z.B. 0 4 * * *',
+    'tf_cmd.reindex': 'reindex — Agent- und Dashboard-Indices aktualisieren',
+    'tf_cmd.web': 'web — Webserver starten (idempotent)',
+    'tf_cmd.webrestart': 'web restart — Webserver neustarten (erzwungen)',
+    'tf_msg.ph': 'Nachricht…', 'timer.create': 'Erstellen',
+    'rep.submit': 'Bericht einreichen', 'rep_title.ph': 'Titel (erforderlich)',
+    'rep_subtitle.ph': 'Untertitel (Kurzansicht)', 'rep_body.ph': 'Berichtstext (optional, Markdown)',
+    'rep_tags.ph': 'Tags (Komma getrennt)', 'rep_taskref.ph': 'Task-Slug (optional)',
+    'rep.attach': 'Anhängen', 'rep_filter_ship.ph': 'Filter: Schiff', 'rep_filter_tag.ph': 'Filter: Tag',
+    'rep.filter.btn': 'Filtern',
+    'task.subject': 'Subject:', 'task.edit': 'Bearbeiten', 'task_m_t.ph': 'Subject (Titel)',
+    'task_m_text.ph': 'Task-Volltext (Markdown-Body)...', 'save': 'Speichern', 'cancel': 'Abbrechen',
+    'files.title': 'Dateien', 'file.download': 'Download', 'file.edit': 'Bearbeiten',
+    'file.save': 'Speichern', 'file.cancel': 'Abbrechen',
+    'sess.title': 'opencode-Sitzungen', 'sess_filter.ph': 'Filter: Schiff',
+    'sess.agent.all': 'alle Modes',
+    'sess.note': 'opencode-DB wird read-only gelesen — auch Sessions ohne termctl-Terminal',
+    'sess.log': 'opencode.log', 'sess.refresh': 'Aktualisieren', 'sess.loading': 'Lade…',
+    'sess.last50': 'letzte 50', 'sess.last200': 'letzte 200',
+    'ship.switch': 'Switch', 'ship.stop': 'Stop', 'ship.chat': 'Chat', 'ship.screen': 'Terminal',
+    'ship.hist': 'Verlauf', 'term.auto': 'Auto-Update: an', 'term.autooff': 'Auto-Update: aus',
+    'term.scrollback': 'Scrollback', 'term.live': 'Live-Screen', 'term.loading': 'Lade Terminal...',
+    'ship_msg.ph': 'Nachricht an Schiff…', 'ship.send': 'Senden',
+    // dynamic strings (JS)
+    'err.leerdir': 'leeres Verzeichnis', 'err.prefix': 'Fehler: ', 'err.unknown': 'unbekannt',
+    'file.toobig': 'Datei zu groß für Inline-Anzeige ({size}). Nutze Download.', 'file.loading': 'Lade...',
+    'filesys.saved': 'Gespeichert: ',
+    'empty.agents': 'keine Agents gemeldet', 'ship.model': 'Modell',
+    'board.notask': 'kein Task',
+    'ship.kv.project': 'Projekt', 'ship.kv.progress': 'Fortschritt',
+    'ship.kv.launch': 'Launch-Typ', 'ship.kv.parent': 'Übergeordnet',
+    'ship.kv.last': 'Zuletzt', 'ship.kv.error': 'Fehler',
+    'ship.ago.suffix': 'her', 'ship.nodetail': 'keine Detaildaten',
+    'ship.nomodel': 'Kein Modell ausgewählt', 'ship.switchreq': 'Modellwechsel angefordert: ',
+    'ship.notext': 'Text fehlt', 'ship.sent': 'gesendet → ', 'ship.stopped': ' gestoppt',
+    'ship.stopconfirm': ' stoppen?',
+    'chat.empty': 'keine Nachrichten',
+    'term.nocontent': 'kein Terminal-Inhalt verfügbar', 'term.lines': ' Zeilen',
+    'reindex.done': 'Dashboard reindexiert',
+    'empty.tasks': 'keine Tasks', 'empty.tasksfilter': 'keine Tasks (Filter)',
+    'task.titlemissing': 'Titel fehlt', 'task.status': 'Status → ', 'task.free': 'frei',
+    'task.captured.auto': 'Task erfasst — an Flagschiff zur Delegation', 'task.captured': 'Task erfasst',
+    'task.moved': 'Task verschoben → ', 'task.updated': 'Task aktualisiert',
+    'task.assigned.auto': 'an Flagschiff zur Delegation', 'task.assigned': 'zugewiesen → ',
+    'task.worker': ' bearbeitet gerade', 'task.assign.auto': 'auto — Flagschiff (delegiert)',
+    'task.assign.none': '(keine Zuweisung)', 'task.cat.none': 'Kategorie: (toplevel)',
+    'task.status.btn': 'Status', 'task.emptybody': '(leer)',
+    'task.assign.btn': 'Zuweisen', 'task.unassign.btn': 'Frei', 'task.detail.btn': 'Detail',
+    'ship.launched': 'Schiff gestartet: ',
+    'bus.nomsgs': 'noch keine Nachrichten', 'bus.notinview': 'Nachricht {id} nicht in dieser Ansicht',
+    'bus.empty': 'leer', 'bus.nolog': 'kein Log',
+    'bus.from': 'von ', 'bus.nothreads': 'keine Threads',
+    'timers.status.running': 'läuft (pid {pid})', 'timers.status.stopped': 'gestoppt',
+    'timers.worker.start': 'Start', 'timers.worker.stop': 'Stop', 'timers.none': 'keine Timer',
+    'timers.cmdmissing': 'Command fehlt', 'timers.msgmissing': 'Nachricht fehlt',
+    'timers.created': 'Timer {id} erstellt',
+    'timers.workerstarted': 'gestartet', 'timers.workerstoppt': 'gestoppt',
+    'timer.active': 'aktiv', 'timer.paused': 'pausiert', 'timer.delete': 'Löschen',
+    'timer.paused.suffix': ' pausiert', 'timer.resumed.suffix': ' fortgesetzt',
+    'timer.deleted.suffix': ' gelöscht',
+    'rep.none': 'keine Berichte', 'rep.attach.label': 'Anhänge: ', 'rep.file': 'Datei wählen',
+    'rep.uploadfailed': 'Upload fehlgeschlagen', 'rep.uploaderr': 'Upload Fehler: ',
+    'rep.loaderror': 'Fehler beim Laden: ',
+    'rep.titlemissing': 'Titel erforderlich', 'rep.submitted': 'Bericht eingereicht',
+    'rep.attached.suffix': ' angehängt',
+    'rep.task.label': '🔗 Task: ', 'rep.attachments.label': '📎 Anhänge: ',
+    'rel.justnow': 'gerade', 'rel.before': 'vor ',
+    'sess.none': 'keine Sessions', 'sess.running': '▶ läuft', 'sess.ended': 'beendet',
+    'sess.assistant': 'Assistent', 'sess.truncated': '(gekürzt)',
+    'sess.nonefor': 'keine opencode-Sessions für ',
+    'web.restarting': 'Web-Server wird neu gestartet…', 'web.restartfail': 'Neustart fehlgeschlagen',
+    'web.restarting.short': 'Neustart…',
+  },
+  en: {
+    'app.title': 'Starfleet — Fleet Console',
+    'h1.title': '★ Fleet Console',
+    'tab.fleet': 'Fleet', 'tab.tasks': 'Tasks', 'tab.bus': 'Bus', 'tab.talk': 'Radio',
+    'tab.log': 'Log', 'tab.sessions': 'Sessions', 'tab.timers': 'Timer',
+    'tab.reports': 'Reports', 'tab.files': 'Files',
+    'ship.new': 'New ship', 'ns_name.ph': 'Name (empty = auto)',
+    'ns_model.ph': 'Choose model...', 'ns_parent.ph': 'Parent (empty = Flagship)',
+    'ns_provider.ph': 'Provider (from model)', 'ship.start': 'Launch',
+    'task.new': 'New task', 't_title.ph': 'Title', 't_desc.ph': 'Description (optional)',
+    't_ship.ph': "Ship (empty=open, 'auto'=auto)",
+    't_assign.none': 'no assignment', 't_assign.flagship': 'to flagship (delegated)',
+    't_assign.explicit': 'explicit (above)', 't_status.label': 'Status: open (default)',
+    't_cat.ph': 'Task category: (toplevel / uncategorized)', 'task.capture': 'Capture',
+    'filter.label': 'Filter:', 'tf_status.all': 'Status: all', 'tf_ship.all': 'Ship: all',
+    'tf_cat.all': 'Category: all (incl. toplevel)', 'sort.label': 'Sort:',
+    'sort.status': 'Status', 'sort.ship': 'Ship', 'sort.cat': 'Category',
+    'sort.title': 'Title', 'sort.created': 'Created',
+    'reindex.title': 'Regenerate DASHBOARD.md index from dashboard/topics/*.md (after manual file edits)',
+    'reindex.btn': '↻ Reindex',
+    'bus.directives': 'Directives', 'bus.inbox': 'Inbox', 'bus.asks': 'Questions',
+    'view.label': 'View:', 'threads.off': '💬 Threads: off', 'threads.on': '💬 Threads: on',
+    'talk.to': 'Message to', 'talk.all': '📡 whole fleet (all)', 'talk.text.ph': 'Text…',
+    'talk.send': 'Send',
+    'talk.hint': 'Note: messages go over comms (comms tell / broadcast). Ships pick them up via inbox.',
+    'timer.worker': 'Timer Worker', 'timer.web': 'Web Server', 'timer.restart': 'Restart',
+    'timer.new': 'New timer', 'tf_type.once': 'Once (--at)',
+    'tf_type.interval': 'Interval (--every)', 'tf_type.cron': 'Cron (--cron)',
+    'tf_target.fleet': 'Fleet (one free)', 'tf_target.fleetall': 'Fleet-all (all free)',
+    'tf_target.ship': 'Own ship', 'tf_target.system': 'System (direct)',
+    'tf_at.ph': 'e.g. 17:30 / tomorrow 17:30 / 2026-07-20 09:00',
+    'tf_every.ph': 'e.g. 10m / 1h / 30s', 'tf_cron.ph': 'e.g. 0 4 * * *',
+    'tf_cmd.reindex': 'reindex — refresh agent and dashboard indices',
+    'tf_cmd.web': 'web — start webserver (idempotent)',
+    'tf_cmd.webrestart': 'web restart — restart webserver (forced)',
+    'tf_msg.ph': 'Message…', 'timer.create': 'Create',
+    'rep.submit': 'Submit report', 'rep_title.ph': 'Title (required)',
+    'rep_subtitle.ph': 'Subtitle (short view)', 'rep_body.ph': 'Report body (optional, Markdown)',
+    'rep_tags.ph': 'Tags (comma separated)', 'rep_taskref.ph': 'Task slug (optional)',
+    'rep.attach': 'Attach', 'rep_filter_ship.ph': 'Filter: ship', 'rep_filter_tag.ph': 'Filter: tag',
+    'rep.filter.btn': 'Filter',
+    'task.subject': 'Subject:', 'task.edit': 'Edit', 'task_m_t.ph': 'Subject (title)',
+    'task_m_text.ph': 'Task full text (Markdown body)...', 'save': 'Save', 'cancel': 'Cancel',
+    'files.title': 'Files', 'file.download': 'Download', 'file.edit': 'Edit',
+    'file.save': 'Save', 'file.cancel': 'Cancel',
+    'sess.title': 'opencode sessions', 'sess_filter.ph': 'Filter: ship',
+    'sess.agent.all': 'all modes',
+    'sess.note': 'opencode DB read read-only — including sessions without termctl terminal',
+    'sess.log': 'opencode.log', 'sess.refresh': 'Refresh', 'sess.loading': 'Loading…',
+    'sess.last50': 'last 50', 'sess.last200': 'last 200',
+    'ship.switch': 'Switch', 'ship.stop': 'Stop', 'ship.chat': 'Chat', 'ship.screen': 'Terminal',
+    'ship.hist': 'History', 'term.auto': 'Auto-update: on', 'term.autooff': 'Auto-update: off',
+    'term.scrollback': 'Scrollback', 'term.live': 'Live screen', 'term.loading': 'Loading terminal...',
+    'ship_msg.ph': 'Message to ship…', 'ship.send': 'Send',
+    // dynamic strings (JS)
+    'err.leerdir': 'empty directory', 'err.prefix': 'Error: ', 'err.unknown': 'unknown',
+    'file.toobig': 'File too large for inline display ({size}). Use download.', 'file.loading': 'Loading...',
+    'filesys.saved': 'Saved: ',
+    'empty.agents': 'no agents reported', 'ship.model': 'Model',
+    'board.notask': 'no task',
+    'ship.kv.project': 'Project', 'ship.kv.progress': 'Progress',
+    'ship.kv.launch': 'Launch type', 'ship.kv.parent': 'Parent',
+    'ship.kv.last': 'Last seen', 'ship.kv.error': 'Error',
+    'ship.ago.suffix': 'ago', 'ship.nodetail': 'no detail data',
+    'ship.nomodel': 'No model selected', 'ship.switchreq': 'Model switch requested: ',
+    'ship.notext': 'Text missing', 'ship.sent': 'sent → ', 'ship.stopped': ' stopped',
+    'ship.stopconfirm': ' stop?',
+    'chat.empty': 'no messages',
+    'term.nocontent': 'no terminal content available', 'term.lines': ' lines',
+    'reindex.done': 'Dashboard reindexed',
+    'empty.tasks': 'no tasks', 'empty.tasksfilter': 'no tasks (filter)',
+    'task.titlemissing': 'Title missing', 'task.status': 'Status → ', 'task.free': 'freed',
+    'task.captured.auto': 'Task captured — to flagship for delegation', 'task.captured': 'Task captured',
+    'task.moved': 'Task moved → ', 'task.updated': 'Task updated',
+    'task.assigned.auto': 'to flagship for delegation', 'task.assigned': 'assigned → ',
+    'task.worker': ' working', 'task.assign.auto': 'auto — flagship (delegated)',
+    'task.assign.none': '(no assignment)', 'task.cat.none': 'Category: (toplevel)',
+    'task.status.btn': 'Status', 'task.emptybody': '(empty)',
+    'task.assign.btn': 'Assign', 'task.unassign.btn': 'Free', 'task.detail.btn': 'Details',
+    'ship.launched': 'Ship launched: ',
+    'bus.nomsgs': 'no messages yet', 'bus.notinview': 'Message {id} not in this view',
+    'bus.empty': 'empty', 'bus.nolog': 'no log',
+    'bus.from': 'from ', 'bus.nothreads': 'no threads',
+    'timers.status.running': 'running (pid {pid})', 'timers.status.stopped': 'stopped',
+    'timers.worker.start': 'Start', 'timers.worker.stop': 'Stop', 'timers.none': 'no timers',
+    'timers.cmdmissing': 'Command missing', 'timers.msgmissing': 'Message missing',
+    'timers.created': 'Timer {id} created',
+    'timers.workerstarted': 'started', 'timers.workerstoppt': 'stopped',
+    'timer.active': 'active', 'timer.paused': 'paused', 'timer.delete': 'Delete',
+    'timer.paused.suffix': ' paused', 'timer.resumed.suffix': ' resumed',
+    'timer.deleted.suffix': ' deleted',
+    'rep.none': 'no reports', 'rep.attach.label': 'Attachments: ', 'rep.file': 'Choose file',
+    'rep.uploadfailed': 'Upload failed', 'rep.uploaderr': 'Upload error: ',
+    'rep.loaderror': 'Error while loading: ',
+    'rep.titlemissing': 'Title required', 'rep.submitted': 'Report submitted',
+    'rep.attached.suffix': ' attached',
+    'rep.task.label': '🔗 Task: ', 'rep.attachments.label': '📎 Attachments: ',
+    'rel.justnow': 'just now', 'rel.before': '',
+    'sess.none': 'no sessions', 'sess.running': '▶ running', 'sess.ended': 'ended',
+    'sess.assistant': 'Assistant', 'sess.truncated': '(truncated)',
+    'sess.nonefor': 'no opencode sessions for ',
+    'web.restarting': 'Web server restarting…', 'web.restartfail': 'Restart failed',
+    'web.restarting.short': 'Restarting…',
+  },
+};
+let lang = 'de';
+try {
+  lang = (localStorage.getItem('sf_lang')) || ((navigator.language||'').toLowerCase().startsWith('de') ? 'de' : 'en');
+} catch (e) { /* localStorage unavailable */ }
+function t(k){ const d = I18N[lang]; return (d && d[k]) || I18N.de[k] || k; }
+const i18nT = t; // alias usable even where a local 't' shadows the translator
+function applyI18n(){
+  document.documentElement.lang = lang;
+  document.title = t('app.title');
+  document.querySelectorAll('[data-i18n]').forEach(el=>{ el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el=>{ el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el=>{ el.title = t(el.dataset.i18nTitle); });
+  const ls = document.getElementById('lang_sel');
+  if (ls) ls.value = lang;
+}
+function setLang(l){
+  lang = l;
+  try { localStorage.setItem('sf_lang', l); } catch (e) {}
+  applyI18n();
+  refresh();
+}
 
 function show(p, push){
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on', s.id===p));
@@ -608,7 +848,7 @@ async function loadFiles(path) {
     }).join('');
     fileCloseViewer();
   } catch (e) {
-    el.innerHTML = '<div class="empty">Fehler: ' + esc(e.message) + '</div>';
+    el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>';
   }
 }
 
@@ -658,14 +898,14 @@ function fileOpenFile(dirpath, name, size) {
   document.getElementById('files_viewer_size').textContent = formatSize(size);
   const contentEl = document.getElementById('files_viewer_content');
   if (size > 2 * 1024 * 1024) {
-    contentEl.textContent = 'Datei zu groß für Inline-Anzeige (' + formatSize(size) + '). Nutze Download.';
+    contentEl.textContent = t('file.toobig').replace('{size}', formatSize(size));
     return;
   }
-  contentEl.textContent = 'Lade...';
+  contentEl.textContent = t('file.loading');
   fetch('/api/files/raw?path=' + encodeURIComponent(fullpath))
     .then(r => { if (!r.ok) throw new Error(r.status + ' ' + r.statusText); return r.text(); })
     .then(text => { contentEl.textContent = text; })
-    .catch(e => { contentEl.textContent = 'Fehler: ' + e.message; });
+    .catch(e => { contentEl.textContent = t('err.prefix') + e.message; });
 }
 
 function fileCloseViewer() {
@@ -698,15 +938,15 @@ async function fileSave() {
     const res = await api('/api/files/save', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({path, content})});
     if (res.ok) {
-      toast('Gespeichert: ' + path);
+      toast(t('filesys.saved') + path);
       fileCloseEditor();
       fileCloseViewer();
       loadFiles(); // refresh file list
     } else {
-      toast('Fehler: ' + (res.error || 'unbekannt'), true);
+      toast(t('err.prefix') + (res.error || t('err.unknown')), true);
     }
   } catch(e) {
-    toast('Fehler: ' + esc(e.message), true);
+    toast(t('err.prefix') + esc(e.message), true);
   }
 }
 
@@ -720,7 +960,7 @@ async function loadBoard(){
   const el = document.getElementById('board');
   try {
     const rows = await api('/api/board');
-    if (!rows.length){ el.innerHTML = '<div class="empty">keine Agents gemeldet</div>'; return; }
+    if (!rows.length){ el.innerHTML = '<div class="empty">'+t('empty.agents')+'</div>'; return; }
     el.innerHTML = rows.filter(r=>r.agent!==identity.ship_id).map(r=>{
       const stale = r.stale ? ' stale' : '';
       const st = (r.state||'idle');
@@ -734,7 +974,7 @@ async function loadBoard(){
       if (r.branch) detail.push(`<span class="pill dim">${esc(r.branch)}</span>`);
       if (r.blocker) detail.push(`<span class="pill bad">⛔ ${esc(r.blocker)}</span>`);
       if (r.eta) detail.push(`<span class="muted">ETA ${esc(r.eta)}</span>`);
-      if (r.unattached) detail.push(`<span class="pill bad">⚠ kein Task</span>`);
+      if (r.unattached) detail.push(`<span class="pill bad">⚠ ${t('board.notask')}</span>`);
       const meta = [];
       if (r.model) meta.push(`<span class="pill dim">🧠 ${esc(r.model)}</span>`);
       else if (r.provider) meta.push(`<span class="pill dim">🧠 ${esc(r.provider)}</span>`);
@@ -755,7 +995,7 @@ async function loadBoard(){
         ${r.note?`<div class="muted" style="margin-top:6px">${esc(r.note)}</div>`:''}
       </div>`;
     }).join('');
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 let shipCurrent = null;
@@ -812,38 +1052,38 @@ async function loadShip(name){
     switchSel.innerHTML = refSel.innerHTML;
     // Add placeholder option at top
     const ph = document.createElement('option');
-    ph.value = ''; ph.textContent = 'Modell wählen...';
+    ph.value = ''; ph.textContent = t('ns_model.ph');
     switchSel.insertBefore(ph, switchSel.firstChild);
     // Pre-select current model if available
     for (const opt of switchSel.options) { if (opt.value === s.model) opt.selected = true; }
     switchSel.style.display = ''; switchBtn.style.display = '';
     const kv = [];
     const add = (k,v)=>{ if(v) kv.push(`<b>${k}</b><span>${esc(v)}</span>`); };
-    add('Projekt', s.project);
+    add(t('ship.kv.project'), s.project);
     add('Task', s.task);
-    add('Fortschritt', s.progress!=null && s.progress>0 ? s.progress+'%' : '');
+    add(t('ship.kv.progress'), s.progress!=null && s.progress>0 ? s.progress+'%' : '');
     add('Branch', s.branch);
     add('Blocker', s.blocker);
     add('ETA', s.eta);
-    add('Modell', s.model);
+    add(t('ship.model'), s.model);
     add('Provider', s.provider);
-    add('Launch-Typ', s.launch_type);
-    add('Übergeordnet', s.parent);
+    add(t('ship.kv.launch'), s.launch_type);
+    add(t('ship.kv.parent'), s.parent);
     add('Note', s.note);
-    add('Zuletzt', s.updated ? age(s.age_seconds)+' her' : '');
-    add('Fehler', s.error_tag);
-    document.getElementById('ship_detail').innerHTML = kv.join('') || '<span class="muted">keine Detaildaten</span>';
+    add(t('ship.kv.last'), s.updated ? age(s.age_seconds)+' '+t('ship.ago.suffix') : '');
+    add(t('ship.kv.error'), s.error_tag);
+    document.getElementById('ship_detail').innerHTML = kv.join('') || '<span class="muted">'+t('ship.nodetail')+'</span>';
     if (s.error_tag && ['streaming-response-failed','nim-overload','resource-exhausted','no-provider'].includes(s.error_tag)){
       toast(s.agent+' · '+s.error_tag+' · auto-recovered');
     }
     await loadShipChat(name);
-  } catch(e){ document.getElementById('ship_detail').innerHTML = '<span class="muted">Fehler: '+esc(e.message)+'</span>'; }
+  } catch(e){ document.getElementById('ship_detail').innerHTML = '<span class="muted">'+t('err.prefix')+esc(e.message)+'</span>'; }
 }
 async function loadShipChat(name){
   const el = document.getElementById('ship_chat');
   try {
     const msgs = await api('/api/msgs?ship='+encodeURIComponent(name));
-    if (!msgs.length){ el.innerHTML = '<div class="empty">noch keine Nachrichten</div>'; return; }
+    if (!msgs.length){ el.innerHTML = '<div class="empty">'+t('bus.nomsgs')+'</div>'; return; }
     const byID = {}, roots = [], children = {};
     msgs.forEach(m=>{ byID[m.id]=m; });
     msgs.forEach(m=>{
@@ -868,45 +1108,45 @@ async function loadShipChat(name){
     };
     // API returns newest first, no need to reverse
     roots.forEach(r=>walk(r, 0));
-    el.innerHTML = out.join('') || '<div class="empty">keine Nachrichten</div>';
+    el.innerHTML = out.join('') || '<div class="empty">'+t('chat.empty')+'</div>';
     el.scrollTop = 0;
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 async function shipSwitchModel(){
   if (!shipCurrent) return;
   const sel = document.getElementById('ship_model_switch');
   const model = sel.value;
-  if (!model){ toast('Kein Modell ausgewählt', true); return; }
+  if (!model){ toast(t('ship.nomodel'), true); return; }
   try {
     await api('/api/cmd', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({target: shipCurrent, verb: 'model', args: model})});
-    toast('Modellwechsel angefordert: '+model);
+    toast(t('ship.switchreq')+model);
     localStorage.setItem('fleet_model', model);
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 async function shipSend(){
   if (!shipCurrent) return;
   const ta = document.getElementById('ship_msg');
   const text = ta.value.trim();
-  if (!text){ toast('Text fehlt', true); return; }
+  if (!text){ toast(t('ship.notext'), true); return; }
   try {
     const r = await api('/api/tell', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({target: shipCurrent, text})});
     ta.value='';
-    toast('gesendet → '+shipCurrent+' ('+r.id+')');
+    toast(t('ship.sent')+shipCurrent+' ('+r.id+')');
     await loadShipChat(shipCurrent);
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 async function shipStop(){
   if (!shipCurrent) return;
-  if (!confirm(shipCurrent+' stoppen?')) return;
+  if (!confirm(shipCurrent+t('ship.stopconfirm'))) return;
   try {
     await api('/api/ship/'+encodeURIComponent(shipCurrent)+'/stop', {method:'POST'});
-    toast(shipCurrent+' gestoppt');
+    toast(shipCurrent+t('ship.stopped'));
     history.back();
     refresh();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 // --- Terminal tab ---
@@ -931,7 +1171,7 @@ function shipTab(tab){
 function termAutoToggle(){
   termAutoUpdate = !termAutoUpdate;
   const el = document.getElementById('term_auto');
-  el.textContent = 'Auto-Update: ' + (termAutoUpdate ? 'an' : 'aus');
+  el.textContent = t(termAutoUpdate ? 'term.auto' : 'term.autooff');
   el.classList.toggle('active', termAutoUpdate);
   if (termAutoUpdate) startTermAutoUpdate();
   else stopTermAutoUpdate();
@@ -940,7 +1180,7 @@ function termAutoToggle(){
 function termShowScrollback(){
   termMode = termMode === 'scrollback' ? 'screen' : 'scrollback';
   const el = document.getElementById('term_scrollback');
-  el.textContent = termMode === 'scrollback' ? 'Live-Screen' : 'Scrollback';
+  el.textContent = t(termMode === 'scrollback' ? 'term.live' : 'term.scrollback');
   el.classList.toggle('active', termMode === 'scrollback');
   loadScreen();
 }
@@ -969,9 +1209,9 @@ async function loadScreen(){
     const data = await api(url);
     if (data.lines && data.lines.length > 0) {
       el.innerHTML = data.lines.map(l => esc(l)).join('\n');
-      statusEl.textContent = data.lines.length + ' Zeilen';
+      statusEl.textContent = data.lines.length + t('term.lines');
     } else {
-      el.innerHTML = '<span class="muted">kein Terminal-Inhalt verfügbar</span>';
+      el.innerHTML = '<span class="muted">'+t('term.nocontent')+'</span>';
       statusEl.textContent = '';
     }
     // Load dimensions
@@ -982,7 +1222,7 @@ async function loadScreen(){
       }
     } catch(e) { /* ignore */ }
   } catch(e) {
-    el.innerHTML = '<span class="muted">Fehler: ' + esc(e.message) + '</span>';
+    el.innerHTML = '<span class="muted">'+t('err.prefix') + esc(e.message) + '</span>';
     statusEl.textContent = '';
   }
 }
@@ -993,7 +1233,7 @@ async function loadTasks(){
     const [rows, board] = await Promise.all([api('/api/tasks'), api('/api/board')]);
     taskState.rows = rows; taskState.board = board;
     renderTasks();
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 // Client-side filter/sort state for the task board. Filters are re-applied on
@@ -1019,9 +1259,9 @@ function taskToggleDir(){
 async function taskReindex(){
   try {
     await api('/api/dashboard/reindex', {method:'POST'});
-    toast('Dashboard reindexiert');
+    toast(t('reindex.done'));
     loadTasks();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 // taskPrefix extracts the category (path prefix) from a topic slug, e.g.
@@ -1034,7 +1274,7 @@ const taskStatusRank = {'':0,'open':1,'assigned':2,'in-progress':3,'parked':4,'d
 function renderTasks(){
   const el = document.getElementById('tasklist');
   const rows = taskState.rows;
-  if (!rows.length){ el.innerHTML = '<div class="empty">keine Tasks</div>'; return; }
+  if (!rows.length){ el.innerHTML = '<div class="empty">'+t('empty.tasks')+'</div>'; return; }
   // Live "in Bearbeitung" marker: ships in state working report their
   // current task via the heartbeat (task/progress status fields).
   const workers = {};
@@ -1045,16 +1285,16 @@ function renderTasks(){
   const shipSel = document.getElementById('tf_ship');
   const allShips = [...new Set(rows.map(r=>r.assigned_to||'').filter(Boolean).concat(ships))].sort();
   if (!allShips.includes(taskState.ship)) taskState.ship = '';
-  shipSel.innerHTML = '<option value="">Schiff: alle</option>' + allShips.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  shipSel.innerHTML = '<option value="">'+t('tf_ship.all')+'</option>' + allShips.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
   shipSel.value = taskState.ship;
   const catSel = document.getElementById('tf_cat');
   const cats = [...new Set(rows.map(r=>taskPrefix(r.slug)))].sort();
   if (!cats.includes(taskState.cat)) taskState.cat = '';
-  catSel.innerHTML = '<option value="">Kategorie: alle (inkl. toplevel)</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  catSel.innerHTML = '<option value="">'+t('tf_cat.all')+'</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   catSel.value = taskState.cat;
   // Populate create-form category dropdown (same categories, with toplevel option).
   const createCatSel = document.getElementById('t_cat');
-  createCatSel.innerHTML = '<option value="">Task-Kategorie: (toplevel / unkategorisiert)</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  createCatSel.innerHTML = '<option value="">'+t('t_cat.ph')+'</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   // Apply filters.
   let filtered = rows;
   if (taskState.status) filtered = filtered.filter(r=>r.status===taskState.status);
@@ -1074,25 +1314,25 @@ function renderTasks(){
     }
     return dir*c;
   });
-  if (!filtered.length){ el.innerHTML = '<div class="empty">keine Tasks (Filter)</div>'; return; }
+  if (!filtered.length){ el.innerHTML = '<div class="empty">'+t('empty.tasksfilter')+'</div>'; return; }
   el.innerHTML = filtered.map(r=>{
     const cls = (r.status==='done')?'ok':(r.status==='assigned')?'warn':'dim';
     const worker = workers[r.slug];
-    const assignOpts = '<option value="__auto__">auto — Flagschiff (delegiert)</option>' +
+    const assignOpts = '<option value="__auto__">'+t('task.assign.auto')+'</option>' +
       ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
     return `<div class="card">
       <div class="row"><b class="grow"><span class="task-title-link" onclick="taskDetail('${esc(r.slug)}')">${esc(r.title)}</span></b>
         <span class="pill ${cls}">${esc(r.status)}</span></div>
-      <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)} bearbeitet gerade`:''}</div>
+      <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)}${t('task.worker')}`:''}</div>
       <div class="actions">
         <select id="st_${esc(r.slug)}" style="width:auto">
           ${['open','assigned','in-progress','done','parked'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}
         </select>
-        <button class="sec" onclick="taskStatus('${esc(r.slug)}')">Status</button>
+        <button class="sec" onclick="taskStatus('${esc(r.slug)}')">${t('task.status.btn')}</button>
         <select id="as_${esc(r.slug)}" style="width:auto">${assignOpts}</select>
-        <button class="sec" onclick="taskAssign('${esc(r.slug)}')">Zuweisen</button>
-        <button class="sec" onclick="taskUnassign('${esc(r.slug)}')">Frei</button>
-        <button class="sec" onclick="taskDetail('${esc(r.slug)}')">Detail</button>
+        <button class="sec" onclick="taskAssign('${esc(r.slug)}')">${t('task.assign.btn')}</button>
+        <button class="sec" onclick="taskUnassign('${esc(r.slug)}')">${t('task.unassign.btn')}</button>
+        <button class="sec" onclick="taskDetail('${esc(r.slug)}')">${t('task.detail.btn')}</button>
       </div>
     </div>`;
   }).join('');
@@ -1100,7 +1340,7 @@ function renderTasks(){
 
 async function taskNew(){
   const title = document.getElementById('t_title').value.trim();
-  if (!title){ toast('Titel fehlt', true); return; }
+  if (!title){ toast(t('task.titlemissing'), true); return; }
   const desc = document.getElementById('t_desc').value.trim();
   const assignSel = document.getElementById('t_assign').value;
   let assign = '';
@@ -1112,20 +1352,20 @@ async function taskNew(){
   try {
     await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({title, desc, assign, status, category: cat})});
-    toast(assign==='__auto__' ? 'Task erfasst — an Flagschiff zur Delegation' : 'Task erfasst'); document.getElementById('t_title').value=''; document.getElementById('t_desc').value='';
+    toast(assign==='__auto__' ? t('task.captured.auto') : t('task.captured')); document.getElementById('t_title').value=''; document.getElementById('t_desc').value='';
     loadTasks();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 async function taskStatus(slug){
   const st = document.getElementById('st_'+slug).value;
   try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({slug, status:st})}); toast('Status → '+st); loadTasks(); }
-  catch(e){ toast('Fehler: '+esc(e.message), true); }
+    body: JSON.stringify({slug, status:st})}); toast(t('task.status')+st); loadTasks(); }
+  catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 async function taskUnassign(slug){
   try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({slug, unassign:true})}); toast('frei'); loadTasks(); }
-  catch(e){ toast('Fehler: '+esc(e.message), true); }
+    body: JSON.stringify({slug, unassign:true})}); toast(t('task.free')); loadTasks(); }
+  catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 // --- Task full-text detail: view (GET /api/topic/<slug>) + edit (POST) ---
 let taskDetailSlug = null;
@@ -1149,7 +1389,7 @@ async function taskDetail(slug){
     // Category select: distinct real categories (slug prefixes) + toplevel.
     const cats = [...new Set(taskState.rows.map(r=>{const i=r.slug.indexOf('/'); return i<0?'':r.slug.slice(0,i)}))].filter(c=>c!=='').sort();
     const catSel = document.getElementById('task_m_cat');
-    catSel.innerHTML = '<option value="">Kategorie: (toplevel)</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    catSel.innerHTML = '<option value="">'+i18nT('task.cat.none')+'</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     catSel.value = taskDetailCat;
     // Status select: known statuses + the task's current one if unknown.
     const statuses = ['open','assigned','in-progress','parked','done'];
@@ -1161,11 +1401,11 @@ async function taskDetail(slug){
     const cur = (t.assigned_to && t.assigned_to!=='—' && t.assigned_to!=='__auto__') ? t.assigned_to : '';
     if (cur && !ships.includes(cur)) ships = [...ships, cur].sort();
     const aSel = document.getElementById('task_m_assign');
-    aSel.innerHTML = '<option value="__none__">(keine Zuweisung)</option>' + ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    aSel.innerHTML = '<option value="__none__">'+i18nT('task.assign.none')+'</option>' + ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
     aSel.value = cur || '__none__';
     showTaskBody();
     document.getElementById('task_modal').style.display = 'flex';
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(i18nT('err.prefix')+esc(e.message), true); }
 }
 function closeTaskModal(){
   document.getElementById('task_modal').style.display = 'none';
@@ -1176,7 +1416,7 @@ function closeTaskModal(){
 function showTaskBody(){
   document.getElementById('task_m_edit').style.display = 'none';
   const el = document.getElementById('task_m_body');
-  el.innerHTML = '<div class="md-body">'+mdHtml(document.getElementById('task_m_text').value || '(leer)')+'</div>';
+  el.innerHTML = '<div class="md-body">'+mdHtml(document.getElementById('task_m_text').value || t('task.emptybody'))+'</div>';
   el.style.display = '';
 }
 function taskDetailEdit(){
@@ -1194,10 +1434,10 @@ async function taskDetailSave(){
   try {
     const res = await api('/api/topic/' + encodeURIComponent(taskDetailSlug), {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({title, body, category, status, assigned_to})});
-    toast(category && category!==taskDetailCat ? 'Task verschoben → '+category : 'Task aktualisiert');
+    toast(category && category!==taskDetailCat ? t('task.moved')+category : t('task.updated'));
     closeTaskModal();
     loadTasks();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 // taskAssign kicks off (or reassigns) an existing task: "__auto__" routes to
 // the flagship (which delegates or executes it), any other value names the
@@ -1206,8 +1446,8 @@ async function taskAssign(slug){
   const ship = document.getElementById('as_'+slug).value;
   try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({slug, ship})});
-    toast(ship==='__auto__' ? 'an Flagschiff zur Delegation' : 'zugewiesen → '+ship); loadTasks(); }
-  catch(e){ toast('Fehler: '+esc(e.message), true); }
+    toast(ship==='__auto__' ? t('task.assigned.auto') : t('task.assigned')+ship); loadTasks(); }
+  catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 // loadModels fetches available models from /api/models and populates the
@@ -1225,7 +1465,7 @@ async function loadModels(){
       groups[p].push(m);
     }
     // Build options
-    sel.innerHTML = '<option value="">Modell wählen...</option>';
+    sel.innerHTML = '<option value="" data-i18n="ns_model.ph">'+t('ns_model.ph')+'</option>';
     for (const [provider, list] of Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0]))) {
       const og = document.createElement('optgroup');
       og.label = provider;
@@ -1262,18 +1502,18 @@ async function shipLaunch(){
   try {
     const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(body)});
-    toast('Schiff gestartet: '+(r.ship_id||name||'?'));
+    toast(t('ship.launched')+(r.ship_id||name||'?'));
     document.getElementById('ns_name').value=''; document.getElementById('ns_model').selectedIndex=0;
     document.getElementById('ns_parent').value=''; document.getElementById('ns_provider').value='';
     refresh();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 let threadMode = false;
 function toggleThread(){
   threadMode = !threadMode;
   const b = document.getElementById('btn_thread');
-  b.textContent = threadMode ? '💬 Threads: an' : '💬 Threads: aus';
+  b.textContent = threadMode ? t('threads.on') : t('threads.off');
   b.classList.toggle('sec', !threadMode);
   loadBus(document.querySelector('#bus .tab.on')?.dataset.b || 'msgs');
 }
@@ -1286,7 +1526,7 @@ function msgCard(r, indented){
       <span class="muted">${age(r.age_seconds)}</span></div>
     <div style="margin-top:6px">${q}</div>
     <div class="row" style="margin-top:4px">
-      ${r.from?`<span class="muted">von ${esc(r.from)}</span>`:''}
+      ${r.from?`<span class="muted">${t('bus.from')}${esc(r.from)}</span>`:''}
       ${r.reply_to?`<a class="pill dim" href="#" onclick="jumpToMsg('${esc(r.reply_to)}');return false">↩ ${esc(r.reply_to)}</a>`:''}
     </div>
   </div>`;
@@ -1303,7 +1543,7 @@ function jumpToMsg(id){
       return;
     }
   }
-  toast('Nachricht '+id+' nicht in dieser Ansicht');
+  toast(t('bus.notinview').replace('{id}', id));
 }
 async function loadBus(kind){
   const el = document.getElementById('busbody');
@@ -1312,7 +1552,7 @@ async function loadBus(kind){
     if (kind==='inbox') rows = await api('/api/inbox');
     else if (kind==='asks') rows = await api('/api/asks');
     else rows = await api('/api/msgs');
-    if (!rows.length){ el.innerHTML = '<div class="empty">leer</div>'; return; }
+    if (!rows.length){ el.innerHTML = '<div class="empty">'+t('bus.empty')+'</div>'; return; }
     if (threadMode && kind!=='asks'){
       // Build threads: messages with reply_to hang under their parent.
       const byID = {};
@@ -1331,18 +1571,18 @@ async function loadBus(kind){
         (children[node.id]||[]).forEach(ch=>walk(ch, depth+1));
       };
       roots.forEach(r=>walk(r, 0));
-      el.innerHTML = out.join('') || '<div class="empty">keine Threads</div>';
+      el.innerHTML = out.join('') || '<div class="empty">'+t('bus.nothreads')+'</div>';
       return;
     }
     el.innerHTML = rows.map(r=>msgCard(r, false)).join('');
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 async function loadTargets(){
   const sel = document.getElementById('talk_target');
   try {
     const rows = await api('/api/board');
-    const opts = ['<option value="all">📡 ganze Flotte (all)</option>']
+    const opts = ['<option value="all">'+t('talk.all')+'</option>']
       .concat(rows.filter(r=>!r.stale).map(r=>`<option value="${esc(r.agent)}">${esc(r.agent)}</option>`));
     if (sel.innerHTML !== opts.join('')) sel.innerHTML = opts.join('');
   } catch(e){}
@@ -1358,7 +1598,7 @@ async function loadTalk(){
   const target = document.getElementById('talk_target')?.value || 'all';
   try {
     const msgs = await api('/api/msgs?ship='+encodeURIComponent(target));
-    if (!msgs.length){ el.innerHTML = '<div class="empty">noch keine Nachrichten</div>'; return; }
+    if (!msgs.length){ el.innerHTML = '<div class="empty">'+t('bus.nomsgs')+'</div>'; return; }
     const byID = {}, roots = [], children = {};
     msgs.forEach(m=>{ byID[m.id]=m; });
     msgs.forEach(m=>{
@@ -1381,30 +1621,30 @@ async function loadTalk(){
       (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
     };
     roots.forEach(r=>walk(r, 0));
-    el.innerHTML = out.reverse().join('') || '<div class="empty">keine Nachrichten</div>';
+    el.innerHTML = out.reverse().join('') || '<div class="empty">'+t('bus.nomsgs')+'</div>';
     el.scrollTop = 0;
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 async function sendTell(){
   const target = document.getElementById('talk_target').value;
   const text = document.getElementById('talk_text').value.trim();
-  if (!text){ toast('Text fehlt', true); return; }
+  if (!text){ toast(t('ship.notext'), true); return; }
   try {
     const r = await api('/api/tell', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({target, text})});
-    toast('gesendet → '+(r.target||target)+' ('+r.id+')');
+    toast(t('ship.sent')+(r.target||target)+' ('+r.id+')');
     document.getElementById('talk_text').value='';
     await loadTalk();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 async function loadEvents(){
   const el = document.getElementById('events');
   try {
     const rows = await api('/api/events?n=50');
-    if (!rows.length){ el.innerHTML = '<div class="empty">kein Log</div>'; return; }
+    if (!rows.length){ el.innerHTML = '<div class="empty">'+t('bus.nolog')+'</div>'; return; }
     el.innerHTML = rows.map(l=>`<div class="ev">${esc(l)}</div>`).join('');
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 // --- Timer tab ---
@@ -1422,7 +1662,7 @@ function timerTargetUpdate(){
   const isSystem = tgt === 'system';
   document.getElementById('tf_cmd_row').style.display = isSystem ? '' : 'none';
   document.getElementById('tf_msg').style.display = isSystem ? 'none' : '';
-  document.getElementById('tf_msg').placeholder = isSystem ? '' : 'Nachricht…';
+  document.getElementById('tf_msg').placeholder = isSystem ? '' : t('tf_msg.ph');
 }
 
 async function loadTimers(){
@@ -1430,14 +1670,14 @@ async function loadTimers(){
     // Worker status
     const ws = await api('/api/timer/worker');
     timerWorkerRunning = ws.running;
-    document.getElementById('tw_status').textContent = ws.running ? 'läuft (pid '+ws.pid+')' : 'gestoppt';
-    document.getElementById('tw_btn').textContent = ws.running ? 'Stop' : 'Start';
+    document.getElementById('tw_status').textContent = ws.running ? t('timers.status.running').replace('{pid}', ws.pid) : t('timers.status.stopped');
+    document.getElementById('tw_btn').textContent = ws.running ? t('timers.worker.stop') : t('timers.worker.start');
     document.getElementById('tw_btn').className = ws.running ? '' : 'sec';
 
     // Timer list
     const rows = await api('/api/timers?all=1');
     const el = document.getElementById('timerlist');
-    if (!rows.length){ el.innerHTML = '<div class="empty">keine Timer</div>'; return; }
+    if (!rows.length){ el.innerHTML = '<div class="empty">'+t('timers.none')+'</div>'; return; }
     el.innerHTML = rows.map(t=>{
       const cls = t.enabled ? 'ok' : 'dim';
       const kind = t.schedule.type;
@@ -1453,14 +1693,14 @@ async function loadTimers(){
       return `<div class="card">
         <div class="row"><span class="agent grow">${esc(t.id)}</span>
           <span class="pill dim">${esc(kind)}</span>
-          <span class="pill ${cls}">${t.enabled?'aktiv':'pausiert'}</span></div>
+          <span class="pill ${cls}">${t.enabled?i18nT('timer.active'):i18nT('timer.paused')}</span></div>
         <div class="muted" style="margin-top:4px">${esc(nf)} · ${esc(tgt)} · ${esc(t.persistent?'persistent':'ephemeral')}</div>
         ${desc?`<div style="margin-top:4px">${esc(desc)}</div>`:''}
         <div class="actions">
           ${t.enabled
             ?`<button class="sec" onclick="timerPause('${esc(t.id)}')">Pause</button>`
             :`<button class="sec" onclick="timerResume('${esc(t.id)}')">Resume</button>`}
-          <button class="sec" onclick="timerCancel('${esc(t.id)}')">Löschen</button>
+          <button class="sec" onclick="timerCancel('${esc(t.id)}')">${i18nT('timer.delete')}</button>
         </div>
       </div>`;
     }).join('');
@@ -1474,11 +1714,11 @@ async function timerCreate(){
   const body = {schedule_type:type, target_type:target};
   if (isSystem) {
     const cmdStr = document.getElementById('tf_cmd').value.trim();
-    if (!cmdStr){ toast('Command fehlt', true); return; }
+    if (!cmdStr){ toast(t('timers.cmdmissing'), true); return; }
     body.cmd = cmdStr.split(/\s+/);
   } else {
     const msg = document.getElementById('tf_msg').value.trim();
-    if (!msg){ toast('Nachricht fehlt', true); return; }
+    if (!msg){ toast(t('timers.msgmissing'), true); return; }
     body.text = msg;
   }
   if (type==='once') body.at = document.getElementById('tf_at').value.trim();
@@ -1487,34 +1727,34 @@ async function timerCreate(){
   try {
     const r = await api('/api/timer', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(body)});
-    toast('Timer '+r.id+' erstellt');
+    toast(t('timers.created').replace('{id}', r.id));
     if (!isSystem) document.getElementById('tf_msg').value='';
     loadTimers();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 async function timerPause(id){
   try {
     await api('/api/timer/'+id+'/pause', {method:'POST'});
-    toast(id+' pausiert');
+    toast(id+t('timer.paused.suffix'));
     loadTimers();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 async function timerResume(id){
   try {
     await api('/api/timer/'+id+'/resume', {method:'POST'});
-    toast(id+' fortgesetzt');
+    toast(id+t('timer.resumed.suffix'));
     loadTimers();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 async function timerCancel(id){
   try {
     await api('/api/timer/'+id, {method:'DELETE'});
-    toast(id+' gelöscht');
+    toast(id+t('timer.deleted.suffix'));
     loadTimers();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 async function timerWorkerToggle(){
@@ -1522,9 +1762,9 @@ async function timerWorkerToggle(){
   try {
     await api('/api/timer/worker', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({action})});
-    toast('Worker '+(action==='start'?'gestartet':'gestoppt'));
+    toast('Worker '+(action==='start'?t('timers.workerstarted'):t('timers.workerstoppt')));
     loadTimers();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 // --- minimal Markdown to HTML ---
@@ -1577,25 +1817,25 @@ const repAttachments = [];
 
 async function reportUploadFile(){
   const input = document.getElementById('rep_file_input');
-  if (!input.files?.length){ toast('Datei wählen', true); return; }
+  if (!input.files?.length){ toast(t('rep.file'), true); return; }
   const file = input.files[0];
   const form = new FormData();
   form.append('file', file);
   try {
     const res = await fetch('/api/store/'+encodeURIComponent(file.name), {method:'POST', body:form});
     const j = await res.json();
-    if (!j.ok){ toast('Upload fehlgeschlagen', true); return; }
+    if (!j.ok){ toast(t('rep.uploadfailed'), true); return; }
     repAttachments.push(file.name);
     renderRepAttachments();
-    toast(file.name+' angehängt');
+    toast(file.name+t('rep.attached.suffix'));
     input.value = '';
-  } catch(e){ toast('Upload Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('rep.uploaderr')+esc(e.message), true); }
 }
 
 function renderRepAttachments(){
   const el = document.getElementById('rep_attachments');
   if (!repAttachments.length){ el.innerHTML = ''; return; }
-  el.innerHTML = 'Anhänge: '+repAttachments.map(n =>
+  el.innerHTML = t('rep.attach.label')+repAttachments.map(n =>
     `<a href="/api/store/${encodeURIComponent(n)}" target="_blank" class="rep-attach">${esc(n)}</a>`
   ).join('');
 }
@@ -1630,9 +1870,9 @@ async function loadSessions(){
   try {
     const data = await api('/api/sessions?'+params.join('&'));
     const rows = data.sessions || [];
-    if (!rows.length){ el.innerHTML = '<div class="empty">keine Sessions</div>'; return; }
+    if (!rows.length){ el.innerHTML = '<div class="empty">'+t('sess.none')+'</div>'; return; }
     el.innerHTML = rows.map(s=>{
-      const run = s.running ? ' <span class="pill warn">▶ läuft</span>' : '';
+      const run = s.running ? ' <span class="pill warn">'+t('sess.running')+'</span>' : '';
       const model = s.model ? ' · <span class="muted">'+esc(s.model)+'</span>' : '';
       const toks = (s.tokens_input+s.tokens_output+s.tokens_reasoning) ? ' · '+fmtTokens(s.tokens_input+s.tokens_output+s.tokens_reasoning)+' Tokens' : '';
       const cost = s.cost>0 ? ' · '+s.cost.toFixed(3)+' €' : '';
@@ -1643,7 +1883,7 @@ async function loadSessions(){
         <div class="muted" style="margin-top:2px;font-size:11px">${esc(s.id)}${toks}${cost}</div>
       </div>`;
     }).join('');
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 function openSess(id){
@@ -1663,7 +1903,7 @@ async function loadSessTranscript(){
     const t = await api('/api/sessions/'+encodeURIComponent(sessCurrentId)+'?limit='+win);
     document.getElementById('sess_m_title').textContent = t.session.title || t.session.id;
     const stEl = document.getElementById('sess_m_state');
-    stEl.textContent = t.session.running ? '▶ läuft' : 'beendet';
+    stEl.textContent = t.session.running ? i18nT('sess.running') : i18nT('sess.ended');
     stEl.className = 'pill ' + (t.session.running ? 'warn' : 'dim');
     const model = t.session.model ? ' · '+t.session.model : '';
     const toks = (t.session.tokens_input+t.session.tokens_output+t.session.tokens_reasoning) ? ' · '+fmtTokens(t.session.tokens_input+t.session.tokens_output+t.session.tokens_reasoning)+' Tokens' : '';
@@ -1672,17 +1912,17 @@ async function loadSessTranscript(){
       (t.session.mode||'') + model + ' · ' + fmtDT(t.session.created) + ' → ' + fmtDT(t.session.updated) +
       toks + cost + ' · ' + t.session.id;
     const out = (t.messages||[]).map(m=>{
-      const who = m.role==='user' ? 'User' : 'Assistent';
+      const who = m.role==='user' ? 'User' : i18nT('sess.assistant');
       const meta = (m.model_id?esc(m.model_id)+' ':'') + (m.tokens_total?'· '+fmtTokens(m.tokens_total)+' Tokens ':'') + fmtDT(m.time);
       const parts = (m.parts||[]).map(p=>{
         if (p.type==='reasoning') return `<details class="sess-part"><summary>🧠 Reasoning</summary><pre>${esc(p.text||'')}</pre></details>`;
-        if (p.type==='tool') return `<details class="sess-part tool"><summary>🔧 ${esc(p.tool||'tool')}${p.truncated?' <span class="muted">(gekürzt)</span>':''}</summary><pre>${esc(p.input||'')}${p.output?'\n────────\n':''}${esc(p.output||'')}</pre></details>`;
-        return `<div class="sess-part"><pre>${esc(p.text||'')}${p.truncated?'<span class="muted"> … (gekürzt)</span>':''}</pre></div>`;
+        if (p.type==='tool') return `<details class="sess-part tool"><summary>🔧 ${esc(p.tool||'tool')}${p.truncated?' <span class="muted">'+i18nT('sess.truncated')+'</span>':''}</summary><pre>${esc(p.input||'')}${p.output?'\n────────\n':''}${esc(p.output||'')}</pre></details>`;
+        return `<div class="sess-part"><pre>${esc(p.text||'')}${p.truncated?'<span class="muted"> … '+i18nT('sess.truncated')+'</span>':''}</pre></div>`;
       }).join('');
       return `<div class="sess-msg ${m.role}"><div class="meta"><b>${who}</b> · ${meta}</div>${parts}</div>`;
-    }).join('') || '<div class="empty">keine Nachrichten</div>';
+      }).join('') || '<div class="empty">'+i18nT('chat.empty')+'</div>';
     document.getElementById('sess_m_body').innerHTML = out;
-  } catch(e){ document.getElementById('sess_m_body').innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ document.getElementById('sess_m_body').innerHTML = '<div class="empty">'+i18nT('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 async function loadOCLog(){
@@ -1691,9 +1931,9 @@ async function loadOCLog(){
   try {
     const data = await api('/api/oclog?n='+n);
     const lines = data.lines || [];
-    el.innerHTML = lines.map(l=>esc(l)).join('\n') || '(leer)';
+    el.innerHTML = lines.map(l=>esc(l)).join('\n') || '('+t('bus.empty')+')';
     el.scrollTop = el.scrollHeight;
-  } catch(e){ el.innerHTML = 'Fehler: '+esc(e.message); }
+  } catch(e){ el.innerHTML = t('err.prefix')+esc(e.message); }
 }
 
 async function loadShipHist(name){
@@ -1702,9 +1942,9 @@ async function loadShipHist(name){
   try {
     const data = await api('/api/sessions?title='+encodeURIComponent(name)+'&limit=100');
     const rows = data.sessions || [];
-    if (!rows.length){ el.innerHTML = '<div class="empty">keine opencode-Sessions für '+esc(name)+'</div>'; return; }
+    if (!rows.length){ el.innerHTML = '<div class="empty">'+t('sess.nonefor')+esc(name)+'</div>'; return; }
     el.innerHTML = rows.map(s=>{
-      const run = s.running ? ' <span class="pill warn">▶ läuft</span>' : '';
+      const run = s.running ? ' <span class="pill warn">'+t('sess.running')+'</span>' : '';
       return `<div class="card" onclick="openSess('${esc(s.id)}')" style="cursor:pointer">
         <div class="row"><span class="agent grow">${esc(s.title)}${run}</span>
           <span class="pill dim">${esc(s.mode)}</span>
@@ -1712,7 +1952,7 @@ async function loadShipHist(name){
         <div class="muted" style="margin-top:2px;font-size:11px">${esc(s.id)} · ${esc(s.model||'')}</div>
       </div>`;
     }).join('');
-  } catch(e){ el.innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 async function loadReports(){
@@ -1726,7 +1966,7 @@ async function loadReports(){
     if (params.length) url += '?'+params.join('&');
     const rows = await api(url);
     const el = document.getElementById('reports_list');
-    if (!rows.length){ el.innerHTML = '<div class="empty">keine Berichte</div>'; return; }
+    if (!rows.length){ el.innerHTML = '<div class="empty">'+t('rep.none')+'</div>'; return; }
     el.innerHTML = rows.map(r=>{
       const tags = r.tags?.length ? ' <span class="muted">['+esc(r.tags.join(', '))+']</span>' : '';
       const sub = r.subtitle ? '<div class="muted" style="font-size:13px;margin-top:2px">'+esc(r.subtitle)+'</div>' : '';
@@ -1740,7 +1980,7 @@ async function loadReports(){
         <div class="muted" style="margin-top:2px;font-size:11px">${esc(r.id)}${tags}</div>
       </div>`;
     }).join('');
-  } catch(e){ document.getElementById('reports_list').innerHTML = '<div class="empty">Fehler: '+esc(e.message)+'</div>'; }
+  } catch(e){ document.getElementById('reports_list').innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
 }
 
 async function openRepModal(id){
@@ -1749,26 +1989,26 @@ async function openRepModal(id){
     document.getElementById('rep_m_title').textContent = r.title || '—';
     document.getElementById('rep_m_subtitle').textContent = r.subtitle || '';
     const ago = /* relative time */
-      (()=>{ const d=Date.now()/1000-r.created; if(d<60)return 'gerade'; if(d<3600)return 'vor '+Math.floor(d/60)+'m'; if(d<86400)return 'vor '+Math.floor(d/3600)+'h'; return 'vor '+Math.floor(d/86400)+'t'; })();
+      (()=>{ const d=Date.now()/1000-r.created; if(d<60)return t('rel.justnow'); if(d<3600)return t('rel.before')+Math.floor(d/60)+'m'; if(d<86400)return t('rel.before')+Math.floor(d/3600)+'h'; return t('rel.before')+Math.floor(d/86400)+'t'; })();
     document.getElementById('rep_m_meta').textContent = r.ship+' • '+ago+(r.tags?.length ? ' • ['+r.tags.join(', ')+']' : '');
     document.getElementById('rep_m_body').innerHTML = '<div class="md-body">'+mdHtml(r.body)+'</div>';
 
     // task reference
     const taskEl = document.getElementById('rep_m_taskref');
     if (r.task_ref){
-      taskEl.innerHTML = '🔗 Task: <a href="#" onclick="showTaskFromReport(\''+esc(r.task_ref)+'\');closeRepModal()" style="color:var(--accent)">'+esc(r.task_ref)+'</a>';
+      taskEl.innerHTML = t('rep.task.label')+'<a href="#" onclick="showTaskFromReport(\''+esc(r.task_ref)+'\');closeRepModal()" style="color:var(--accent)">'+esc(r.task_ref)+'</a>';
     } else { taskEl.innerHTML = ''; }
 
     // attachments
     const attEl = document.getElementById('rep_m_attachments');
     if (r.attachments?.length){
-      attEl.innerHTML = '📎 Anhänge: '+r.attachments.map(n =>
+      attEl.innerHTML = t('rep.attachments.label')+r.attachments.map(n =>
         '<a href="/api/store/'+encodeURIComponent(n)+'" target="_blank" class="rep-attach">'+esc(n)+'</a>'
       ).join('');
     } else { attEl.innerHTML = ''; }
 
     document.getElementById('rep_modal').style.display = 'flex';
-  } catch(e){ toast('Fehler beim Laden: '+esc(e.message), true); }
+  } catch(e){ toast(t('rep.loaderror')+esc(e.message), true); }
 }
 
 function closeRepModal(){
@@ -1786,7 +2026,7 @@ function showTaskFromReport(slug){
 
 async function reportSubmit(){
   const title = document.getElementById('rep_title').value.trim();
-  if (!title){ toast('Titel erforderlich', true); return; }
+  if (!title){ toast(t('rep.titlemissing'), true); return; }
   const subtitle = document.getElementById('rep_subtitle').value.trim();
   const body = document.getElementById('rep_body').value.trim();
   const tagsStr = document.getElementById('rep_tags').value.trim();
@@ -1796,7 +2036,7 @@ async function reportSubmit(){
   try {
     await api('/api/reports', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({title, subtitle, body, tags, task_ref, attachments})});
-    toast('Bericht eingereicht');
+    toast(t('rep.submitted'));
     document.getElementById('rep_title').value = '';
     document.getElementById('rep_subtitle').value = '';
     document.getElementById('rep_body').value = '';
@@ -1805,24 +2045,25 @@ async function reportSubmit(){
     repAttachments.length = 0;
     renderRepAttachments();
     loadReports();
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 async function webRestart(){
   try {
-    document.getElementById('ws_info').textContent = 'Neustart…';
+    document.getElementById('ws_info').textContent = t('web.restarting.short');
     await api('/api/web/restart', {method:'POST'});
-    toast('Web-Server wird neu gestartet…');
+    toast(t('web.restarting'));
     // The server will die and restart — poll until it's back.
     let tries = 0;
     const poll = setInterval(async () => {
       tries++;
       try { await api('/api/identity'); clearInterval(poll); location.reload(); }
-      catch(e) { if (tries > 20) { clearInterval(poll); toast('Neustart fehlgeschlagen', true); } }
+      catch(e) { if (tries > 20) { clearInterval(poll); toast(t('web.restartfail'), true); } }
     }, 500);
-  } catch(e){ toast('Fehler: '+esc(e.message), true); }
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
+applyI18n();
 loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
