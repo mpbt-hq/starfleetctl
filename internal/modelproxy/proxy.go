@@ -408,12 +408,11 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) (*Usage, boo
 				}
 				continue
 			} else if strings.HasPrefix(payload, "{") {
+				// Upstreams (notably NIM) repeat the usage block on several
+				// trailing chunks with a growing counter — the last one holds
+				// the final values, so last-wins instead of accumulating.
 				if u := extractStreamUsage([]byte(payload)); u != nil {
-					if usage == nil {
-						usage = &Usage{}
-					}
-					usage.PromptTokens += u.PromptTokens
-					usage.CompletionTokens += u.CompletionTokens
+					usage = u
 				}
 			}
 		}
