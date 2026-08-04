@@ -6,7 +6,13 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.0'
+const PLUGIN_VERSION = '2.5.1'
+
+// Plugin→opencode app-logging switch (writes into opencode.log via
+// client.app.log). The per-poll diagnostics (retry-status dumps, inbox
+// listings, log-monitor results) bloat opencode.log heavily during normal
+// operation, so they are off by default. Flip to true to debug the plugin.
+const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
 
@@ -144,6 +150,15 @@ export const plugin = async ({ client, $ }: any) => {
   const toastBus = (variant: string, title: string, message: string, duration = 5000): void => {
     toast(variant, title, message, duration)
     try { bus({ cmd: 'toast', variant, title, message, duration }) } catch { /* ignore */ }
+  }
+
+  // App-log writer (opencode.log): no-op unless APP_LOG_ENABLED is true.
+  // Central gate for all diagnostic logging so normal operation stays quiet.
+  const appLog = (level: string, message: string): void => {
+    if (!APP_LOG_ENABLED) return
+    try {
+      client.app.log({ body: { service: 'starfleet-dispatch', level, message } }).catch(() => {})
+    } catch { /* ignore */ }
   }
 
   // Parse and handle fleet messages by type.
@@ -412,7 +427,7 @@ export const plugin = async ({ client, $ }: any) => {
       }
       hasSwitched.v = true
       const msg = `ERROR-HANDLE ${src}: switching to ${targetModel} (was: ${detail})`
-      client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
+      appLog('warn', msg)
       tickLog(msg)
       toastBus('warning', 'starfleet-dispatch', msg, 8000)
       // Use .then() chain like the working 'model' command, not await
@@ -432,7 +447,7 @@ export const plugin = async ({ client, $ }: any) => {
         .then(() => tickLog(`ERROR-HANDLE ${src}: promptAsync sent`))
         .catch((e: any) => {
           const emsg = `ERROR-HANDLE ${src}: failed: ${String(e).slice(0, 120)}`
-          client.app.log({ body: { service: 'starfleet-dispatch', level: 'error', message: emsg } }).catch(() => {})
+          appLog('error', emsg)
           tickLog(emsg)
           hasSwitched.v = false
         })
@@ -454,17 +469,17 @@ export const plugin = async ({ client, $ }: any) => {
 
   const pollRetryStatus = async () => {
     tickLog(`retry-poll tick sid=${currentSessionID || '(empty)'}`)
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll tick: sid=${currentSessionID || '(empty)'} hasStatus=${typeof client?.session?.status}` } }).catch(() => {})
+    appLog('info', `retry-poll tick: sid=${currentSessionID || '(empty)'} hasStatus=${typeof client?.session?.status}`)
     if (!currentSessionID) return
     let status: any
     try {
       status = await client.session.status()
     } catch (e) {
-      client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `retry-poll status() threw: ${String(e).slice(0, 120)}` } }).catch(() => {})
+      appLog('warn', `retry-poll status() threw: ${String(e).slice(0, 120)}`)
       return
     }
     const body = status?.body ?? status
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `retry-poll raw: sid=${currentSessionID} keys=${body && typeof body === 'object' ? Object.keys(body).join(',') : typeof body} sample=${JSON.stringify(body).slice(0, 200)}` } }).catch(() => {})
+    appLog('info', `retry-poll raw: sid=${currentSessionID} keys=${body && typeof body === 'object' ? Object.keys(body).join(',') : typeof body} sample=${JSON.stringify(body).slice(0, 200)}`)
     if (!body || typeof body !== 'object') return
     const data: any = (body as any).data ?? body
     const st: any = data[currentSessionID] ?? Object.values(data)[0]
@@ -477,7 +492,7 @@ export const plugin = async ({ client, $ }: any) => {
     if (detail === lastRetryDetail && now < retryCooldownUntil) return
     lastRetryDetail = detail
     retryCooldownUntil = now + RETRY_COOLDOWN_MS
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `session retry status: ${detail}` } }).catch(() => {})
+    appLog('warn', `session retry status: ${detail}`)
     tickLog(`MODEL RETRY (quota/zen): ${detail}`)
     toastBus('warning', 'starfleet-dispatch', `model retry: ${detail}`, 6000)
 
@@ -504,7 +519,7 @@ export const plugin = async ({ client, $ }: any) => {
     const errDetail = checkLogForErrors()
     if (!errDetail) return
     const msg = `LOG ERROR detected: ${errDetail}`
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: msg } }).catch(() => {})
+    appLog('warn', msg)
     tickLog(`LOG-MONITOR: ${msg}`)
     toastBus('warning', 'starfleet-dispatch', msg, 8000)
 
@@ -515,7 +530,7 @@ export const plugin = async ({ client, $ }: any) => {
       session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
     })
     tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
-    client.app.log({ body: { service: 'starfleet-dispatch', level: 'warn', message: `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}` } }).catch(() => {})
+    appLog('warn', `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}`)
     if (r.ok && r.action) {
       if (r.action === 'retry') {
         logMonitorCooldownUntil = Date.now() + LOG_COOLDOWN_MS
@@ -532,7 +547,7 @@ export const plugin = async ({ client, $ }: any) => {
   setTimeout(() => {
     if (!tuiReady) {
       tuiReady = true
-      client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: 'active (fallback)' } }).catch(() => {})
+      appLog('info', 'active (fallback)')
       resolveSessionId().then(() => {
         if (currentModel.model) {
           bus({ cmd: 'health', ...currentModel })
@@ -575,7 +590,7 @@ export const plugin = async ({ client, $ }: any) => {
     const injectable: any[] = []
     for (const msg of msgs) {
       submitted.add(msg.id)
-      client.app.log({ body: { service: 'starfleet-dispatch', level: 'info', message: `inbox: [${msg.id}] from=${msg.from} type=${msg.type || 'ship'}: ${msg.text.slice(0, 80)}` } }).catch(() => {})
+      appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || 'ship'}: ${msg.text.slice(0, 80)}`)
       // handleMessage: type=command → execute, type=ship/user/control → false (inject)
       if (handleMessage(msg, client, currentSessionID)) continue
       injectable.push(msg)
