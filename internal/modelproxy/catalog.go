@@ -19,6 +19,7 @@ import (
 type catalogModel struct {
 	Label   string
 	Context int
+	Output  int
 	Caps    []string
 }
 
@@ -116,6 +117,7 @@ func parseOpencodeCatalog(output string) map[string]catalogModel {
 			} `json:"capabilities"`
 			Limit struct {
 				Context int `json:"context"`
+				Output  int `json:"output"`
 			} `json:"limit"`
 		}
 		if err := json.Unmarshal([]byte(raw), &d); err != nil {
@@ -159,7 +161,7 @@ func parseOpencodeCatalog(output string) map[string]catalogModel {
 		if d.Capabilities.Output.PDF {
 			caps = append(caps, "pdf-out")
 		}
-		byID[d.ID] = catalogModel{Label: d.Name, Context: d.Limit.Context, Caps: caps}
+		byID[d.ID] = catalogModel{Label: d.Name, Context: d.Limit.Context, Output: d.Limit.Output, Caps: caps}
 	}
 	return byID
 }

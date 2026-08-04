@@ -159,8 +159,8 @@ func modelEntryFor(inf ModelInfo) map[string]any {
 	if inf.Label != "" {
 		entry["name"] = inf.Label
 	}
-	if inf.Context > 0 {
-		entry["limit"] = map[string]any{"context": inf.Context}
+	if inf.Context > 0 && inf.Output > 0 {
+		entry["limit"] = map[string]any{"context": inf.Context, "output": inf.Output}
 	}
 	for _, c := range inf.Caps {
 		switch c {

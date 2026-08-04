@@ -27,6 +27,7 @@ type ModelInfo struct {
 	OwnedBy string   `json:"owned_by,omitempty"`
 	Label   string   `json:"label,omitempty"`
 	Context int      `json:"context,omitempty"`
+	Output  int      `json:"output,omitempty"`
 	Caps    []string `json:"caps,omitempty"`
 }
 
@@ -132,6 +133,9 @@ func (p *Proxy) providerModelInfo(prov Provider) []ModelInfo {
 			}
 			if info[i].Context == 0 {
 				info[i].Context = meta.Context
+			}
+			if info[i].Output == 0 {
+				info[i].Output = meta.Output
 			}
 			if len(info[i].Caps) == 0 {
 				info[i].Caps = meta.Caps
