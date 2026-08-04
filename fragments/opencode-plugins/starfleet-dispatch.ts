@@ -408,7 +408,7 @@ export const plugin = async ({ client, $ }: any) => {
       promise
         .then(() => client.session.promptAsync({
           path: { id: sessionID },
-          body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+          body: { parts: [{ type: 'text', text: `[synthetic restart after transient error] Transient API failure (${detail.slice(0,50)}). Session cleared/restarted. Please proceed.`, synthetic: true }] },
         }))
         .then(() => tickLog(`ERROR-HANDLE ${src}: promptAsync sent`))
         .catch((e: any) => tickLog(`ERROR-HANDLE ${src}: promptAsync failed: ${String(e).slice(0, 120)}`))
@@ -420,7 +420,7 @@ export const plugin = async ({ client, $ }: any) => {
         try {
           await client.session.promptAsync({
             path: { id: sessionID },
-            body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+            body: { parts: [{ type: 'text', text: `[synthetic restart] Model switch failed (${targetModel || 'unknown'}). Already switched / no target. Transient error: ${detail.slice(0,50)}. Please proceed.`, synthetic: true }] },
           })
         } catch { /* ignore */ }
         return
@@ -441,7 +441,7 @@ export const plugin = async ({ client, $ }: any) => {
           tickLog(`ERROR-HANDLE ${src}: update ok → ${targetModel}`)
           return client.session.promptAsync({
             path: { id: sessionID },
-            body: { parts: [{ type: 'text', text: 'Please continue.', synthetic: true }] },
+            body: { parts: [{ type: 'text', text: `[synthetic restart after switch-model] Switched to ${targetModel}. Transient error resolved: ${detail.slice(0,50)}. Please proceed.`, synthetic: true }] },
           })
         })
         .then(() => tickLog(`ERROR-HANDLE ${src}: promptAsync sent`))
