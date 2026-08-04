@@ -627,15 +627,14 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 		defaultRule = "ask"
 	}
 
-	// Use workspace root for permission paths (portable across machines)
-	workspacePattern := root + "/**"
-	localBinPattern := filepath.Join(os.Getenv("HOME"), ".local", "bin", "**")
+	// Use relative pattern "**" for workspace (tools pass paths relative to worktree).
+	// Absolute patterns like "/home/.../workspace/**" never match relative paths.
+	workspacePattern := "**"
 
 	permission := map[string]any{
 		"bash": bashRules,
 		"read": map[string]string{
 			workspacePattern: "allow",
-			localBinPattern:  "allow",
 			"**":             defaultRule,
 		},
 		"write": map[string]string{
@@ -668,9 +667,14 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	// launches (a human is present), and deny everything outside the
 	// workspace for background/auto ships so the tool call fails fast and
 	// the agent can recover (retry with a workspace-relative path).
+	// external_directory receives absolute glob patterns from the tool, so
+	// we use absolute patterns here (unlike read/write/edit which receive
+	// relative paths from the worktree).
+	absWorkspacePattern := root + "/**"
+	absLocalBinPattern := filepath.Join(os.Getenv("HOME"), ".local", "bin", "**")
 	externalDirRules := map[string]string{
-		workspacePattern: "allow",
-		localBinPattern:  "allow",
+		absWorkspacePattern: "allow",
+		absLocalBinPattern:  "allow",
 	}
 	if unrestricted {
 		externalDirRules["**"] = "allow"
