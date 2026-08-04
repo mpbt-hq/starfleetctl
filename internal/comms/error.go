@@ -52,6 +52,16 @@ func ClassifyModelError(detail string) string {
 	// Transient NIM/API errors: "AI_APICallError: ... |transient" or similar
 	// These are temporary failures needing restart, NOT permanent rate limits.
 	isTransient := strings.Contains(d, "transient") || strings.Contains(d, "ai_apicallerror")
+	// NIM overload: server-side 5xx or connection-level failures OR NIM 429 format
+	// NIM 429 errors look like: 'Too Many Requests: {"status":429,"title":"Too Many Requests"}'
+	// These are transient capacity issues, NOT zen rate limits.
+	if nimOverloadRe.MatchString(d) {
+		return "nim-overload"
+	}
+	// Also catch NIM 429 JSON format explicitly before ratelimitRe
+	if strings.Contains(d, `{"status":429`) || strings.Contains(d, `{"status": 429`) {
+		return "nim-overload"
+	}
 	// ResourceExhausted: worker capacity / token quota / context length
 	// Check BEFORE ratelimitRe — "ResourceExhausted: request limit reached"
 	// matches both regexes, but should be classified as resource-exhausted.
