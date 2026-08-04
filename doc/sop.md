@@ -190,7 +190,7 @@ frontmatter, wraps each body in `<!-- begin/end inlined fragment: <slug> -->`
 markers, sorts by `(order, slug)`, and writes:
 
 1. `.starfleet-ai/var/sop.d/index.md` — the canonical fragment index
-2. `CLAUDE.md` — same content with a CLAUDE.md header, for agents that
+2. `CLAUDE.md` — same content with a CLAUDE.md header, for ships that
    don't resolve `@-imports` (e.g. opencode)
 
 **Idempotent.** Two concurrent reindex operations converge to the same
@@ -220,7 +220,7 @@ They overlap in content (e.g. the starfleet skill covers comms topics also
 covered by fragments) but serve different loading models. Fragments are
 **always present**; skills are **on-demand**.
 
-## How Agents Receive Fragment Content
+## How Ships Receive Fragment Content
 
 ### Claude Code
 

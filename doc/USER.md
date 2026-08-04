@@ -126,7 +126,7 @@ starfleetctl pr-claim 3162 "fixing CI"
 starfleetctl pr-claim --release 3162
 ```
 
-Claims are **cooperative** — they don't block git at filesystem level, but all participating agents check claims before pushing.
+Claims are **cooperative** — they don't block git at filesystem level, but all participating ships check claims before pushing.
 
 ### Dashboard — Project Status Tracking
 

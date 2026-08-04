@@ -1,16 +1,16 @@
 # starfleetctl
 
-**One binary to coordinate AI-agent sessions working on the same codebase.**
+**One binary to coordinate ship sessions working on the same codebase.**
 
-starfleetctl manages concurrent agent sessions ("ships") — status heartbeats, cross-session directives, PR-branch locking, and GitHub PR access — so multiple agents can work in parallel without stepping on each other.
+starfleetctl manages concurrent ship sessions — status heartbeats, cross-session directives, PR-branch locking, and GitHub PR access — so multiple ships can work in parallel without stepping on each other.
 
 ## Why?
 
-When several AI agents share one repository, you need:
+When several ships share one repository, you need:
 
 - **A status board** — who's working on what, who's idle, who's blocked
-- **A message bus** — agents can send tasks and questions to each other
-- **PR locking** — prevent two agents from editing the same branch
+- **A message bus** — ships can send tasks and questions to each other
+- **PR locking** — prevent two ships from editing the same branch
 - **Safe commits** — concurrent sessions don't race the same working tree
 - **GitHub integration** — view, comment, and label PRs without `jq`/`sed`
 

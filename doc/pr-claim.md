@@ -15,9 +15,9 @@ starfleetctl pr-claim --who <pr#>
 
 ## How It Works
 
-Each agent works in its own clone, but pushes to the same GitHub PR branch. `pr-claim` is a cooperative registry — agents claim a PR before editing it, so others know to avoid it.
+Each ship works in its own clone, but pushes to the same GitHub PR branch. `pr-claim` is a cooperative registry — ships claim a PR before editing it, so others know to avoid it.
 
-Claims are **advisory only**: they don't block git operations at the filesystem level. They work because all participating agents check claims before starting work.
+Claims are **advisory only**: they don't block git operations at the filesystem level. They work because all participating ships check claims before starting work.
 
 ## Commands
 

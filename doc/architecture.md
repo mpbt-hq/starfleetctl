@@ -64,7 +64,7 @@ All mutations go through `flock(2)` on `.starfleet-ai/var/comms/.lock`. This ens
 
 ### PR Claims
 
-Each PR can be "claimed" by one agent at a time. Claims are advisory (cooperative) — they prevent two agents from pushing to the same branch, but don't block git operations at the filesystem level.
+Each PR can be "claimed" by one ship at a time. Claims are advisory (cooperative) — they prevent two ships from pushing to the same branch, but don't block git operations at the filesystem level.
 
 ## Data Flow
 
@@ -110,7 +110,7 @@ Enterprise                          Voyager
 ```
 1. pr-claim 3162 "fixing build"
 2. Creates .starfleet-ai/var/agent-claims/pr-3162.tsv
-3. Other agents see claim, avoid branch
+3. Other ships see claim, avoid branch
 4. pr-claim --release 3162
 5. Claim file removed
 ```
@@ -119,7 +119,7 @@ Enterprise                          Voyager
 
 The Go implementation reads and writes the exact same file formats as the original bash scripts (`scripts/comms`, `scripts/pr-claim`). A workspace can have:
 
-- Some agents using the Go binary
+- Some ships using the Go binary
 - Others using the bash scripts
 - Both operating on the same `.starfleet-ai/var/...` files
 

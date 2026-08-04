@@ -11,7 +11,7 @@ starfleetctl dashboard topic <command> [args...]
 
 ## How It Works
 
-The dashboard is a thin index (`.starfleet-ai/var/DASHBOARD.md`) that links to per-topic files under `.starfleet-ai/dashboard/topics/`. Each topic tracks one initiative or topic. The index is regenerated from topic file frontmatter — two agents racing a `reindex` converge to the same output.
+The dashboard is a thin index (`.starfleet-ai/var/DASHBOARD.md`) that links to per-topic files under `.starfleet-ai/dashboard/topics/`. Each topic tracks one initiative or topic. The index is regenerated from topic file frontmatter — two ships racing a `reindex` converge to the same output.
 
 ## ⚠️ Common Mistake
 
@@ -99,4 +99,4 @@ Description of what this topic tracks...
 
 ## Concurrency
 
-`topic commit` locks only the one topic file's `git add`, so two agents committing different topics never collide. The full `dashboard commit` locks the entire workspace commit path.
+`topic commit` locks only the one topic file's `git add`, so two ships committing different topics never collide. The full `dashboard commit` locks the entire workspace commit path.

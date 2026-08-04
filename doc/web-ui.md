@@ -174,7 +174,7 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 | `/api/reports` | POST | Create a report (JSON body) |
 | `/api/reports/<id>` | GET | Get a single report (JSON) |
 | `/api/reports/<id>` | DELETE | Delete a report |
-| `/api/board` | GET | Fleet status board (all agents with status, progress, etc.) |
+| `/api/board` | GET | Fleet status board (all ships with status, progress, etc.) |
 | `/api/msgs` | GET | All bus messages (newest first). Optional `?ship=<name>` for per-ship conversation |
 | `/api/inbox` | GET | Messages addressed to the viewing ship |
 | `/api/asks` | GET | Unanswered `[ask]` questions for the viewing ship |
