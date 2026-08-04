@@ -205,7 +205,7 @@ func (s *Server) apiMsgs(w http.ResponseWriter, r *http.Request) {
 	if ship := strings.TrimSpace(r.URL.Query().Get("ship")); ship != "" {
 		// Optional sort parameter: "age" (default, newest first), "age-asc" (oldest first)
 		sortBy := r.URL.Query().Get("sort")
-		msgs := s.bus.ConversationWithViewer(ship, s.bus.ShipID)
+		msgs := s.bus.Conversation(ship)
 		if sortBy == "age-asc" {
 			// Reverse the default (newest first) to get oldest first
 			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {

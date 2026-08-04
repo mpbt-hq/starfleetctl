@@ -173,41 +173,12 @@ func (b *Bus) DoMsgsJSON() error {
 // Conversation returns the messages involving a single ship (sent by it,
 // addressed to it, or a broadcast to all) — used by the web console's
 // per-ship chat view. Each entry is identical in shape to DoMsgsJSON.
+// The result is sorted by age (newest first), which the web UI relies on.
 func (b *Bus) Conversation(ship string) []msgEntryJSON {
 	msgs := b.allMsgRecords()
 	out := make([]msgEntryJSON, 0, len(msgs))
 	for _, m := range msgs {
 		if m.From != ship && m.Target != ship && m.Target != "all" {
-			continue
-		}
-		out = append(out, msgEntryJSON{
-			ID:         m.ID,
-			AgeSeconds: now() - m.Epoch,
-			From:       m.From,
-			Target:     m.Target,
-			Acks:       b.ackedCount(m.ID),
-			Text:       m.Text,
-			ReplyTo:    m.ReplyTo,
-			Type:       m.Type,
-		})
-	}
-	return out
-}
-
-// ConversationWithViewer is like Conversation(ship) but additionally keeps
-// any message addressed to or sent by the web viewer (b.ShipID). This is what
-// makes a ship's reply visible in the web Funk tab when the user chats with a
-// ship over the web console: the ship replies to the viewer's identity (often
-// a direct tell, not a broadcast), so the reply's target is the viewer — not
-// the chat partner and not "all". Without this, such replies would be filtered
-// out and the user would never see the answer they asked for in the UI.
-func (b *Bus) ConversationWithViewer(ship, viewer string) []msgEntryJSON {
-	msgs := b.allMsgRecords()
-	out := make([]msgEntryJSON, 0, len(msgs))
-	for _, m := range msgs {
-		involved := m.From == ship || m.Target == ship || m.Target == "all" ||
-			(viewer != "" && (m.From == viewer || m.Target == viewer))
-		if !involved {
 			continue
 		}
 		out = append(out, msgEntryJSON{
