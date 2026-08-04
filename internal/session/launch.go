@@ -450,16 +450,24 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	inner += "export STARFLEET_ROLE=" + shellQuote("ship") + "; "
 	inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
 	inner += "export STARFLEET_LAUNCH_TYPE=" + shellQuote(launchType) + "; "
+	// Export API keys so opencode can use them in provider config
+	if nimKey := os.Getenv("NIM_API_KEY"); nimKey != "" {
+		inner += "export NIM_API_KEY=" + shellQuote(nimKey) + "; "
+	}
+	if groqKey := os.Getenv("GROQ_API_KEY"); groqKey != "" {
+		inner += "export GROQ_API_KEY=" + shellQuote(groqKey) + "; "
+	}
+	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
+		`{"username":"`+name+`","instructions":[".starfleet-ai/var/sop.d/index.md"],"plugin":["./.opencode/plugins/starfleet-dispatch.ts"]}`) + "; "
+	inner += "cd " + shellQuote(root) + "; "
 	// Select opencode config based on launch type: background/auto ships get
 	// the permissive auto-config (with provider keys), foreground gets terminal config.
+	// Export AFTER cd so relative path resolves correctly.
 	opencodeConfig := ".opencode/opencode.auto.json"
 	if launchType == "terminal" {
 		opencodeConfig = ".opencode/opencode.terminal.json"
 	}
 	inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfig) + "; "
-	inner += "export OPENCODE_CONFIG_CONTENT=" + shellQuote(
-		`{"username":"`+name+`","instructions":[".starfleet-ai/var/sop.d/index.md"],"plugin":["./.opencode/plugins/starfleet-dispatch.ts"]}`) + "; "
-	inner += "cd " + shellQuote(root) + "; "
 	inner += "exec " + shellQuote(resolveClientPath("opencode"))
 	if model != "" {
 		inner += " --model " + shellQuote(model)
