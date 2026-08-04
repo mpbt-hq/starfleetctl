@@ -4,8 +4,9 @@
 // Package modelproxy implements a local OpenAI-compatible proxy in front of
 // the real model API backends (NVIDIA NIM, OpenCode Zen, ...). Ships talk to
 // this single local endpoint instead of the flaky upstreams: the proxy retries
-// transient errors (429/5xx/conn-reset) and catches streaming failures so a
-// model-API hiccup never leaks raw into the agent session.
+// transient errors (429/5xx/conn-reset, and gRPC-style saturation errors such
+// as ResourceExhausted) and catches streaming failures so a model-API hiccup
+// never leaks raw into the agent session.
 package modelproxy
 
 import (

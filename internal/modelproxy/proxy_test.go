@@ -274,6 +274,116 @@ func TestChatStreamingInterrupted(t *testing.T) {
 	}
 }
 
+// TestChatStreamingRetriesEarlyResourceExhausted simulates a NIM worker that
+// is saturated: the first streaming attempt returns a 200 with a streamed
+// "ResourceExhausted" error event before any content. The proxy must absorb
+// it (retry internally) so the client only ever sees the successful stream —
+// a saturation error must never reach the client.
+func TestChatStreamingRetriesEarlyResourceExhausted(t *testing.T) {
+	var calls atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		f, _ := w.(http.Flusher)
+		if calls.Add(1) == 1 {
+			_, _ = io.WriteString(w, "data: {\"error\":{\"message\":\"ResourceExhausted: Worker local total request limit reached\"}}\n\n")
+			f.Flush()
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		f.Flush()
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		f.Flush()
+	})
+	p, _ := testProxy(t, upstream)
+	resp := postChatAuth(t, p, "m1", true, ShipKey("Phoenix"))
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if strings.Contains(s, "ResourceExhausted") {
+		t.Fatalf("client saw the saturation error, proxy must absorb it: %q", s)
+	}
+	if !strings.Contains(s, `"hi"`) || !strings.Contains(s, "data: [DONE]") {
+		t.Fatalf("client stream wrong, want the successful retry content: %q", s)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls = %d, want 2", calls.Load())
+	}
+	ships := getShips(t, p)
+	if len(ships) != 1 || ships[0].Failures != 0 || ships[0].Retries != 1 || ships[0].Successes != 1 {
+		t.Fatalf("tracker = %+v, want success after 1 retry", ships)
+	}
+}
+
+// TestChatStreamingResourceExhaustedExhausted verifies that when the upstream
+// stays saturated across the whole retry budget, the final streamed error IS
+// relayed to the client (structured error event + [DONE]) so it doesn't hang
+// on a silent stream, and the attempt counts as a failure.
+func TestChatStreamingResourceExhaustedExhausted(t *testing.T) {
+	var calls atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		f, _ := w.(http.Flusher)
+		calls.Add(1)
+		_, _ = io.WriteString(w, "data: {\"error\":{\"message\":\"ResourceExhausted: Worker local total request limit reached\"}}\n\n")
+		f.Flush()
+	})
+	p, _ := testProxy(t, upstream)
+	resp := postChat(t, p, "m1", true)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 (headers committed on first attempt)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !strings.Contains(s, "ResourceExhausted") {
+		t.Fatalf("retry budget exhausted — error must be relayed, got: %q", s)
+	}
+	if calls.Load() != 3 { // MaxRetries=2 → 3 attempts
+		t.Fatalf("upstream calls = %d, want 3", calls.Load())
+	}
+	ships := getShips(t, p)
+	if len(ships) != 1 || ships[0].Retries != 2 {
+		t.Fatalf("tracker = %+v, want 2 retries (relayed upstream error counts as completed request)", ships)
+	}
+}
+
+// TestChatRetriesResourceExhaustedBody verifies that a non-streaming upstream
+// error is retried when the body describes a saturation condition even if the
+// HTTP status alone wouldn't be classified as transient (here: 400).
+func TestChatRetriesResourceExhaustedBody(t *testing.T) {
+	var calls atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"ResourceExhausted: Worker local total request limit reached"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ok"})
+	})
+	p, _ := testProxy(t, upstream)
+	resp := postChat(t, p, "m1", false)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 after retry (calls=%d)", resp.StatusCode, calls.Load())
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls = %d, want 2", calls.Load())
+	}
+}
+
 func TestHealth(t *testing.T) {
 	p, _ := testProxy(t, modelsHandler())
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)

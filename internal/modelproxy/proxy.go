@@ -255,6 +255,29 @@ func retryableError(err error) bool {
 	return false
 }
 
+// retryableErrorText reports whether an upstream error message describes a
+// transient saturation/overload condition worth retrying even when the HTTP
+// status alone wouldn't classify it as transient. This catches gRPC-style
+// errors (e.g. NIM's "ResourceExhausted: Worker local total request limit
+// reached") that some backends deliver with a generic status or — in streaming
+// mode — as a 200 SSE error event instead of a 4xx/5xx response. Such
+// saturation errors must be absorbed here in the proxy so they never reach the
+// client; the worker stays saturated only for a short while and a plain retry
+// succeeds.
+func retryableErrorText(s string) bool {
+	l := strings.ToLower(s)
+	for _, frag := range []string{
+		"resourceexhausted", "resource exhausted",
+		"rate limit", "too many requests", "overloaded", "overload",
+		"worker busy", "worker saturated", "capacity exceeded",
+	} {
+		if strings.Contains(l, frag) {
+			return true
+		}
+	}
+	return false
+}
+
 // isStreamingRequest reports whether the chat request asked for a stream.
 func isStreamingRequest(body []byte) bool {
 	var req struct {
@@ -296,8 +319,10 @@ func (p *Proxy) handleShips(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleChat serves POST /v1/chat/completions. It routes to the provider that
-// serves the requested model, retries transient upstream failures, and pipes
-// the SSE stream through (catching mid-stream breaks with a clean error event).
+// serves the requested model, retries transient upstream failures (incl.
+// gRPC-style saturation errors such as ResourceExhausted, which are absorbed
+// here and never reach the client), and pipes the SSE stream through (catching
+// mid-stream breaks with a clean error event).
 func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, 405, "method not allowed")
@@ -359,6 +384,7 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 
 	var lastErr error
 	retries := 0
+	writeHeaders := true
 	for attempt := 1; attempt <= attempts; attempt++ {
 		upstreamReq, _, err := buildReq()
 		if err != nil {
@@ -380,10 +406,12 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		}
 
 		if resp.StatusCode >= 400 {
-			// Read the error body once for logging; retry transient statuses.
+			// Read the error body once for logging; retry transient statuses
+			// and gRPC-style saturation errors (e.g. ResourceExhausted) that
+			// some backends return with a generic status.
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			if transientStatus(resp.StatusCode) && attempt < attempts {
+			if attempt < attempts && (transientStatus(resp.StatusCode) || retryableErrorText(string(errBody))) {
 				p.logf("%s/%s: transient HTTP %d (attempt %d/%d): %.300s — retrying", ship, prov.ID, resp.StatusCode, attempt, attempts, string(errBody))
 				retries++
 				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
@@ -401,7 +429,14 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		}
 
 		if streaming {
-			usage, failed := p.pipeSSE(w, resp)
+			usage, failed, retryEarly := p.pipeSSE(w, resp, writeHeaders, attempt < attempts)
+			if retryEarly {
+				p.logf("%s/%s: retryable streamed error before content (attempt %d/%d) — retrying", ship, prov.ID, attempt, attempts)
+				retries++
+				writeHeaders = false
+				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
+				continue
+			}
 			p.tracker.record(ship, prov.ID, requestedModel, usage, retries, failed)
 		} else {
 			bodyBytes, err := io.ReadAll(resp.Body)
@@ -446,20 +481,38 @@ func extractStreamUsage(payload []byte) *Usage {
 // forwarding headers and catching a premature close (EOF without a [DONE]
 // sentinel) with a clean error event so the client sees a structured failure
 // instead of a truncated stream. It returns the accumulated token usage (from
-// trailing usage chunks) and whether the stream failed.
-func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) (*Usage, bool) {
+// trailing usage chunks), whether the stream failed, and whether it aborted
+// early with a retryable error.
+//
+// When writeHeaders is false the caller already committed the response
+// headers (a previous attempt's 200) and the stream is relayed without
+// re-writing them.
+//
+// A saturation/overload error (e.g. NIM "ResourceExhausted: Worker local total
+// request limit reached") that arrives as a streamed error event BEFORE any
+// content chunk is NOT relayed: with canRetry set the attempt is aborted
+// (retryEarly=true, nothing written to the client besides the already-committed
+// headers) so the caller can re-dial the request — the worker stays saturated
+// only briefly and the retry succeeds. Such errors must never reach the client,
+// which would otherwise treat them as hard failures. Mid-stream errors (after
+// content) and errors once the retry budget is exhausted are passed through as
+// structured error events.
+func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders, canRetry bool) (*Usage, bool, bool) {
 	defer resp.Body.Close()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
+	if writeHeaders {
+		for k, vv := range resp.Header {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
 		}
+		w.WriteHeader(resp.StatusCode)
 	}
-	w.WriteHeader(resp.StatusCode)
 
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	sawDone := false
 	sawError := false
+	sawContent := false
 	flusher, _ := w.(http.Flusher)
 	var usage *Usage
 
@@ -471,8 +524,13 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) (*Usage, boo
 			if payload == "[DONE]" {
 				sawDone = true
 			} else if strings.HasPrefix(payload, "{") && strings.Contains(payload, "\"error\"") {
-				// Upstream streamed a structured error event — pass it through
-				// and remember we saw one (so we don't append our own).
+				// A streamed error event. Before any content chunk a retryable
+				// overload/rate-limit error is aborted for a clean retry;
+				// everything else is passed through and remembered so we don't
+				// append our own error on EOF.
+				if !sawContent && canRetry && retryableErrorText(payload) {
+					return nil, true, true
+				}
 				sawError = true
 				_, _ = io.WriteString(w, line+"\n\n")
 				if flusher != nil {
@@ -480,6 +538,9 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) (*Usage, boo
 				}
 				continue
 			} else if strings.HasPrefix(payload, "{") {
+				if strings.Contains(payload, "\"choices\"") {
+					sawContent = true
+				}
 				// Upstreams (notably NIM) repeat the usage block on several
 				// trailing chunks with a growing counter — the last one holds
 				// the final values, so last-wins instead of accumulating.
@@ -513,9 +574,9 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response) (*Usage, boo
 		if flusher != nil {
 			flusher.Flush()
 		}
-		return usage, true
+		return usage, true, false
 	}
-	return usage, false
+	return usage, false, false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
