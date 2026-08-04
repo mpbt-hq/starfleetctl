@@ -614,7 +614,7 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 
 	// Load user config for provider definitions (only if not model-proxy-only)
 	var userConfig map[string]any
-	if cfg.Comms.ProviderMode != "model-proxy-only" {
+	if cfg.Fleet.ProviderMode != "model-proxy-only" {
 		userConfigPath := filepath.Join(os.Getenv("HOME"), ".config", "opencode", "opencode.json")
 		if data, err := os.ReadFile(userConfigPath); err == nil {
 			_ = json.Unmarshal(data, &userConfig)
@@ -630,7 +630,7 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	}
 
 	// Copy provider config from user config (unless model-proxy-only mode)
-	if cfg.Comms.ProviderMode != "model-proxy-only" && userConfig != nil {
+	if cfg.Fleet.ProviderMode != "model-proxy-only" && userConfig != nil {
 		if providers, ok := userConfig["provider"].(map[string]any); ok {
 			shipConfig["provider"] = providers
 		}

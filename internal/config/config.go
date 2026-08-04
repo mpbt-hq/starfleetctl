@@ -58,6 +58,12 @@ type FleetConfig struct {
 	// ShipNames is the worker ship-name pool. When empty, the compiled-in
 	// Star Trek ship roster is used. The flagship name is always excluded.
 	ShipNames []string `yaml:"ship_names"`
+	// ProviderMode controls which providers are included in generated
+	// per-ship opencode configs. "all" (default) copies user providers
+	// from ~/.config/opencode/opencode.json AND injects model-proxy
+	// providers. "model-proxy-only" skips user providers entirely,
+	// exposing only the model-proxy backends (nim-proxy, zen-proxy, etc.).
+	ProviderMode string `yaml:"provider_mode"`
 }
 
 // WebConfig holds web server configuration.
@@ -88,12 +94,6 @@ type CommsConfig struct {
 	RetryCooldownMS int    `yaml:"retry_cooldown_ms"`
 	LogPollMS       int    `yaml:"log_poll_ms"`
 	LogCooldownMS   int    `yaml:"log_cooldown_ms"`
-	// ProviderMode controls which providers are included in generated
-	// per-ship opencode configs. "all" (default) copies user providers
-	// from ~/.config/opencode/opencode.json AND injects model-proxy
-	// providers. "model-proxy-only" skips user providers entirely,
-	// exposing only the model-proxy backends (nim-proxy, zen-proxy, etc.).
-	ProviderMode string `yaml:"provider_mode"`
 }
 
 // DefaultConfig returns defaults.
@@ -115,7 +115,9 @@ func DefaultConfig() *Config {
 			RetryCooldownMS: 10_000,
 			LogPollMS:       10_000,
 			LogCooldownMS:   10_000,
-			ProviderMode:    "all",
+		},
+		Fleet: FleetConfig{
+			ProviderMode: "all",
 		},
 		ModelProxy: ModelProxyConfig{
 			ListenAddr: "127.0.0.1:8443",
