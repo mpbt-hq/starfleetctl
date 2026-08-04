@@ -119,6 +119,60 @@ func ProviderConfigs(root, shipID string) map[string]any {
 	return out
 }
 
+// ProxyModelInfos returns the full model catalog (with label/context/caps)
+// for every configured model-proxy backend. The data is sourced from the
+// running local proxy's /v1/models when reachable (the same code path ships
+// use), otherwise from a direct upstream query. It is used by `models sync`
+// to make the proxy models selectable in the web console.
+func ProxyModelInfos(root string) []ModelInfo {
+	cfg, err := Load(root)
+	if err != nil {
+		return nil
+	}
+	if len(cfg.Providers) == 0 {
+		return nil
+	}
+	var out []ModelInfo
+	for _, prov := range cfg.Providers {
+		infos, ok := proxyModelInfosViaLocal(cfg, prov)
+		if !ok {
+			// No local proxy running — query the upstream directly (no
+			// catalog enrichment without the proxy, but ids still valid).
+			raw, ferr := fetchModelInfo(prov)
+			if ferr != nil {
+				continue
+			}
+			infos = raw
+		}
+		for _, m := range infos {
+			m.OwnedBy = prov.ID
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// proxyModelInfosViaLocal queries the running local proxy for one provider's
+// model catalog (enriched with label/context/caps).
+func proxyModelInfosViaLocal(cfg *Config, prov Provider) ([]ModelInfo, bool) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(cfg.proxyBaseURL() + "/models?provider=" + prov.ID)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	var out struct {
+		Data []ModelInfo `json:"data"`
+	}
+	if err := jsonDecode(resp, &out); err != nil {
+		return nil, false
+	}
+	return out.Data, true
+}
+
 // checkModels prints the model catalog the proxy knows for each configured
 // provider (diagnostics for `model-proxy models`).
 func checkModels(root string) error {

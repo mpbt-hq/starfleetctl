@@ -16,6 +16,20 @@ import (
 	"time"
 )
 
+// ModelInfo is one model entry served by GET /v1/models. The upstream fields
+// (id, object, created, owned_by) are taken verbatim from the backend's
+// /models response; Label/Context/Caps are enriched from the opencode model
+// catalog (the upstreams themselves only expose the bare OpenAI fields).
+type ModelInfo struct {
+	ID      string   `json:"id"`
+	Object  string   `json:"object,omitempty"`
+	Created int64    `json:"created,omitempty"`
+	OwnedBy string   `json:"owned_by,omitempty"`
+	Label   string   `json:"label,omitempty"`
+	Context int      `json:"context,omitempty"`
+	Caps    []string `json:"caps,omitempty"`
+}
+
 // Proxy is the local OpenAI-compatible model API server that fronts the
 // configured upstream providers.
 type Proxy struct {
@@ -24,6 +38,7 @@ type Proxy struct {
 	// modelCache maps provider ID → set of model IDs, refreshed on demand.
 	cacheMu   sync.RWMutex
 	modelSets map[string]map[string]bool
+	modelInfo map[string][]ModelInfo
 	cacheAt   map[string]time.Time
 	tracker   *shipTracker
 	mux       *http.ServeMux
@@ -35,6 +50,7 @@ func New(cfg *Config) *Proxy {
 		cfg:       cfg,
 		logger:    log.Default(),
 		modelSets: map[string]map[string]bool{},
+		modelInfo: map[string][]ModelInfo{},
 		cacheAt:   map[string]time.Time{},
 		tracker:   newShipTracker(),
 	}
@@ -91,8 +107,63 @@ func (p *Proxy) providerModelSet(prov Provider) map[string]bool {
 	return set
 }
 
-// fetchModels queries an upstream OpenAI-compatible /models endpoint.
+// providerModelInfo returns the full model metadata a provider serves, using
+// a short-lived cache and the upstream /models query as source of truth.
+func (p *Proxy) providerModelInfo(prov Provider) []ModelInfo {
+	p.cacheMu.RLock()
+	info, ok := p.modelInfo[prov.ID]
+	at := p.cacheAt[prov.ID]
+	p.cacheMu.RUnlock()
+	if ok && time.Since(at) < 60*time.Second {
+		return info
+	}
+
+	raw, err := fetchModelInfo(prov)
+	if err != nil {
+		p.logf("model query %s: %v", prov.ID, err)
+		info = nil
+	} else {
+		info = make([]ModelInfo, len(raw))
+		for i, m := range raw {
+			info[i] = m
+			meta := catalog.lookup(m.ID)
+			if info[i].Label == "" {
+				info[i].Label = meta.Label
+			}
+			if info[i].Context == 0 {
+				info[i].Context = meta.Context
+			}
+			if len(info[i].Caps) == 0 {
+				info[i].Caps = meta.Caps
+			}
+		}
+	}
+	p.cacheMu.Lock()
+	p.modelInfo[prov.ID] = info
+	p.cacheAt[prov.ID] = time.Now()
+	p.cacheMu.Unlock()
+	return info
+}
+
+// fetchModels queries an upstream OpenAI-compatible /models endpoint and
+// returns the model ids.
 func fetchModels(prov Provider) ([]string, error) {
+	infos, err := fetchModelInfo(prov)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(infos))
+	for _, m := range infos {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	return ids, nil
+}
+
+// fetchModelInfo queries an upstream OpenAI-compatible /models endpoint and
+// returns the raw model entries (id, object, created, owned_by).
+func fetchModelInfo(prov Provider) ([]ModelInfo, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, prov.BaseURL+"/models", nil)
 	if err != nil {
@@ -110,43 +181,40 @@ func fetchModels(prov Provider) ([]string, error) {
 		return nil, fmt.Errorf("models: upstream HTTP %d", resp.StatusCode)
 	}
 	var out struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+		Data []ModelInfo `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("models: decode: %w", err)
 	}
-	var ids []string
+	var infos []ModelInfo
 	for _, m := range out.Data {
 		if m.ID != "" {
-			ids = append(ids, m.ID)
+			infos = append(infos, m)
 		}
 	}
-	return ids, nil
+	return infos, nil
 }
 
 // handleModels serves GET /v1/models — the consolidated list of all upstream
-// models. With ?provider=<id> only that provider's models are returned (used
-// by opencode-config generation to enumerate one backend's catalog).
+// models, enriched with display metadata (label, context, caps) from the
+// opencode catalog. The listing is queried straight from the upstream /models
+// endpoints (never from models.yaml). With ?provider=<id> only that provider's
+// models are returned (used by opencode-config generation to enumerate one
+// backend's catalog).
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "method not allowed")
 		return
 	}
 	providerID := r.URL.Query().Get("provider")
-	type modelEntry struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		OwnedBy string `json:"owned_by"`
-	}
-	data := []modelEntry{}
+	data := []ModelInfo{}
 	for _, prov := range p.cfg.Providers {
 		if providerID != "" && prov.ID != providerID {
 			continue
 		}
-		for id := range p.providerModelSet(prov) {
-			data = append(data, modelEntry{ID: id, Object: "model", OwnedBy: prov.ID})
+		for _, m := range p.providerModelInfo(prov) {
+			m.OwnedBy = prov.ID
+			data = append(data, m)
 		}
 	}
 	writeJSON(w, map[string]any{"object": "list", "data": data})

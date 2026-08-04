@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/metux/starfleetctl/internal/modelproxy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -140,6 +141,11 @@ func (m *Models) DoSync() error {
 	if err != nil {
 		return fmt.Errorf("models sync: %w", err)
 	}
+
+	// Add the model-proxy backends (nim-proxy, zen-proxy, ...) so the web
+	// console can select models that are only reachable through the local
+	// proxy. Queried from the running proxy directly, not from models.yaml.
+	scanned = append(scanned, m.proxyModels()...)
 
 	// Build lookup: id → scanned.
 	scanMap := make(map[string]scannedModel, len(scanned))
@@ -320,6 +326,30 @@ func countDisabled(m []yamlModel) int {
 }
 
 // --- opencode output parsing ---
+
+// proxyModels converts the local model-proxy's catalog into scannedModel
+// entries (prefixed "<proxy>/<model>" so they are distinct from the plain
+// opencode catalog ids). Best-effort: empty when no proxy is configured or
+// reachable.
+func (m *Models) proxyModels() []scannedModel {
+	var out []scannedModel
+	for _, inf := range modelproxy.ProxyModelInfos(m.Root) {
+		out = append(out, scannedModel{
+			id:       inf.OwnedBy + "/" + inf.ID,
+			provider: inf.OwnedBy,
+			label:    inf.Label,
+			context:  inf.Context,
+			caps:     inf.Caps,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].provider != out[j].provider {
+			return out[i].provider < out[j].provider
+		}
+		return out[i].label < out[j].label
+	})
+	return out
+}
 
 func parseScanOutput(output string) ([]scannedModel, error) {
 	lines := strings.Split(output, "\n")
