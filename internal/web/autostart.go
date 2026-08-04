@@ -109,6 +109,11 @@ func Daemonize(root, addr, logFile string) (int, error) {
 	cmd.Stdout = logF
 	cmd.Stderr = logF
 	cmd.Stdin = nil
+	// The daemon is often spawned by cron with a minimal PATH
+	// (PATH=/usr/bin:/bin), which its children then inherit. Expand the PATH
+	// so exec'd helpers (ss, git, ...) are found regardless of the caller's
+	// environment.
+	cmd.Env = append(os.Environ(), "PATH="+daemonPath())
 	// Detach from parent
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
@@ -272,6 +277,48 @@ func extractPID(line string) int {
 	return pid
 }
 
+// daemonPath returns the PATH the web daemon should run with: the caller's
+// PATH first, then the standard bin/sbin dirs (and the user's ~/.local/bin and
+// ~/bin). This makes the daemon independent of a minimal environment passed
+// down by cron.
+func daemonPath() string {
+	extra := []string{"/usr/local/sbin", "/usr/sbin", "/usr/local/bin"}
+	if home, err := os.UserHomeDir(); err == nil {
+		extra = append(extra, filepath.Join(home, ".local", "bin"), filepath.Join(home, "bin"))
+	}
+	seen := map[string]bool{}
+	var parts []string
+	for _, d := range append(filepath.SplitList(os.Getenv("PATH")), extra...) {
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		parts = append(parts, d)
+	}
+	return strings.Join(parts, string(os.PathListSeparator))
+}
+
+// killWebProcOnPort kills any starfleetctl web process bound to the given
+// listen address (e.g. "0.0.0.0:8080").
+func killWebProcOnPort(addr string) error {
+	_, expectedPort, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil
+	}
+	procs, err := findStarlfleetWebProcs()
+	if err != nil {
+		return err
+	}
+	for _, p := range procs {
+		if p.Port == expectedPort {
+			if process, err := os.FindProcess(p.PID); err == nil {
+				process.Kill()
+			}
+		}
+	}
+	return nil
+}
+
 // Stop stops the web server daemon.
 func Stop(root string) error {
 	ac := DefaultAutostartConfig(root)
@@ -290,9 +337,27 @@ func Stop(root string) error {
 
 // Restart stops the web server if running, then starts it again.
 func Restart(root string) error {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	addr := cfg.Web.ListenAddr
+
 	Stop(root)
 	// Wait for the port to be freed.
 	time.Sleep(500 * time.Millisecond)
-	_, err := Autostart(root)
+
+	// If the port is still busy, the PID file was missing or stale and Stop
+	// could not kill the daemon. Kill the starfleetctl web process bound to
+	// the configured address so Autostart actually replaces it instead of
+	// seeing the port as busy and returning early.
+	if IsWebServerRunning(addr) {
+		if err := killWebProcOnPort(addr); err != nil {
+			return err
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	_, err = Autostart(root)
 	return err
 }

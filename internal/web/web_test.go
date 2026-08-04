@@ -224,3 +224,16 @@ func TestTopicAPIErrors(t *testing.T) {
 		t.Fatalf("GET empty slug: want 400, got %d", code)
 	}
 }
+
+// TestDaemonPath verifies the web daemon's PATH is expanded with the standard
+// bin/sbin dirs so exec'd helpers (ss, git) are found even when the daemon is
+// spawned by cron with a minimal PATH.
+func TestDaemonPath(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin:/bin")
+	got := daemonPath()
+	for _, want := range []string{"/usr/bin", "/usr/sbin", "/usr/local/sbin", "/usr/local/bin"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("daemonPath() = %q, want it to contain %q", got, want)
+		}
+	}
+}
