@@ -2,7 +2,7 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // JSON output variants (--json flag) for the list-shaped comms
-// subcommands (board/inbox/msgs/asks), so agents consuming this output can
+// subcommands (board/inbox/msgs/asks), so ships consuming this output can
 // parse it directly instead of grep/awk/cut-ing the human-formatted table.
 // Field names/values mirror the text columns exactly (age as a computed
 // integer of seconds rather than the "3m"/"1h2m" string, so callers don't

@@ -282,7 +282,7 @@ func (b *Bus) LogEvent(kind, note string) {
 	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", isots(), kind, b.ShipID, clean(note))
 }
 
-// ackedCount returns the number of agents who have acked (seen) a message
+// ackedCount returns the number of ships who have acked (seen) a message
 func (b *Bus) ackedCount(id string) int {
 	count := 0
 	entries, err := os.ReadDir(b.MsgDir)

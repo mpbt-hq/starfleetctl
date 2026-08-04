@@ -11,7 +11,7 @@ import "os"
 // `dashboard topic new`/`reindex` to work immediately, no topics yet.
 const minimalSkeleton = `# DASHBOARD.md
 
-Cross-session "what's in flight / what got parked" index — lets parallel agents
+Cross-session "what's in flight / what got parked" index — lets parallel ships
 (and the praetor) see at a glance what's actively being worked, and stops
 half-started ideas from getting lost when a session ends.
 

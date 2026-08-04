@@ -163,7 +163,7 @@ func (s *SOP) DoReindex() error {
 		return err
 	}
 
-	// CLAUDE.md is the entry point for agents that don't resolve @-imports
+	// CLAUDE.md is the entry point for ships that don't resolve @-imports
 	// (e.g. opencode). Write the full inlined content directly into it.
 	claudePath := filepath.Join(s.Root, "CLAUDE.md")
 	claude := claudeHeader + indexContent

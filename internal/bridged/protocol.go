@@ -34,7 +34,7 @@ const maxFrameSize = 64 * 1024 * 1024
 //
 // Env carries per-request identity overrides (STARFLEET_SHIP_ID and friends — see
 // allowedEnvOverrides) so one daemon instance can serve many different
-// agents' identities instead of reporting everything under whatever
+// ships' identities instead of reporting everything under whatever
 // environment the daemon process itself happened to start with. Omitting
 // Env (nil/empty) is fully backward compatible: the request runs against
 // the daemon's own ambient environment exactly like v1 did.

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// File store: temporary file storage for fleet agents, with web visibility.
+// File store: temporary file storage for fleet ships, with web visibility.
 // Files are stored under .starfleet-ai/var/files/<name> with a TTL (default
-// 60 min). Agents upload via `starfleetctl file put <path>` and retrieve via
+// 60 min). Ships upload via `starfleetctl file put <path>` and retrieve via
 // the web URL printed on upload. The web server serves /api/files/<name>.
 package filestore
 

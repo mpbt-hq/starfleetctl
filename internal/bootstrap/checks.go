@@ -87,7 +87,7 @@ const opencodeInstructionsPath = ".starfleet-ai/var/sop.d/index.md"
 
 // opencodeStaleInstructionsPaths are legacy instruction entries that older
 // starfleetctl versions registered under a different location. fix drops them
-// so agents load the current index instead of a path that no longer exists.
+// so ships load the current index instead of a path that no longer exists.
 var opencodeStaleInstructionsPaths = []string{
 	".starfleet-ai/agents.d/index.md",
 	".starfleet-ai/var/agents.d/index.md",
@@ -96,7 +96,7 @@ var opencodeStaleInstructionsPaths = []string{
 // opencodePlanCommands are the starfleetctl top-level verbs the built-in
 // opencode "plan" agent is explicitly allowed to run (read + write via the
 // starfleetctl CLI). Deliberately narrow — extend here, not in per-workspace
-// configs, so every bootstrap keeps agents in sync.
+// configs, so every bootstrap keeps ships in sync.
 var opencodePlanCommands = []string{
 	"comms",
 	"dashboard",
@@ -810,7 +810,7 @@ func opencodePlanPermissionRules() map[string]string {
 }
 
 // verifyOpencodePlanAccess checks that .opencode/opencode.json already carries
-// bootstrap's required entries: the generated agents index in "instructions"
+// bootstrap's required entries: the generated SOP index in "instructions"
 // and the plan-agent bash allow rules for the starfleetctl verbs.
 func verifyOpencodePlanAccess(b *Bootstrap) (bool, string) {
 	doc := readOpencodeConfig(b)
@@ -880,7 +880,7 @@ func ensureOpencodePlanAccess(doc map[string]any) bool {
 		changed = true
 	}
 
-	// "instructions": register the generated agents index, drop legacy paths.
+	// "instructions": register the generated SOP index, drop legacy paths.
 	instructions, _ := doc["instructions"].([]any)
 	keep := instructions[:0]
 	hasIndex := false

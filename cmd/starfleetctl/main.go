@@ -61,7 +61,7 @@ Fleet management:
   reports           fleet report system (submit/list/show/delete)
   logs              scan ship logs + bus events, extract failures as tasks (feedback loop)
   web               minimalist mobile-first fleet web console (start/stop/autostart/restart)
-  file              temporary file store for agents (put/list/rm/prune)
+  file              temporary file store for ships (put/list/rm/prune)
 
 Bootstrap & setup:
   genesis-init      bootstrap a workspace from nothing (writes starfleet-bootstrap + runs bootstrap --fix)

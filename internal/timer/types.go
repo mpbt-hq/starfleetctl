@@ -15,7 +15,7 @@
 //
 // Timer types:
 //
-//   - "ship" / "command": fire comms directives to agents via bus.DoPost().
+//   - "ship" / "command": fire comms directives to ships via bus.DoPost().
 //   - "system": execute workspace-level commands (reindex, web, …) directly
 //     in the worker process — no agent involvement needed.
 //

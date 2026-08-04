@@ -533,7 +533,7 @@ func (b *Bus) DoAck(id, note string) error {
 func (b *Bus) DoBoard() error {
 	recs := b.AllStatusRecords()
 	if len(recs) == 0 {
-		fmt.Println("(no agents reporting — none have run 'comms status' yet)")
+		fmt.Println("(no ships reporting — none have run 'comms status' yet)")
 		return nil
 	}
 	fmt.Printf("%-18s  %-12s  %-10s  %-6s  %-5s  %-22s  %s\n", "AGENT", "PROJECT", "STATE", "AGE", "INBOX", "ATTACH", "NOTE")

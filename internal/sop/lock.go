@@ -15,7 +15,7 @@ import (
 // lock acquires the shared clone lock, honoring LOCK_WAIT (seconds, default
 // 600) like bash's with-clone-lock does with `flock -w`. It is the SAME file
 // scripts/with-clone-lock / internal/dashboard / internal/wscommit use, so a
-// Go agents commit and a concurrent bash/Go actor on this clone serialize
+// Go ships commit and a concurrent bash/Go actor on this clone serialize
 // against each other instead of both mutating the index/HEAD at once.
 func (s *SOP) lock() (*flock.Handle, error) {
 	path := filepath.Join(s.GitDir, "mpbt-clone.lock")

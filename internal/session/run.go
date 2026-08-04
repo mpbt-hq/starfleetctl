@@ -89,7 +89,7 @@ func runAttach(root string, args []string) int {
 		fmt.Println("== comms board ==")
 		records := ListBoard(root)
 		if len(records) == 0 {
-			fmt.Println("(no agents reporting)")
+			fmt.Println("(no ships reporting)")
 		} else {
 			fmt.Printf("%-18s  %-12s  %-10s  %-22s  %s\n", "AGENT", "PROJECT", "STATE", "ATTACH", "NOTE")
 			for _, r := range records {
