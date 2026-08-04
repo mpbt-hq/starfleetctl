@@ -94,6 +94,11 @@ type CommsConfig struct {
 	RetryCooldownMS int    `yaml:"retry_cooldown_ms"`
 	LogPollMS       int    `yaml:"log_poll_ms"`
 	LogCooldownMS   int    `yaml:"log_cooldown_ms"`
+	// ErrorCooldownMS is how long an identical model-API error detail is
+	// suppressed after being handled once, preventing a clear+re-prompt
+	// restart storm while an upstream stays saturated (e.g. ResourceExhausted).
+	// Default 60000.
+	ErrorCooldownMS int `yaml:"error_cooldown_ms"`
 }
 
 // DefaultConfig returns defaults.
@@ -115,6 +120,7 @@ func DefaultConfig() *Config {
 			RetryCooldownMS: 10_000,
 			LogPollMS:       10_000,
 			LogCooldownMS:   10_000,
+			ErrorCooldownMS: 60_000,
 		},
 		Fleet: FleetConfig{
 			ProviderMode: "all",
