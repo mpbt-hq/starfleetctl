@@ -122,3 +122,28 @@ func TestTopicLoadMissing(t *testing.T) {
 		t.Fatal("expected error for missing topic, got nil")
 	}
 }
+
+// TestLoadAllTopicsSkipsLockFiles verifies that editor lock files (emacs
+// ".#name" symlinks, which may dangle) are not treated as topics — otherwise a
+// stale lock breaks topic listing and the DASHBOARD.md reindex.
+func TestLoadAllTopicsSkipsLockFiles(t *testing.T) {
+	d := newTestDashboard(t)
+	if err := os.WriteFile(d.TopicPath("task-x"), []byte(roundTripSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A dangling editor lock symlink in a subdirectory (the real-world failure).
+	if err := os.MkdirAll(d.TopicsDir()+"/starfleet", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/nonexistent/target", d.TopicsDir()+"/starfleet/.#task-y.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, err := d.loadAllTopics()
+	if err != nil {
+		t.Fatalf("loadAllTopics: %v", err)
+	}
+	if len(metas) != 1 || metas[0].Slug != "task-x" {
+		t.Fatalf("expected exactly [task-x], got %+v", metas)
+	}
+}

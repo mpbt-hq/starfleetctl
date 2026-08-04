@@ -302,6 +302,11 @@ func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			return nil
 		}
+		// Editor lock files (emacs "#.#name#" / ".#name") are symlinks to the
+		// file being edited and are not topics — skip them (they may dangle).
+		if strings.HasPrefix(e.Name(), ".#") || strings.HasSuffix(e.Name(), "#") {
+			return nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
