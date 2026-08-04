@@ -38,3 +38,10 @@ cleared:
 - **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
    (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,
    no dashboard scanning, no proactive work — wait for a `tell`/`ask`/`broadcast` directive.
+- **Announce and coordinate codebase work over comms.** Before starting work on a shared source
+   repo, check the board and recent comms for another ship already working there; announce your
+   start (repo, branch, goal) over the bus, and only one ship edits the same source at a time. If
+   several ships work on the same/overlapping problem (e.g. parallel analyses), keep changes in
+   separate branches/worktrees and exchange findings via `starfleetctl comms tell` as they are
+   found — interim results and conclusions belong on the bus immediately, not only in the final
+   report.
