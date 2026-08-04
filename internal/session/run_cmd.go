@@ -168,6 +168,20 @@ func RunCmd(root string, args []string) int {
 		os.Unsetenv("STARFLEET_TARGET")
 	}
 
+	// Generate a per-ship opencode config file (same mechanism as background
+	// ships started via `session ship-run`), instead of an inline
+	// OPENCODE_CONFIG_CONTENT. Terminal ships use "ask" for anything outside
+	// the workspace since a human is present at the console.
+	if client == "opencode" {
+		configPath, err := generateOpencodeConfig(root, shipID, "terminal", false)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "run: generate opencode config:", err)
+			return 1
+		}
+		os.Setenv("OPENCODE_CONFIG", configPath)
+		os.Unsetenv("OPENCODE_CONFIG_CONTENT")
+	}
+
 	// Post initial heartbeat
 	if bus, err := comms.New(root); err == nil {
 		provider := providerFromModel(model)
@@ -198,14 +212,14 @@ func RunCmd(root string, args []string) int {
 // defaultPrompt returns the standard prompt for the given client/role combination.
 func defaultPrompt(root, client, shipID, role, model string) string {
 	if client == "opencode" {
-		configContent := fmt.Sprintf(`{"username":"%s","instructions":[".starfleet-ai/var/sop.d/index.md"],"plugin":["./.opencode/plugins/starfleet-dispatch.ts"]}`, shipID)
-		os.Setenv("OPENCODE_CONFIG_CONTENT", configContent)
-
+		// The per-ship opencode config (OPENCODE_CONFIG) is generated in
+		// RunCmd before this is called; the fleet identity itself is injected
+		// by the starfleet-dispatch plugin from STARFLEET_SHIP_ID/TARGET.
 		if role == "flagship" {
-			return "You are the flagship " + shipID + ". Fleet identity loaded via OPENCODE_CONFIG_CONTENT."
+			return "You are the flagship " + shipID + ". Fleet identity loaded via opencode plugin."
 		}
 		return "You are fleet ship " + shipID + ", report to flagship " + shipnames.FlagshipName(root) +
-			". Fleet identity loaded via OPENCODE_CONFIG_CONTENT."
+			". Fleet identity loaded via opencode plugin."
 	}
 
 	// claude
@@ -298,10 +312,14 @@ func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model s
 		parts = append(parts, "export STARFLEET_TARGET="+shellQuote(shipnames.FlagshipName(root)))
 	}
 
-	// Set OPENCODE_CONFIG_CONTENT for opencode
+	// Set OPENCODE_CONFIG for opencode (per-ship config generated in RunCmd;
+	// inherited by this shell, re-exported for explicitness). Unset the inline
+	// variant so only the file config applies.
 	if client == "opencode" {
-		configContent := `{"username":"` + shipID + `","instructions":[".starfleet-ai/var/sop.d/index.md"],"plugin":["./.opencode/plugins/starfleet-dispatch.ts"]}`
-		parts = append(parts, "export OPENCODE_CONFIG_CONTENT="+shellQuote(configContent))
+		if cfg := os.Getenv("OPENCODE_CONFIG"); cfg != "" {
+			parts = append(parts, "export OPENCODE_CONFIG="+shellQuote(cfg))
+			parts = append(parts, "unset OPENCODE_CONFIG_CONTENT")
+		}
 	}
 
 	// Build the exec command

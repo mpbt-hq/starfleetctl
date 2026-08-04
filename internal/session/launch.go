@@ -574,9 +574,12 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 		_ = json.Unmarshal(data, &userConfig)
 	}
 
-	// Build the ship config
+	// Build the ship config. username gives each ship its own identity
+	// (opencode falls back to the OS user when it's missing), matching the
+	// role prompt and the comms heartbeat.
 	shipConfig := map[string]any{
-		"$schema": "https://opencode.ai/config.json",
+		"$schema":  "https://opencode.ai/config.json",
+		"username": shipID,
 	}
 
 	// Copy provider config from user config

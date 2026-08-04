@@ -89,3 +89,20 @@ func TestGenerateOpencodeConfigExternalDirectory(t *testing.T) {
 		t.Errorf("unrestricted: external_directory ** = %q, want allow", got)
 	}
 }
+
+// TestGenerateOpencodeConfigUsername verifies every generated per-ship config
+// carries the ship ID as its username, so opencode sessions/commits are
+// attributed to the ship rather than the OS user.
+func TestGenerateOpencodeConfigUsername(t *testing.T) {
+	root := t.TempDir()
+	for _, launchType := range []string{"terminal", "background", "auto"} {
+		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false)
+		if err != nil {
+			t.Fatalf("generateOpencodeConfig(%q): %v", launchType, err)
+		}
+		cfg := readShipConfig(t, cfgPath)
+		if got, _ := cfg["username"].(string); got != "TestShip" {
+			t.Errorf("%s: username = %q, want TestShip", launchType, got)
+		}
+	}
+}
