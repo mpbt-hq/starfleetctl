@@ -134,6 +134,72 @@ func TestTopicAPISubdirSlug(t *testing.T) {
 	}
 }
 
+// TestTopicAPICategoryMove verifies relocating a topic to another category
+// through the edit API: the slug gains the category prefix, the file moves
+// into the category subdirectory, frontmatter status/assignment/category are
+// updated, and moving back to toplevel (category "") works too.
+func TestTopicAPICategoryMove(t *testing.T) {
+	s := newTestServer(t)
+	slug := "task-x"
+	seedTopic(t, s, slug, "Task X", "body\n")
+	h := s.Handler()
+
+	// Move toplevel -> starfleet/.
+	code, resp := apiPost(t, h, "/api/topic/"+slug,
+		map[string]any{"title": "Task X", "body": "body\n", "category": "starfleet",
+			"status": "assigned", "assigned_to": "Reliant", "push": false})
+	if code != http.StatusOK {
+		t.Fatalf("POST move status %d: %s", code, resp)
+	}
+	newSlug := "starfleet/task-x"
+	if _, err := os.Stat(filepath.Join(s.dash.TopicsDir(), newSlug+".md")); err != nil {
+		t.Fatalf("moved file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.dash.TopicsDir(), slug+".md")); !os.IsNotExist(err) {
+		t.Fatalf("old file still present: %v", err)
+	}
+	if code, got := apiGet(t, h, "/api/topic/"+newSlug); code != http.StatusOK {
+		t.Fatalf("GET new slug status %d", code)
+	} else {
+		if got["category"] != "starfleet" || got["status"] != "assigned" || got["assigned_to"] != "Reliant" {
+			t.Fatalf("moved topic fields wrong: %+v", got)
+		}
+	}
+	if code, _ := apiGet(t, h, "/api/topic/"+slug); code != http.StatusNotFound {
+		t.Fatalf("GET old slug: want 404, got %d", code)
+	}
+
+	// Move back starfleet/ -> toplevel.
+	code, resp = apiPost(t, h, "/api/topic/"+newSlug,
+		map[string]any{"title": "Task X", "body": "body\n", "category": "", "push": false})
+	if code != http.StatusOK {
+		t.Fatalf("POST move-back status %d: %s", code, resp)
+	}
+	if _, err := os.Stat(filepath.Join(s.dash.TopicsDir(), slug+".md")); err != nil {
+		t.Fatalf("back-moved file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.dash.TopicsDir(), newSlug+".md")); !os.IsNotExist(err) {
+		t.Fatalf("starfleet/ file still present: %v", err)
+	}
+	if code, got := apiGet(t, h, "/api/topic/"+slug); code != http.StatusOK {
+		t.Fatalf("GET original slug status %d", code)
+	} else if got["category"] != "" {
+		t.Fatalf("toplevel category wrong: %+v", got)
+	}
+
+	// The sanctioned move commits ran (git log contains both messages).
+	out, err := exec.Command("git", "-C", s.Root, "log", "--oneline").Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	for _, want := range []string{"web: topic move task-x -> starfleet/task-x",
+		"web: topic move starfleet/task-x -> task-x"} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("expected commit %q not found in log:\n%s", want, out)
+		}
+	}
+}
+
 // TestTopicAPIErrors checks the failure paths: unknown slug -> 404, bad JSON
 // and unknown method -> 4xx.
 func TestTopicAPIErrors(t *testing.T) {

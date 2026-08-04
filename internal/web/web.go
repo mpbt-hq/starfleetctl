@@ -254,8 +254,10 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 // dashboard topic (used for the task detail view):
 //
 //	GET  -> full topic (frontmatter + markdown body)
-//	POST {title?, body, commit_msg?, push?} -> rewrite body (+ title) via the
-//	      sanctioned dashboard path and commit (+ push by default)
+//	POST {title?, body, category?, status?, assigned_to?, commit_msg?, push?}
+//	      -> rewrite body/frontmatter via the sanctioned dashboard path and
+//	      commit (+ push by default). Changing category relocates the topic
+//	      to that subdirectory (slug prefix changes), otherwise edits in place.
 func (s *Server) apiTopicDispatch(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimPrefix(r.URL.Path, "/api/topic/")
 	if slug == "" {
@@ -280,6 +282,7 @@ func (s *Server) apiTopicGet(w http.ResponseWriter, slug string) {
 	}
 	writeJSON(w, map[string]any{
 		"slug":        m.Slug,
+		"category":    dashboard.SlugCategory(m.Slug),
 		"title":       m.Title,
 		"body":        body,
 		"kind":        m.Kind,
@@ -298,10 +301,13 @@ func (s *Server) apiTopicGet(w http.ResponseWriter, slug string) {
 // surfaces to the caller instead of silently dropping the push.
 func (s *Server) apiTopicUpdate(w http.ResponseWriter, r *http.Request, slug string) {
 	var p struct {
-		Title     string `json:"title"`
-		Body      string `json:"body"`
-		CommitMsg string `json:"commit_msg"`
-		Push      *bool  `json:"push"`
+		Title      string  `json:"title"`
+		Body       string  `json:"body"`
+		Category   *string `json:"category"`
+		Status     *string `json:"status"`
+		AssignedTo *string `json:"assigned_to"`
+		CommitMsg  string  `json:"commit_msg"`
+		Push       *bool   `json:"push"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
@@ -315,23 +321,45 @@ func (s *Server) apiTopicUpdate(w http.ResponseWriter, r *http.Request, slug str
 	if p.Title != "" {
 		m.Title = p.Title
 	}
+	if p.Status != nil && *p.Status != "" {
+		m.Status = *p.Status
+	}
+	if p.AssignedTo != nil {
+		m.AssignedTo = *p.AssignedTo
+	}
+	newSlug := slug
+	if p.Category != nil && *p.Category != dashboard.SlugCategory(slug) {
+		newSlug, err = s.dash.DoTopicMove(slug, *p.Category, m, p.Body)
+		if err != nil {
+			writeErr(w, 500, "move: "+err.Error())
+			return
+		}
+	} else if err := s.dash.DoTopicUpdate(slug, m, p.Body); err != nil {
+		writeErr(w, 500, "write: "+err.Error())
+		return
+	}
 	msg := strings.TrimSpace(p.CommitMsg)
 	if msg == "" {
-		msg = "web: topic update " + slug
+		if newSlug != slug {
+			msg = "web: topic move " + slug + " -> " + newSlug
+		} else {
+			msg = "web: topic update " + slug
+		}
 	}
 	push := true
 	if p.Push != nil {
 		push = *p.Push
 	}
-	if err := s.dash.DoTopicUpdate(slug, m, p.Body); err != nil {
-		writeErr(w, 500, "write: "+err.Error())
-		return
-	}
-	if err := s.dash.DoTopicCommit(slug, msg, push); err != nil {
+	if newSlug != slug {
+		if err := s.dash.DoTopicCommitMove(slug, newSlug, msg, push); err != nil {
+			writeErr(w, 500, "commit: "+err.Error())
+			return
+		}
+	} else if err := s.dash.DoTopicCommit(slug, msg, push); err != nil {
 		writeErr(w, 500, "commit: "+err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "slug": slug})
+	writeJSON(w, map[string]any{"ok": true, "slug": newSlug})
 }
 
 // apiDashboardReindex handles POST /api/dashboard/reindex — regenerates the

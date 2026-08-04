@@ -376,6 +376,11 @@
       <div id="task_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></div>
       <div id="task_m_edit" style="display:none;margin-top:12px">
         <input id="task_m_t" placeholder="Titel" style="width:100%;box-sizing:border-box">
+        <div class="grid2" style="margin-top:8px">
+          <select id="task_m_cat"></select>
+          <select id="task_m_status"></select>
+        </div>
+        <select id="task_m_assign" style="width:100%;margin-top:8px"></select>
         <textarea id="task_m_text" placeholder="Task-Volltext (Markdown-Body)..." style="width:100%;min-height:280px;margin-top:8px;box-sizing:border-box;font:13px/1.5 ui-monospace,monospace"></textarea>
         <div class="row" style="margin-top:8px;gap:8px">
           <button onclick="taskDetailSave()">Speichern</button>
@@ -1123,15 +1128,34 @@ async function taskUnassign(slug){
 }
 // --- Task full-text detail: view (GET /api/topic/<slug>) + edit (POST) ---
 let taskDetailSlug = null;
+let taskDetailCat = '';
 async function taskDetail(slug){
   try {
     const t = await api('/api/topic/' + encodeURIComponent(slug));
     taskDetailSlug = slug;
+    taskDetailCat = t.category || '';
     document.getElementById('task_m_title').textContent = t.title;
     document.getElementById('task_m_meta').textContent =
       t.slug + ' · ' + (t.kind||'task') + ' · ' + (t.status||'') + ' · 👤 ' + (t.assigned_to||'-');
     document.getElementById('task_m_t').value = t.title;
     document.getElementById('task_m_text').value = t.body || '';
+    // Category select: distinct real categories (slug prefixes) + toplevel.
+    const cats = [...new Set(taskState.rows.map(r=>{const i=r.slug.indexOf('/'); return i<0?'':r.slug.slice(0,i)}))].filter(c=>c!=='').sort();
+    const catSel = document.getElementById('task_m_cat');
+    catSel.innerHTML = '<option value="">Kategorie: (toplevel)</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    catSel.value = taskDetailCat;
+    // Status select: known statuses + the task's current one if unknown.
+    const statuses = ['open','assigned','in-progress','parked','done'];
+    if (t.status && !statuses.includes(t.status)) statuses.unshift(t.status);
+    document.getElementById('task_m_status').innerHTML =
+      statuses.map(s=>`<option value="${esc(s)}"${s===t.status?' selected':''}>${esc(s)}</option>`).join('');
+    // Assignment select: current assignee (if a real ship) + all board ships.
+    let ships = [...new Set(taskState.board.map(r=>r.agent))].sort();
+    const cur = (t.assigned_to && t.assigned_to!=='—' && t.assigned_to!=='__auto__') ? t.assigned_to : '';
+    if (cur && !ships.includes(cur)) ships = [...ships, cur].sort();
+    const aSel = document.getElementById('task_m_assign');
+    aSel.innerHTML = '<option value="__none__">(keine Zuweisung)</option>' + ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    aSel.value = cur || '__none__';
     showTaskBody();
     document.getElementById('task_modal').style.display = 'flex';
   } catch(e){ toast('Fehler: '+esc(e.message), true); }
@@ -1156,10 +1180,14 @@ async function taskDetailSave(){
   if (!taskDetailSlug) return;
   const title = document.getElementById('task_m_t').value.trim();
   const body = document.getElementById('task_m_text').value;
+  const category = document.getElementById('task_m_cat').value;
+  const status = document.getElementById('task_m_status').value;
+  const ass = document.getElementById('task_m_assign').value;
+  const assigned_to = ass==='__none__' ? '—' : ass;
   try {
-    await api('/api/topic/' + encodeURIComponent(taskDetailSlug), {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({title, body})});
-    toast('Task aktualisiert');
+    const res = await api('/api/topic/' + encodeURIComponent(taskDetailSlug), {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({title, body, category, status, assigned_to})});
+    toast(category && category!==taskDetailCat ? 'Task verschoben → '+category : 'Task aktualisiert');
     closeTaskModal();
     loadTasks();
   } catch(e){ toast('Fehler: '+esc(e.message), true); }

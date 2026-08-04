@@ -240,6 +240,44 @@ func (d *Dashboard) DoTopicCommit(slug, msg string, push bool) error {
 	return run(d.Root, "git", "push", "origin", branch)
 }
 
+// DoTopicCommitMove stages a topic relocation (new path added, old path
+// deleted), commits, and (unless push=false) pushes — the commit counterpart
+// to DoTopicMove, since a move touches two files rather than one.
+func (d *Dashboard) DoTopicCommitMove(oldSlug, newSlug, msg string, push bool) error {
+	lh, err := d.lock()
+	if err != nil {
+		return err
+	}
+	defer lh.Close()
+
+	oldPath := d.topicPath(oldSlug)
+	newPath := d.topicPath(newSlug)
+	if err := run(d.Root, "git", "add", newPath); err != nil {
+		return err
+	}
+	if err := run(d.Root, "git", "rm", "--cached", oldPath); err != nil {
+		// old file not tracked — nothing to remove, the add below still counts
+	}
+	if err := run(d.Root, "git", "diff", "--cached", "--quiet", "--", oldPath, newPath); err == nil {
+		fmt.Println("dashboard: nothing staged — nothing to commit")
+		return nil
+	}
+	if err := run(d.Root, "git", "commit", "-m", msg); err != nil {
+		return err
+	}
+	if !push {
+		return nil
+	}
+	branch, err := d.branch()
+	if err != nil {
+		return err
+	}
+	if err := run(d.Root, "git", "pull", "--rebase", "--autostash"); err != nil {
+		return fmt.Errorf("dashboard: pull --rebase failed, NOT pushing (local state may be stale): %w", err)
+	}
+	return run(d.Root, "git", "push", "origin", branch)
+}
+
 var (
 	reActiveHeading = regexp.MustCompile(`(?m)^## Active Topics\s*$`)
 	reParkedHeading = regexp.MustCompile(`(?m)^## Parked\s*$`)

@@ -66,6 +66,35 @@ func (d *Dashboard) topicPathWithCategory(slug, category string) string {
 	return filepath.Join(d.TopicsDir(), slug+".md")
 }
 
+// SlugCategory returns the category (path prefix) of a slug — the part before
+// the first "/", or "" for toplevel topics: "starfleet/task-x" -> "starfleet",
+// "task-x" -> "".
+func SlugCategory(slug string) string {
+	if i := strings.Index(slug, "/"); i >= 0 {
+		return slug[:i]
+	}
+	return ""
+}
+
+// SlugBase returns the slug without its category prefix:
+// "starfleet/task-x" -> "task-x", "task-x" -> "task-x".
+func SlugBase(slug string) string {
+	if i := strings.Index(slug, "/"); i >= 0 {
+		return slug[i+1:]
+	}
+	return slug
+}
+
+// SlugForCategory returns the slug a topic would have in the given category:
+// "" or "active" (toplevel) keeps the bare base, any other category is
+// prefixed: ("task-x", "starfleet") -> "starfleet/task-x".
+func SlugForCategory(base, category string) string {
+	if category == "" || category == "active" {
+		return base
+	}
+	return category + "/" + base
+}
+
 // TopicPath returns the absolute filesystem path for a topic slug — exported
 // so task rm etc. can access it without duplicating the path logic.
 func (d *Dashboard) TopicPath(slug string) string {
@@ -366,6 +395,31 @@ func (d *Dashboard) DoTopicLoad(slug string) (TopicMeta, string, error) {
 	}
 	m.Slug = slug
 	return m, body, nil
+}
+
+// DoTopicMove relocates a topic to a different category (subdirectory),
+// changing its slug prefix accordingly (e.g. "starfleet/task-x" ->
+// "xlibre/task-x", or "task-x" for toplevel). The frontmatter Category is
+// updated to match (mirroring task capture), and the file is moved on disk —
+// both the new path write and the old path removal happen here. Committing is
+// left to the caller via DoTopicCommitMove, which stages both paths.
+func (d *Dashboard) DoTopicMove(slug, newCategory string, m TopicMeta, body string) (string, error) {
+	newSlug := SlugForCategory(SlugBase(slug), newCategory)
+	if newSlug == slug {
+		return newSlug, nil
+	}
+	if newCategory == "" || newCategory == "active" {
+		m.Category = "active"
+	} else {
+		m.Category = newCategory
+	}
+	if err := writeTopicFile(d.topicPath(newSlug), m, body); err != nil {
+		return "", err
+	}
+	if err := os.Remove(d.topicPath(slug)); err != nil {
+		return "", err
+	}
+	return newSlug, nil
 }
 
 // DoTopicUpdate rewrites an existing topic file with the given frontmatter
