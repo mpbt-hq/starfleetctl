@@ -605,11 +605,20 @@ func opencodeConfigPath(root, shipID string) string {
 // the user's provider config with launch-type-specific permissions and
 // starfleet-specific settings (plugin, instructions, username).
 func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) (string, error) {
-	// Load user config for provider definitions
-	userConfigPath := filepath.Join(os.Getenv("HOME"), ".config", "opencode", "opencode.json")
+	// Load starfleetctl config for provider_mode setting
+	cfg, err := config.Load(root)
+	if err != nil {
+		// Config load failed, use defaults
+		cfg = config.DefaultConfig()
+	}
+
+	// Load user config for provider definitions (only if not model-proxy-only)
 	var userConfig map[string]any
-	if data, err := os.ReadFile(userConfigPath); err == nil {
-		_ = json.Unmarshal(data, &userConfig)
+	if cfg.Comms.ProviderMode != "model-proxy-only" {
+		userConfigPath := filepath.Join(os.Getenv("HOME"), ".config", "opencode", "opencode.json")
+		if data, err := os.ReadFile(userConfigPath); err == nil {
+			_ = json.Unmarshal(data, &userConfig)
+		}
 	}
 
 	// Build the ship config. username gives each ship its own identity
@@ -620,8 +629,8 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 		"username": shipID,
 	}
 
-	// Copy provider config from user config
-	if userConfig != nil {
+	// Copy provider config from user config (unless model-proxy-only mode)
+	if cfg.Comms.ProviderMode != "model-proxy-only" && userConfig != nil {
 		if providers, ok := userConfig["provider"].(map[string]any); ok {
 			shipConfig["provider"] = providers
 		}
