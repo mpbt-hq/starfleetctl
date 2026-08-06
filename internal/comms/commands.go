@@ -367,14 +367,9 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 		if b.acked(m.ID, b.ShipID) {
 			continue
 		}
-		// Mark as seen by moving to seen/ (no ack file needed)
-		seenPath := filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json")
-		if err := os.MkdirAll(filepath.Dir(seenPath), 0o755); err == nil {
-			if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json")); err == nil {
-				os.Rename(filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(m.ID)+".json"), seenPath)
-			} else if _, err := os.Stat(filepath.Join(b.MsgDir, fsafe(m.ID)+".json")); err == nil {
-				os.Rename(filepath.Join(b.MsgDir, fsafe(m.ID)+".json"), filepath.Join(b.MsgDir, fsafe(b.ShipID), "seen", fsafe(m.ID)+".json"))
-			}
+		// Mark as seen by moving/copying to seen/ (no ack file needed)
+		if err := b.ackMessage(m.ID); err != nil {
+			continue // best-effort — never fail startup on a stray message
 		}
 		acked = append(acked, inboxMsg{ID: m.ID, From: m.From, Text: m.Text})
 		b.LogEvent("ack", m.ID+" init-seen")
@@ -468,22 +463,48 @@ func (b *Bus) DoInbox() error {
 	return nil
 }
 
+// exists reports whether the given path exists on disk.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// ackMessage marks a message as seen by this ship by placing a copy in my
+// seen/ dir. Targeted messages (in my own unseen/ dir or the legacy flat
+// path) are moved there. Broadcasts (target "all") live only in the shared
+// all/unseen/ dir, so acking one COPIES it into my seen/ dir — the shared
+// copy must stay for the other ships; acked() only checks for the copy in
+// my own seen/ dir. Returns usageErr "no such directive" when the message
+// exists in the records but has no source file at any known location.
+func (b *Bus) ackMessage(id string) error {
+	seenPath, err := b.mfileSeen(b.ShipID, id)
+	if err != nil {
+		return err
+	}
+	myUnseen := filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(id)+".json")
+	allUnseen := filepath.Join(b.MsgDir, "all", "unseen", fsafe(id)+".json")
+	legacy := filepath.Join(b.MsgDir, fsafe(id)+".json")
+
+	switch {
+	case exists(myUnseen):
+		return os.Rename(myUnseen, seenPath)
+	case exists(allUnseen):
+		data, err := os.ReadFile(allUnseen)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(seenPath, data, 0o644)
+	case exists(legacy):
+		return os.Rename(legacy, seenPath)
+	default:
+		return usageErr(fmt.Sprintf("comms: no such directive '%s'", id))
+	}
+}
+
 // DoAck implements `comms ack <id> [note]`.
 func (b *Bus) DoAck(id, note string) error {
 	if id == "" {
 		return usageErr("comms: ack needs <id> (see 'comms inbox')")
-	}
-
-	// First, find the message to get its target
-	found := false
-	for _, m := range b.allMsgRecords() {
-		if m.ID == id {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return usageErr(fmt.Sprintf("comms: no such directive '%s'", id))
 	}
 
 	lock, err := b.lockBus()
@@ -492,31 +513,7 @@ func (b *Bus) DoAck(id, note string) error {
 	}
 	defer lock.Close()
 
-	// Move from unseen to seen for this ship
-	seenPath, err := b.mfileSeen(b.ShipID, id)
-	if err != nil {
-		return err
-	}
-	// Also try old location for migration compat
-	oldPath := filepath.Join(b.MsgDir, fsafe(id)+".json")
-	newPath := filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(id)+".json")
-
-	// Move message from unseen to seen
-	var srcPath string
-	if _, err := os.Stat(newPath); err == nil {
-		srcPath = newPath
-	} else if _, err := os.Stat(oldPath); err == nil {
-		srcPath = oldPath
-	} else {
-		return usageErr(fmt.Sprintf("comms: no such directive '%s'", id))
-	}
-
-	// Ensure seen dir exists
-	seenPath, err = b.mfileSeen(b.ShipID, id)
-	if err != nil {
-		return err
-	}
-	if err := os.Rename(srcPath, seenPath); err != nil {
+	if err := b.ackMessage(id); err != nil {
 		return err
 	}
 
