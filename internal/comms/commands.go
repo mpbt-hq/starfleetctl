@@ -96,16 +96,31 @@ func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) 
 		Type:    msgType,
 		Attach:  attachName,
 	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return "", err
+
+	// Broadcasts (target "all") are fanned out at post time: one copy is
+	// written into every known ship's unseen/ dir, each carrying the concrete
+	// recipient in its Target field. There is no shared "all" pseudo-target
+	// anymore, so acking is a plain move for every recipient and each copy is
+	// pruned/acked independently. The sender is always included so it sees its
+	// own broadcast in its inbox, exactly like the old shared-dir behavior.
+	recipients := []string{target}
+	if target == "all" {
+		recipients = b.broadcastRecipients()
 	}
-	mpath, err := b.mfile(id, target)
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(mpath, data, 0o644); err != nil {
-		return "", err
+	for _, rcpt := range recipients {
+		mc := msg
+		mc.Target = rcpt
+		data, err := json.Marshal(mc)
+		if err != nil {
+			return "", err
+		}
+		mpath, err := b.mfile(id, rcpt)
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(mpath, data, 0o644); err != nil {
+			return "", err
+		}
 	}
 	b.LogEvent("directive", fmt.Sprintf("%s → %s: %s", id, target, text))
 	return id, nil
@@ -361,7 +376,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 	// 1. Ack all unacked inbox for this ship.
 	var acked []inboxMsg
 	for _, m := range b.allMsgRecords() {
-		if m.Target != "all" && m.Target != b.ShipID {
+		if m.Target != b.ShipID {
 			continue
 		}
 		if b.acked(m.ID, b.ShipID) {
@@ -393,7 +408,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 		}
 		keep := false
 		for agent := range live {
-			if m.Target != "all" && m.Target != agent {
+			if m.Target != agent {
 				continue
 			}
 			if !b.acked(m.ID, agent) {
@@ -444,7 +459,7 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 func (b *Bus) DoInbox() error {
 	found := false
 	for _, m := range b.allMsgRecords() {
-		if m.Target != "all" && m.Target != b.ShipID {
+		if m.Target != b.ShipID {
 			continue
 		}
 		if !found {
@@ -469,31 +484,23 @@ func exists(path string) bool {
 	return err == nil
 }
 
-// ackMessage marks a message as seen by this ship by placing a copy in my
-// seen/ dir. Targeted messages (in my own unseen/ dir or the legacy flat
-// path) are moved there. Broadcasts (target "all") live only in the shared
-// all/unseen/ dir, so acking one COPIES it into my seen/ dir — the shared
-// copy must stay for the other ships; acked() only checks for the copy in
-// my own seen/ dir. Returns usageErr "no such directive" when the message
-// exists in the records but has no source file at any known location.
+// ackMessage marks a message as seen by this ship by moving the copy in my
+// own unseen/ dir (or the legacy flat path) to my seen/ dir. Broadcasts are
+// fanned out to per-ship copies at post time, so they are moved just like
+// targeted messages — there is no shared "all" copy anymore. Returns usageErr
+// "no such directive" when the message exists in the records but has no
+// source file at any known location.
 func (b *Bus) ackMessage(id string) error {
 	seenPath, err := b.mfileSeen(b.ShipID, id)
 	if err != nil {
 		return err
 	}
 	myUnseen := filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(id)+".json")
-	allUnseen := filepath.Join(b.MsgDir, "all", "unseen", fsafe(id)+".json")
 	legacy := filepath.Join(b.MsgDir, fsafe(id)+".json")
 
 	switch {
 	case exists(myUnseen):
 		return os.Rename(myUnseen, seenPath)
-	case exists(allUnseen):
-		data, err := os.ReadFile(allUnseen)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(seenPath, data, 0o644)
 	case exists(legacy):
 		return os.Rename(legacy, seenPath)
 	default:
@@ -727,9 +734,9 @@ func (b *Bus) DoReply(qid string, words []string) error {
 	if qid == "" || ans == "" {
 		return usageErr("comms: reply needs <qid> <answer…>")
 	}
-	qpath, err := b.mfile(qid, "all")
-	if err != nil {
-		return usageErr(fmt.Sprintf("comms: %v", err))
+	qpath, _, ok := b.findMsgFile(qid)
+	if !ok {
+		return usageErr(fmt.Sprintf("comms: no such question '%s'", qid))
 	}
 	qm, ok := parseMsgFile(qid, qpath)
 	if !ok {
@@ -841,7 +848,7 @@ func (b *Bus) DoPrune() error {
 		}
 		keep := false
 		for agent := range live {
-			if m.Target != "all" && m.Target != agent {
+			if m.Target != agent {
 				continue
 			}
 			if !b.acked(m.ID, agent) {
@@ -905,7 +912,7 @@ func (b *Bus) DoPurgeOld(olderThan string, all bool) error {
 	for _, m := range b.allMsgRecords() {
 		// Only consider messages from/to dead ships
 		isDeadShip := m.From != "" && !live[m.From] && m.From != b.ShipID
-		isTargetDead := m.Target != "all" && m.Target != "" && !live[m.Target]
+		isTargetDead := m.Target != "" && !live[m.Target]
 
 		if !isDeadShip && !isTargetDead {
 			continue
@@ -930,6 +937,61 @@ func (b *Bus) DoPurgeOld(olderThan string, all bool) error {
 
 	b.LogEvent("purge", fmt.Sprintf("%d old directives from dead ships (all=%v, olderThan=%s)", msgCnt, all, olderThan))
 	fmt.Printf("comms: purged %d old directive(s) from dead ships\n", msgCnt)
+	return nil
+}
+
+// DoMigrateBroadcasts converts legacy broadcasts (the shared msgs/all/
+// pseudo-target, or flat files with Target "all") to the fan-out model: one
+// per-ship copy into every known ship's unseen/ dir (only for ships that
+// haven't acked yet), then removes the legacy source and the now-empty
+// msgs/all/ directory. Idempotent — once no Target=="all" record exists,
+// it is a no-op.
+func (b *Bus) DoMigrateBroadcasts() error {
+	lock, err := b.lockBus()
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	migrated := 0
+	handled := make(map[string]bool)
+	for _, m := range b.allMsgRecords() {
+		if m.Target != "all" || handled[m.ID] {
+			continue
+		}
+		handled[m.ID] = true
+		src, _, ok := b.findMsgFile(m.ID)
+		if !ok {
+			continue
+		}
+		for _, ship := range b.broadcastRecipients() {
+			if b.acked(m.ID, ship) {
+				continue
+			}
+			mc := m
+			mc.Target = ship
+			data, err := json.Marshal(mc)
+			if err != nil {
+				continue
+			}
+			mpath, err := b.mfile(m.ID, ship)
+			if err != nil {
+				continue
+			}
+			if err := os.WriteFile(mpath, data, 0o644); err == nil {
+				migrated++
+			}
+		}
+		os.Remove(src)
+	}
+
+	// The shared msgs/all/ tree is fully obsolete now.
+	if err := os.RemoveAll(filepath.Join(b.MsgDir, "all")); err != nil {
+		return err
+	}
+
+	b.LogEvent("migrate", fmt.Sprintf("%d broadcast copies fanned out, msgs/all removed", migrated))
+	fmt.Printf("comms: migrated %d broadcast copy(ies); removed legacy msgs/all\n", migrated)
 	return nil
 }
 

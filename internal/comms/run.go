@@ -13,7 +13,7 @@ const usage = `comms <command> [args…]
 
 Worker session:
   status <state> ["note"]   report/refresh my heartbeat
-  inbox [--json]            directives addressed to me or to all, unacked
+  inbox [--json]            directives addressed to me, unacked
   ack <id> ["note"]         mark a directive handled
   ask "<q>" [--to <ctrl>] [--timeout <secs>]
   clear                     drop my heartbeat (session end)
@@ -39,6 +39,8 @@ Control agent:
   events [N]                tail the audit log (default 20)
   prune                     drop stale heartbeats + fully-acked old directives
   purge [--older-than <dur>] [--all]  remove old directives (by age or all from dead ships)
+  migrate-broadcasts        one-off: fan legacy msgs/all broadcasts out to
+                            per-ship copies, then remove msgs/all (idempotent)
   health [--json] [--loop]  fleet liveness watchdog (Go port of fleet-health)
   dispatch --stdin          JSON-RPC entry point for the opencode plugin
                             (reads dispatchRequest, returns dispatchResponse)
@@ -163,6 +165,8 @@ func Run(root string, args []string) int {
 		cmdErr = b.DoEvents(n)
 	case "prune":
 		cmdErr = b.DoPrune()
+	case "migrate-broadcasts":
+		cmdErr = b.DoMigrateBroadcasts()
 	case "purge":
 		olderThan := ""
 		all := false

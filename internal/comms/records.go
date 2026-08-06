@@ -225,7 +225,7 @@ func (b *Bus) allMsgRecords() []msgRecord {
 func (b *Bus) inboxCount(agent string) int {
 	cnt := 0
 	for _, m := range b.allMsgRecords() {
-		if m.Target != "all" && m.Target != agent {
+		if m.Target != agent {
 			continue
 		}
 		// Count only unseen messages (not in seen/)
@@ -235,6 +235,53 @@ func (b *Bus) inboxCount(agent string) int {
 		cnt++
 	}
 	return cnt
+}
+
+// knownShips returns the sorted set of every ship ID known to the fleet: the
+// union of the per-ship message dirs under MsgDir and the agents that have a
+// status record on the board. Broadcasts are fanned out to exactly this set
+// at post time (no shared "all" pseudo-target anymore).
+func (b *Bus) knownShips() []string {
+	known := make(map[string]bool)
+	entries, err := os.ReadDir(b.MsgDir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || e.Name() == "all" {
+				continue
+			}
+			known[e.Name()] = true
+		}
+	}
+	for _, r := range b.AllStatusRecords() {
+		if r.Agent != "" && !strings.HasPrefix(r.Agent, ".") && r.Agent != "all" {
+			known[r.Agent] = true
+		}
+	}
+	out := make([]string, 0, len(known))
+	for s := range known {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// broadcastRecipients returns the sorted recipient set for a broadcast:
+// every known ship plus the sender itself, so a ship always sees its own
+// broadcasts in its inbox (matching the old shared "all"-dir behavior).
+func (b *Bus) broadcastRecipients() []string {
+	recs := b.knownShips()
+	found := false
+	for _, r := range recs {
+		if r == b.ShipID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		recs = append(recs, b.ShipID)
+		sort.Strings(recs)
+	}
+	return recs
 }
 
 // shipExists reports whether a status file exists for the given ship name.

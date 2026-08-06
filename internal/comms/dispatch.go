@@ -234,7 +234,7 @@ func (b *Bus) dispatchInbox() dispatchResponse {
 	agent := b.ShipID
 	var out []inboxMsg
 	for _, m := range msgs {
-		if m.Target != "all" && m.Target != agent {
+		if m.Target != agent {
 			continue
 		}
 		if b.acked(m.ID, agent) {

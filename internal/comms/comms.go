@@ -237,42 +237,6 @@ func age(epoch int64) string {
 	}
 }
 
-// allTargetsAcked returns true if every live agent that is a target of
-// the message has acknowledged it. Used to auto-delete messages when
-// all live targets have acked (so old messages don't resurface on restart).
-func (b *Bus) allTargetsAcked(id string, live map[string]bool) bool {
-	// We need to find the message to get its target
-	var msg msgRecord
-	found := false
-	for _, m := range b.allMsgRecords() {
-		if m.ID == id {
-			msg = m
-			found = true
-			break
-		}
-	}
-	if !found {
-		return false
-	}
-	path, err := b.mfile(id, msg.Target)
-	if err != nil {
-		return false
-	}
-	m, ok := parseMsgFile(id, path)
-	if !ok {
-		return false
-	}
-	for agent := range live {
-		if m.Target != "all" && m.Target != agent {
-			continue
-		}
-		if !b.acked(m.ID, agent) {
-			return false
-		}
-	}
-	return true
-}
-
 func (b *Bus) LogEvent(kind, note string) {
 	f, err := os.OpenFile(b.Events, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {

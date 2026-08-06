@@ -123,7 +123,7 @@ type inboxEntryJSON struct {
 func (b *Bus) DoInboxJSON() error {
 	var out []inboxEntryJSON
 	for _, m := range b.allMsgRecords() {
-		if m.Target != "all" && m.Target != b.ShipID {
+		if m.Target != b.ShipID {
 			continue
 		}
 		out = append(out, inboxEntryJSON{
@@ -178,7 +178,7 @@ func (b *Bus) Conversation(ship string) []msgEntryJSON {
 	msgs := b.allMsgRecords()
 	out := make([]msgEntryJSON, 0, len(msgs))
 	for _, m := range msgs {
-		if m.From != ship && m.Target != ship && m.Target != "all" {
+		if m.From != ship && m.Target != ship {
 			continue
 		}
 		out = append(out, msgEntryJSON{
@@ -247,7 +247,7 @@ func (b *Bus) AllMsgRecordsJSON() []msgEntryJSON {
 func (b *Bus) AllInboxRecordsJSON() []inboxEntryJSON {
 	var out []inboxEntryJSON
 	for _, m := range b.allMsgRecords() {
-		if m.Target != "all" && m.Target != b.ShipID {
+		if m.Target != b.ShipID {
 			continue
 		}
 		out = append(out, inboxEntryJSON{

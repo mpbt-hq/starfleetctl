@@ -42,7 +42,7 @@ func (b *Bus) DoMonitorLoop() error {
 
 	for {
 		for _, m := range b.allMsgRecords() {
-			if m.Target != "all" && m.Target != b.ShipID {
+			if m.Target != b.ShipID {
 				continue
 			}
 			if b.acked(m.ID, b.ShipID) {
@@ -94,14 +94,10 @@ func (b *Bus) DoFleetWatch() error {
 }
 
 // DoWatch implements `comms watch`: a local, LLM-free desktop
-// notifier for new directives targeting this agent (or a broadcast). Single
+// notifier for new directives targeting this agent. Single
 // instance per agent id (PID-file guard, matching bash); --stop kills it.
 func (b *Bus) DoWatch(intervalArg string, stop bool) error {
 	notifyDir := filepath.Join(b.BusDir, "notify")
-	popupOnceDir := filepath.Join(notifyDir, ".popup-once")
-	if err := os.MkdirAll(popupOnceDir, 0o755); err != nil {
-		return err
-	}
 	agentSafe := fsafe(b.ShipID)
 	pidFile := filepath.Join(notifyDir, ".watch-"+agentSafe+".pid")
 	logFile := filepath.Join(notifyDir, agentSafe+".log")
@@ -127,15 +123,14 @@ func (b *Bus) DoWatch(intervalArg string, stop bool) error {
 
 	for {
 		for _, m := range b.allMsgRecords() {
-			if m.Target != "all" && m.Target != b.ShipID {
+			if m.Target != b.ShipID {
 				continue
 			}
 			if b.acked(m.ID, b.ShipID) {
 				continue
 			}
-			notify(logFile, popupOnceDir, b.ShipID, m)
+			notify(logFile, b.ShipID, m)
 		}
-		reapPopupOnce(popupOnceDir, b.MsgDir)
 		time.Sleep(interval)
 	}
 }
@@ -173,7 +168,7 @@ func alreadyRunning(pidFile string) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-func notify(logFile, popupOnceDir, agentID string, m msgRecord) {
+func notify(logFile, agentID string, m msgRecord) {
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err == nil {
@@ -181,27 +176,8 @@ func notify(logFile, popupOnceDir, agentID string, m msgRecord) {
 		f.Close()
 	}
 	title := fmt.Sprintf("comms: directive for %s", agentID)
-	if m.Target == "all" {
-		title = "comms: broadcast"
-		// Atomic "first ship wins" gate, same as bash's mkdir race guard.
-		if err := os.Mkdir(filepath.Join(popupOnceDir, m.ID), 0o755); err != nil {
-			return
-		}
-	}
 	if _, err := exec.LookPath("notify-send"); err == nil {
 		_ = exec.Command("notify-send", "-u", "normal", title, fmt.Sprintf("[%s] %s: %s", m.ID, m.From, m.Text)).Run()
-	}
-}
-
-func reapPopupOnce(popupOnceDir, msgDir string) {
-	entries, err := os.ReadDir(popupOnceDir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if _, err := os.Stat(filepath.Join(msgDir, e.Name()+".tsv")); err != nil {
-			os.Remove(filepath.Join(popupOnceDir, e.Name()))
-		}
 	}
 }
 

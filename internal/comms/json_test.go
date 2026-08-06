@@ -31,7 +31,9 @@ func TestConversation_FiltersOutUnrelatedShips(t *testing.T) {
 	seedMsg(t, dir, "m2", 200, "Enterprise", "Stargazer", "reply")
 	seedMsg(t, dir, "m3", 300, "Stargazer", "Voyager", "unrelated")
 	seedMsg(t, dir, "m4", 400, "McKinley", "Stargazer", "unrelated viewer msg")
-	seedMsg(t, dir, "m5", 500, "Stargazer", "all", "fleet broadcast")
+	// Fleet broadcast: in the fan-out model this is a per-ship copy carrying
+	// the concrete recipient (Target=Enterprise), not the legacy "all" target.
+	seedMsg(t, dir, "m5", 500, "Stargazer", "Enterprise", "fleet broadcast")
 
 	msgs := b.Conversation("Enterprise")
 
