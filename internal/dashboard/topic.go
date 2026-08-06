@@ -286,7 +286,13 @@ func writeTopicFile(path string, m TopicMeta, body string) error {
 //	topics/project/x86emu.md   → slug = "project/x86emu"
 //
 // The slug is NOT stored in the frontmatter; it's derived from the filename.
-func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
+//
+// When strict=false (the recommended mode for listing/UI paths), a single
+// broken or unreadable file is logged to stderr and skipped instead of
+// failing the whole walk — otherwise one corrupted topic would blank the
+// entire task board. strict=true (fail-fast) is for callers that must not
+// silently lose topics.
+func (d *Dashboard) loadAllTopics(strict bool) ([]TopicMeta, error) {
 	topicsDir := d.TopicsDir()
 	if _, err := os.Stat(topicsDir); os.IsNotExist(err) {
 		return nil, nil
@@ -309,11 +315,19 @@ func (d *Dashboard) loadAllTopics() ([]TopicMeta, error) {
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			if strict {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "dashboard: skipping unreadable topic %s: %v\n", path, err)
+			return nil
 		}
 		m, _, err := parseTopicFile(data)
 		if err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			if strict {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			fmt.Fprintf(os.Stderr, "dashboard: skipping broken topic %s: %v\n", path, err)
+			return nil
 		}
 		rel, err := filepath.Rel(topicsDir, path)
 		if err != nil {
@@ -347,24 +361,20 @@ type TopicJSON struct {
 }
 
 // LoadAllTopics returns every dashboard/topics/*.md file's frontmatter, sorted
-// by slug. Exposed for task purge and other callers that need the full set.
+// by slug. Broken/unreadable files are skipped with a stderr warning (see
+// loadAllTopics). Exposed for task purge and other callers that need the full set.
 func (d *Dashboard) LoadAllTopics() ([]TopicMeta, error) {
-	return d.loadAllTopics()
+	return d.loadAllTopics(false)
 }
 
 // LoadAllTopicsJSON returns every dashboard/topics/*.md file's frontmatter as a
 // JSON-shaped slice, sorted by slug — for the web UI's task board.
-// If strict=true, any parse error fails the whole call. If strict=false (default),
-// invalid files are skipped with a warning and the rest are returned.
+// If strict=true, any parse error fails the whole call. If strict=false
+// (default), invalid files are skipped with a warning and the rest are returned.
 func (d *Dashboard) LoadAllTopicsJSON(strict bool) ([]TopicJSON, error) {
-	metas, err := d.loadAllTopics()
+	metas, err := d.loadAllTopics(strict)
 	if err != nil {
-		if strict {
-			return nil, err
-		}
-		// Non-strict: log and continue with what we have
-		fmt.Fprintf(os.Stderr, "dashboard: loadAllTopics warning: %v\n", err)
-		metas = nil
+		return nil, err
 	}
 	out := make([]TopicJSON, 0, len(metas))
 	for _, m := range metas {

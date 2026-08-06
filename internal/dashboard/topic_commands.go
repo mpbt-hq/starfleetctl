@@ -25,7 +25,7 @@ type TopicListOpts struct {
 // a JSON array) — the "what's tracked" overview, same spirit as `pr-claim
 // --list`/`ship-names list`.
 func (d *Dashboard) DoTopicList(opts TopicListOpts) error {
-	metas, err := d.loadAllTopics()
+	metas, err := d.loadAllTopics(false)
 	if err != nil {
 		return err
 	}
@@ -292,7 +292,7 @@ func (d *Dashboard) DoReindex() error {
 	if _, err := d.EnsureBootstrapped(); err != nil {
 		return err
 	}
-	metas, err := d.loadAllTopics()
+	metas, err := d.loadAllTopics(false)
 	if err != nil {
 		return err
 	}

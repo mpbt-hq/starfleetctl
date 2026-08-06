@@ -139,11 +139,40 @@ func TestLoadAllTopicsSkipsLockFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	metas, err := d.loadAllTopics()
+	metas, err := d.loadAllTopics(false)
 	if err != nil {
 		t.Fatalf("loadAllTopics: %v", err)
 	}
 	if len(metas) != 1 || metas[0].Slug != "task-x" {
 		t.Fatalf("expected exactly [task-x], got %+v", metas)
+	}
+}
+
+// TestLoadAllTopicsSkipsBrokenFiles verifies that a single topic file without
+// frontmatter (or otherwise unparseable) does not blank the whole topic set in
+// non-strict mode — the regression that made /api/tasks return [] — while
+// strict mode still surfaces it as an error.
+func TestLoadAllTopicsSkipsBrokenFiles(t *testing.T) {
+	d := newTestDashboard(t)
+	if err := os.WriteFile(d.TopicPath("task-ok"), []byte(roundTripSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A topic whose frontmatter was clobbered (body-only file, no YAML/RFC2822).
+	if err := os.WriteFile(d.TopicPath("task-broken"), []byte("just a note without frontmatter\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-strict: broken file skipped, valid one still returned.
+	metas, err := d.loadAllTopics(false)
+	if err != nil {
+		t.Fatalf("loadAllTopics(false): %v", err)
+	}
+	if len(metas) != 1 || metas[0].Slug != "task-ok" {
+		t.Fatalf("expected exactly [task-ok], got %+v", metas)
+	}
+
+	// Strict: the broken file fails the whole call.
+	if _, err := d.loadAllTopics(true); err == nil {
+		t.Fatal("expected error in strict mode, got nil")
 	}
 }
