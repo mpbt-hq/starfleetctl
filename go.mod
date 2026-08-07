@@ -12,4 +12,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/X11Libre/go-x11proto => /home/nekrad/src/xorg/mpbt-workspace/_WORK_/go-x11proto/sources/xlibre/go-x11proto
+replace github.com/X11Libre/go-x11proto => /home/nekrad/src/xorg/mpbt-workspace/_WORK_/worktrees/go-x11proto-scrollback
