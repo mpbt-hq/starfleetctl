@@ -701,6 +701,7 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 		Description  string   `json:"description"`   // human-readable description
 		ScheduleType string   `json:"schedule_type"` // "once"|"interval"|"cron"
 		At           string   `json:"at"`
+		TZ           string   `json:"tz"`
 		Every        string   `json:"every"`
 		Cron         string   `json:"cron"`
 		Type         string   `json:"type"`        // "ship" (directive), "command", or "system"
@@ -763,7 +764,7 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 	switch timer.ScheduleType(p.ScheduleType) {
 	case timer.ScheduleOnce:
 		sched = timer.Schedule{Type: timer.ScheduleOnce}
-		t, err := timer.ParseAtTime(p.At, "")
+		t, err := timer.ParseAtTime(p.At, p.TZ)
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
@@ -805,6 +806,7 @@ func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
 		Text:        p.Text,
 		Cmd:         p.Cmd,
 		Schedule:    sched,
+		Timezone:    p.TZ,
 		Persistent:  persistent,
 		Enabled:     true,
 		CreatedAt:   time.Now().Unix(),

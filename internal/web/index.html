@@ -306,7 +306,19 @@
       </div>
       <div id="tf_at_row" class="grid2" style="margin-top:8px">
         <input id="tf_at" data-i18n-ph="tf_at.ph" placeholder="z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00">
+        <input id="tf_tz" data-i18n-ph="tf_tz.ph" list="tzlist" placeholder="Europe/Berlin" title="Zeitzone (IANA-Name oder Abkürzung, z.B. CEST)">
       </div>
+      <datalist id="tzlist">
+        <option value="UTC"></option>
+        <option value="Europe/Berlin"></option>
+        <option value="Europe/London"></option>
+        <option value="Europe/Paris"></option>
+        <option value="Europe/Vienna"></option>
+        <option value="Europe/Zurich"></option>
+        <option value="America/New_York"></option>
+        <option value="America/Los_Angeles"></option>
+        <option value="Asia/Tokyo"></option>
+      </datalist>
       <div id="tf_every_row" class="grid2" style="margin-top:8px;display:none">
         <input id="tf_every" data-i18n-ph="tf_every.ph" placeholder="z.B. 10m / 1h / 30s">
       </div>
@@ -581,7 +593,7 @@ const I18N = {
     'tf_type.interval': 'Intervall (--every)', 'tf_type.cron': 'Cron (--cron)',
     'tf_target.fleet': 'Fleet (einen freien)', 'tf_target.fleetall': 'Fleet-alle (alle freien)',
     'tf_target.ship': 'Eigenes Schiff', 'tf_target.system': 'System (direkt)',
-    'tf_at.ph': 'z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00',
+    'tf_at.ph': 'z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00', 'tf_tz.ph': 'Zeitzone (z.B. Europe/Berlin oder CEST)',
     'tf_every.ph': 'z.B. 10m / 1h / 30s', 'tf_cron.ph': 'z.B. 0 4 * * *',
     'tf_cmd.reindex': 'reindex — Agent- und Dashboard-Indices aktualisieren',
     'tf_cmd.web': 'web — Webserver starten (idempotent)',
@@ -686,7 +698,7 @@ const I18N = {
     'tf_type.interval': 'Interval (--every)', 'tf_type.cron': 'Cron (--cron)',
     'tf_target.fleet': 'Fleet (one free)', 'tf_target.fleetall': 'Fleet-all (all free)',
     'tf_target.ship': 'Own ship', 'tf_target.system': 'System (direct)',
-    'tf_at.ph': 'e.g. 17:30 / tomorrow 17:30 / 2026-07-20 09:00',
+    'tf_at.ph': 'e.g. 17:30 / tomorrow 17:30 / 2026-07-20 09:00', 'tf_tz.ph': 'Timezone (e.g. Europe/Berlin or CEST)',
     'tf_every.ph': 'e.g. 10m / 1h / 30s', 'tf_cron.ph': 'e.g. 0 4 * * *',
     'tf_cmd.reindex': 'reindex — refresh agent and dashboard indices',
     'tf_cmd.web': 'web — start webserver (idempotent)',
@@ -1675,6 +1687,16 @@ function timerFormUpdate(){
   document.getElementById('tf_cron_row').style.display = t==='cron'?'':'none';
 }
 
+function timerTZDefault(){
+  const el = document.getElementById('tf_tz');
+  if (!el) return;
+  if (el.value.trim()) return;
+  let z = '';
+  try { z = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(e) {}
+  if (!z) z = (new Date().toString().match(/\(([^)]+)\)/)||[])[1] || '';
+  el.value = z;
+}
+
 function timerTargetUpdate(){
   const tgt = document.getElementById('tf_target').value;
   const isSystem = tgt === 'system';
@@ -1685,6 +1707,7 @@ function timerTargetUpdate(){
 
 async function loadTimers(){
   try {
+    timerTZDefault();
     // Worker status
     const ws = await api('/api/timer/worker');
     timerWorkerRunning = ws.running;
@@ -1739,7 +1762,10 @@ async function timerCreate(){
     if (!msg){ toast(t('timers.msgmissing'), true); return; }
     body.text = msg;
   }
-  if (type==='once') body.at = document.getElementById('tf_at').value.trim();
+  if (type==='once') {
+    body.at = document.getElementById('tf_at').value.trim();
+    body.tz = document.getElementById('tf_tz').value.trim();
+  }
   if (type==='interval') body.every = document.getElementById('tf_every').value.trim();
   if (type==='cron') body.cron = document.getElementById('tf_cron').value.trim();
   try {

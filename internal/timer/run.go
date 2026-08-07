@@ -627,12 +627,57 @@ func parseSchedule(stype ScheduleType, atStr, everyStr, cronExpr, tz string) (in
 	}
 }
 
+// commonTZ is a small map of common timezone abbreviations to fixed offsets
+// (seconds east of UTC). DST abbreviations are handled as their standard
+// offsets, since the absolute wall-clock the user types is interpreted in
+// that offset. Full IANA names (e.g. "Europe/Berlin") take precedence when
+// the suffix resolves via time.LoadLocation.
+var commonTZ = map[string]int{
+	"UTC": 0, "GMT": 0, "Z": 0,
+	"CET": 3600, "CEST": 2 * 3600,
+	"EET": 2 * 3600, "EEST": 3 * 3600,
+	"WET": 0, "WEST": 3600,
+	"EST": -5 * 3600, "EDT": -4 * 3600,
+	"CST": -6 * 3600, "CDT": -5 * 3600,
+	"MST": -7 * 3600, "MDT": -6 * 3600,
+	"PST": -8 * 3600, "PDT": -7 * 3600,
+	"AKST": -9 * 3600, "AKDT": -8 * 3600,
+	"HST": -10 * 3600,
+	"JST": 9 * 3600,
+	"KST": 9 * 3600,
+	"IST": 5*3600 + 30*60,
+	"AEST": 10 * 3600, "AEDT": 11 * 3600,
+	"ACST": 9*3600 + 30*60, "ACDT": 10*3600 + 30*60,
+	"NZST": 12 * 3600, "NZDT": 13 * 3600,
+}
+
+// resolveLocation maps a timezone string (IANA name or common abbreviation)
+// to a *time.Location. Returns nil if the string is empty or unrecognized.
+func resolveLocation(tz string) *time.Location {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return nil
+	}
+	if loc, err := time.LoadLocation(tz); err == nil {
+		return loc
+	}
+	if off, ok := commonTZ[strings.ToUpper(tz)]; ok {
+		return time.FixedZone(tz, off)
+	}
+	return nil
+}
+
 // ParseAtTime parses a --at string into a UTC time.
 // Supported formats:
 //   - "17:30" (today)
+//   - "17:30 CEST" (today, in the given timezone)
+//   - "17:30 Europe/Berlin" (today, in the given timezone)
 //   - "2006-01-02 15:04" (absolute)
 //   - "2006-01-02T15:04:00Z" (ISO 8601)
 //   - "tomorrow 17:30"
+//
+// If no timezone is given in the string, the tz argument is used (may be an
+// IANA name or a common abbreviation); empty tz falls back to UTC.
 func ParseAtTime(s, tz string) (time.Time, error) {
 	now := time.Now().UTC()
 	if s == "" {
@@ -651,6 +696,13 @@ func ParseAtTime(s, tz string) (time.Time, error) {
 		rest = strings.TrimSpace(s[len("morgen"):])
 	}
 
+	// Split off a trailing timezone token ("15:20 CEST" / "09:00 Europe/Berlin").
+	rest, tz = splitTZ(rest, tz)
+	loc := resolveLocation(tz)
+	if loc == nil {
+		loc = time.UTC
+	}
+
 	// Try various formats.
 	formats := []string{
 		"15:04",
@@ -664,11 +716,11 @@ func ParseAtTime(s, tz string) (time.Time, error) {
 			// Combine with date.
 			if prefix == "tomorrow" {
 				return time.Date(now.Year(), now.Month(), now.Day()+1,
-					t.Hour(), t.Minute(), t.Second(), 0, time.UTC), nil
+					t.Hour(), t.Minute(), t.Second(), 0, loc).UTC(), nil
 			}
 			// Today or absolute date.
 			result := time.Date(now.Year(), now.Month(), now.Day(),
-				t.Hour(), t.Minute(), t.Second(), 0, time.UTC)
+				t.Hour(), t.Minute(), t.Second(), 0, loc).UTC()
 			if t.Year() > 2000 {
 				// Full date was parsed.
 				result = t.UTC()
@@ -677,6 +729,22 @@ func ParseAtTime(s, tz string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("invalid --at format: %s", s)
+}
+
+// splitTZ strips a trailing timezone token (IANA name like "Europe/Berlin" or
+// a common abbreviation like "CEST") from s. The caller-provided tz is used as
+// the fallback when s carries no timezone token.
+func splitTZ(s, tz string) (string, string) {
+	sp := strings.Fields(s)
+	if len(sp) < 2 {
+		return s, tz
+	}
+	last := sp[len(sp)-1]
+	rest := strings.Join(sp[:len(sp)-1], " ")
+	if resolveLocation(last) != nil {
+		return rest, last
+	}
+	return s, tz
 }
 
 // CronNextFire computes the next fire time for a cron expression using robfig/cron.
