@@ -194,8 +194,92 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": msg})
 }
 
+// truncate returns s truncated to at most n characters.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// BoardEntryWithTimers extends boardEntryJSON with timer information.
+type BoardEntryWithTimers struct {
+	comms.BoardEntryJSON
+	Timers []TimerInfo `json:"timers,omitempty"`
+}
+
+// TimerInfo represents a summary of a timer for board display.
+type TimerInfo struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+	NextFire    int64  `json:"next_fire"`
+	Target      string `json:"target"`
+	Status      string `json:"status"`
+	Text        string `json:"text"`
+	Type        string `json:"type"`
+	Persistent  bool   `json:"persistent"`
+}
+
 func (s *Server) apiBoard(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.bus.BoardEntries())
+	board := s.bus.BoardEntries()
+
+	// Fetch all timers.
+	timers, err := timer.ListAllTimers(s.Root)
+	if err != nil {
+		timers = []*timer.TimerRecord{}
+	}
+
+	// Group timers by owner.
+	timersByOwner := make(map[string][]TimerInfo)
+	for _, t := range timers {
+		if t.Owner == "" {
+			continue
+		}
+		kind := string(t.Schedule.Type)
+		status := "active"
+		if !t.Enabled {
+			status = "paused"
+		}
+		target := targetDesc(t.Target.Type, t.Target.Value, s.bus.ShipID)
+		timersByOwner[t.Owner] = append(timersByOwner[t.Owner], TimerInfo{
+			ID:          t.ID,
+			Description: t.Description,
+			Kind:        kind,
+			NextFire:    t.NextFire,
+			Target:      target,
+			Status:      status,
+			Text:        truncate(t.Text, 60),
+			Type:        t.Type,
+			Persistent:  t.Persistent,
+		})
+	}
+
+	// Combine board entries with timer info.
+	var result []BoardEntryWithTimers
+	for _, e := range board {
+		entry := BoardEntryWithTimers{
+			BoardEntryJSON: e,
+			Timers:         timersByOwner[e.Agent],
+		}
+		result = append(result, entry)
+	}
+
+	writeJSON(w, result)
+}
+
+func targetDesc(tt timer.TargetType, value, self string) string {
+	switch tt {
+	case timer.TargetFleet:
+		return "fleet"
+	case timer.TargetFleetAll:
+		return "fleet-all"
+	default:
+		if value == "" || value == self {
+			return self
+		}
+		return value
+	}
 }
 
 func (s *Server) apiMsgs(w http.ResponseWriter, r *http.Request) {

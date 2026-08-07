@@ -64,6 +64,14 @@ func apiGet(t *testing.T, h http.Handler, url string) (int, map[string]any) {
 	return rr.Code, m
 }
 
+// apiGetRaw returns the raw response body for array-returning endpoints.
+func apiGetRaw(t *testing.T, h http.Handler, url string) (int, []byte) {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, url, nil))
+	return rr.Code, rr.Body.Bytes()
+}
+
 func apiPost(t *testing.T, h http.Handler, url string, v any) (int, string) {
 	t.Helper()
 	buf, err := json.Marshal(v)
@@ -256,5 +264,56 @@ func TestWebAddrPort(t *testing.T) {
 	args := []string{"./.starfleet-ai/bin/starfleetctl", "web", "start", "--addr", "0.0.0.0:8080"}
 	if port := webAddrPort(args); port != "8080" {
 		t.Errorf("webAddrPort(%v) = %q, want 8080", args, port)
+	}
+}
+
+// TestAPIBoardIncludesTimers verifies that the board API attaches each
+// ship's timers to its board entry.
+func TestAPIBoardIncludesTimers(t *testing.T) {
+	s := newTestServer(t)
+	root := s.Root
+
+	statusDir := filepath.Join(root, ".starfleet-ai", "var", "comms", "status")
+	if err := os.MkdirAll(statusDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	status := `{"agent":"Alpha","state":"working","project":"proj"}`
+	if err := os.WriteFile(filepath.Join(statusDir, "Alpha.json"), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	timersDir := filepath.Join(root, ".starfleet-ai", "var", "timers")
+	if err := os.MkdirAll(timersDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	timerJSON := `{"id":"t-1","description":"poll CI","owner":"Alpha","type":"ship","text":"check CI","schedule":{"type":"interval","interval_sec":900},"enabled":true,"next_fire":0,"persistent":false}`
+	if err := os.WriteFile(filepath.Join(timersDir, "t-1.json"), []byte(timerJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, raw := apiGetRaw(t, s.Handler(), "/api/board")
+	if code != 200 {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("unmarshal board: %v (body: %s)", err, raw)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d board rows, want 1 (body: %s)", len(rows), raw)
+	}
+	timers, ok := rows[0]["timers"].([]any)
+	if !ok {
+		t.Fatalf("board row has no timers array: %s", raw)
+	}
+	if len(timers) != 1 {
+		t.Fatalf("got %d timers, want 1", len(timers))
+	}
+	tm := timers[0].(map[string]any)
+	if tm["id"] != "t-1" {
+		t.Errorf("timer id = %v, want t-1", tm["id"])
+	}
+	if tm["owner"] != nil {
+		t.Errorf("unexpected owner field leaked into TimerInfo: %v", tm["owner"])
 	}
 }

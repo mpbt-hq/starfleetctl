@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-type boardEntryJSON struct {
+type BoardEntryJSON struct {
 	Agent      string `json:"agent"`
 	Project    string `json:"project"`
 	State      string `json:"state"`
@@ -45,11 +45,11 @@ type boardEntryJSON struct {
 // BoardEntries returns the same board data that `comms board --json`
 // prints, as a slice — for programmatic callers that need it without parsing
 // stdout.
-func (b *Bus) BoardEntries() []boardEntryJSON {
+func (b *Bus) BoardEntries() []BoardEntryJSON {
 	recs := b.AllStatusRecords()
-	out := make([]boardEntryJSON, 0, len(recs))
+	out := make([]BoardEntryJSON, 0, len(recs))
 	for _, r := range recs {
-		e := boardEntryJSON{
+		e := BoardEntryJSON{
 			Agent:      r.Agent,
 			Project:    r.Project,
 			State:      r.State,

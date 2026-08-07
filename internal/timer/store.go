@@ -111,3 +111,20 @@ func (s *Store) List() ([]*TimerRecord, error) {
 func (s *Store) Dir() string {
 	return s.dir
 }
+
+// ListAllTimers returns all timer records across all timer directories for the given root.
+func ListAllTimers(root string) ([]*TimerRecord, error) {
+	var all []*TimerRecord
+	for _, td := range TimerDirs(root) {
+		store, err := NewStore(td.Dir)
+		if err != nil {
+			continue
+		}
+		timers, err := store.List()
+		if err != nil {
+			continue
+		}
+		all = append(all, timers...)
+	}
+	return all, nil
+}

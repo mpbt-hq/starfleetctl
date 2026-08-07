@@ -988,6 +988,12 @@ async function loadBoard(){
       else if (r.provider) meta.push(`<span class="pill dim">🧠 ${esc(r.provider)}</span>`);
       if (r.launch_type) meta.push(`<span class="pill dim">${esc(r.launch_type)}</span>`);
       if (r.parent) meta.push(`<span class="muted">↳ ${esc(r.parent)}</span>`);
+      if (r.timers && r.timers.length) meta.push(r.timers.map(tr=>{
+        const nm = tr.description || tr.id;
+        const st = tr.status==='paused' ? '⏸ ' : '⏱ ';
+        const nf = tr.next_fire ? ' · '+age(tr.next_fire - Date.now()/1000) : '';
+        return `<span class="pill ${tr.status==='paused'?'dim':'ok'}" title="timer ${esc(tr.id)}">${st}${esc(nm)}${nf}</span>`;
+      }).join(' '));
       return `<div class="card ship${stale}" onclick="openShip('${esc(r.agent)}')">
         <div class="row"><span class="agent grow">${esc(r.agent)}</span>
           <span class="pill ${cls}">${esc(st)}</span></div>
