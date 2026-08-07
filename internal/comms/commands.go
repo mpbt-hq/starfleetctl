@@ -54,6 +54,14 @@ const attachPrefix = "[[attach:"
 // Caller must not hold the bus lock — post takes it itself, mirroring _post().
 // msgType specifies the message type: "ship", "user", "control" (defaults to "ship").
 func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) (string, error) {
+	return b.postAs(b.ShipID, target, summary, payload, basename, replyTo, msgType)
+}
+
+// postAs is like post, but records the given sender as the message's From
+// instead of the bus identity (b.ShipID). Used by background daemons (e.g.
+// the timer worker) to attribute a directive to the ship that owns/created
+// it, rather than to the daemon process itself.
+func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType string) (string, error) {
 	lock, err := b.lockBus()
 	if err != nil {
 		return "", err
@@ -89,7 +97,7 @@ func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) 
 		ID:      id,
 		Epoch:   now(),
 		ISO:     isots(),
-		From:    b.ShipID,
+		From:    from,
 		Target:  target,
 		Text:    text,
 		ReplyTo: replyTo,
@@ -651,6 +659,29 @@ func (b *Bus) Command(target, verb, args string) (string, error) {
 		text = verb + " " + args
 	}
 	return b.post(target, text, "", "cmd", "", "command")
+}
+
+// PostFrom posts a ship-type directive with an explicit sender. It is the
+// programmatic equivalent of `comms tell` but attributes the message to
+// `from` rather than to the bus identity — used by the timer worker so a
+// timer's message arrives from the ship that created the timer.
+func (b *Bus) PostFrom(from, target, text string) error {
+	text = clean(text)
+	if text == "" {
+		return usageErr("comms: directive needs text")
+	}
+	_, err := b.postAs(from, target, text, "", "", "", "ship")
+	return err
+}
+
+// CommandFrom posts a command directive with an explicit sender. Like
+// PostFrom it attributes the message to `from` instead of the bus identity.
+func (b *Bus) CommandFrom(from, target, verb, args string) (string, error) {
+	text := verb
+	if args != "" {
+		text = verb + " " + args
+	}
+	return b.postAs(from, target, text, "", "cmd", "", "command")
 }
 
 // DoCommand implements `comms cmd <target> <verb> [args...]`.
