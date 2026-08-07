@@ -20,6 +20,10 @@ background process, no blocking, survives a session restart.
 - With `--type ship` and **no** `--target`, the directive is posted to **your own
   ship** at fire time — the poller then re-arms you. This is the core "remind me
   later" pattern.
+- Fired directives are attributed to the ship that **created** the timer
+  (`From` = timer owner) and carry a `[timer] ` prefix in the text, so a
+  scheduled/automatic message is clearly recognizable and never looks like a
+  manual directive from another agent.
 - The timer worker runs independently of any session (daemon managed by
   `timer worker autostart`/`restart`), so the fire still happens even if your
   current turn/session has ended.
