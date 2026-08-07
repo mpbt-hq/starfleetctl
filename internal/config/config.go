@@ -38,11 +38,15 @@ type ModelProxyConfig struct {
 // proxy. ID is the opencode provider name exposed to ships (e.g. "nim-proxy",
 // "zen-proxy"); BaseURL is the upstream OpenAI-compatible endpoint; APIKey
 // supports env replacement ({env:VAR} or ${VAR}) since keys come via env.
+// When Direct is true, the provider is used directly (bypassing the local
+// proxy) — the generated opencode config will point to the upstream's actual
+// BaseURL and use its APIKey, instead of routing through the local proxy.
 type ModelProxyProvider struct {
 	ID      string `yaml:"id"`
 	Name    string `yaml:"name"`
 	BaseURL string `yaml:"base_url"`
 	APIKey  string `yaml:"api_key"`
+	Direct  bool   `yaml:"direct"`
 	// MaxRetries retries a request when the upstream reports a transient
 	// error (429/5xx/conn-reset). Default 3.
 	MaxRetries int `yaml:"max_retries"`

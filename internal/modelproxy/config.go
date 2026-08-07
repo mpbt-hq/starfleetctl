@@ -92,6 +92,11 @@ type Provider struct {
 	Name    string
 	BaseURL string
 	APIKey  string
+	// Direct indicates this provider should be used directly (bypassing the
+	// local proxy). When true, the provider's actual BaseURL and APIKey are
+	// used in the generated opencode config instead of the proxy's endpoint
+	// and the ship-specific key.
+	Direct bool
 	// Retry tuning (defaults applied).
 	MaxRetries   int
 	RetryDelayMS int
@@ -137,6 +142,7 @@ func Load(root string) (*Config, error) {
 			Name:    p.Name,
 			BaseURL: strings.TrimRight(expandEnv(p.BaseURL), "/"),
 			APIKey:  expandEnv(p.APIKey),
+			Direct:  p.Direct,
 		}
 		if prov.ID == "" {
 			return nil, fmt.Errorf("model-proxy: provider without id in config")

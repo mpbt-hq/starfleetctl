@@ -114,6 +114,8 @@ func (c *Config) modelListFor(prov Provider) []string {
 // be merged directly into a generated opencode config's "provider" section.
 // shipID is embedded into each provider's apiKey (see ShipKey) so the proxy
 // can attribute requests to the ship.
+// For providers with Direct=true, the entry uses the upstream's actual
+// BaseURL and APIKey (bypassing the local proxy).
 func ProviderConfigs(root, shipID string) map[string]any {
 	cfg, err := Load(root)
 	if err != nil {
@@ -126,14 +128,27 @@ func ProviderConfigs(root, shipID string) map[string]any {
 	key := ShipKey(shipID)
 	out := map[string]any{}
 	for _, prov := range cfg.Providers {
+		// For direct providers, use upstream endpoint and key directly
+		var entryBaseURL, entryAPIKey string
+		if prov.Direct {
+			entryBaseURL = prov.BaseURL
+			entryAPIKey = prov.APIKey
+		} else {
+			entryBaseURL = base
+			entryAPIKey = key
+		}
 		entry := map[string]any{
 			"npm":  "@ai-sdk/openai-compatible",
 			"name": prov.Name,
 			"options": map[string]any{
-				"baseURL": base,
-				"apiKey":  key,
+				"baseURL": entryBaseURL,
+				"apiKey":  entryAPIKey,
 			},
 		}
+		// Model info: for direct providers, we could query upstream directly,
+		// but the proxy's /models endpoint also proxies the catalog. We use
+		// the existing modelInfoFor which tries proxy first then falls back to
+		// direct upstream query.
 		if infos := cfg.modelInfoFor(prov); len(infos) > 0 {
 			mm := map[string]any{}
 			for _, inf := range infos {
