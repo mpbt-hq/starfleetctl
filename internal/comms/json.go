@@ -10,6 +10,7 @@
 package comms
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"sort"
@@ -47,6 +48,7 @@ type BoardEntryJSON struct {
 // stdout.
 func (b *Bus) BoardEntries() []BoardEntryJSON {
 	recs := b.AllStatusRecords()
+	counts := b.InboxCounts()
 	out := make([]BoardEntryJSON, 0, len(recs))
 	for _, r := range recs {
 		e := BoardEntryJSON{
@@ -54,7 +56,7 @@ func (b *Bus) BoardEntries() []BoardEntryJSON {
 			Project:    r.Project,
 			State:      r.State,
 			AgeSeconds: now() - r.Epoch,
-			InboxCount: b.inboxCount(r.Agent),
+			InboxCount: counts[r.Agent],
 			Attach:     r.Handle,
 			Note:       r.Note,
 			Stale:      b.stale(r.Epoch, r.State),
@@ -282,15 +284,60 @@ func (b *Bus) AllAskRecordsJSON() []askEntryJSON {
 // TailEvents returns the last n lines of the audit log (or an empty slice when
 // there is no log yet) — for the web UI's live event feed.
 func (b *Bus) TailEvents(n int) []string {
-	data, err := os.ReadFile(b.Events)
+	lines, err := tailLines(b.Events, n)
 	if err != nil {
 		return []string{}
 	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	return lines
+}
+
+// tailLines returns the last n lines of the file at path. The audit log can
+// grow to hundreds of MB, so instead of slurping the whole file we seek to the
+// end and read backwards in chunks until enough newlines have been collected.
+func tailLines(path string, n int) ([]string, error) {
+	if n <= 0 {
+		return []string{}, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := st.Size()
+	if size == 0 {
+		return []string{}, nil
+	}
+	const chunkSize = 64 * 1024
+	var buf []byte
+	pos := size
+	for pos > 0 && bytes.Count(buf, []byte{'\n'}) <= n {
+		read := int64(chunkSize)
+		if read > pos {
+			read = pos
+		}
+		pos -= read
+		chunk := make([]byte, read)
+		if _, err := f.ReadAt(chunk, pos); err != nil {
+			return nil, err
+		}
+		buf = append(chunk, buf...)
+	}
+	// The buffer start may sit mid-line (or the read set may already contain
+	// more lines than requested) — drop the leading partial line.
+	if pos > 0 || bytes.Count(buf, []byte{'\n'}) > n {
+		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+			buf = buf[i+1:]
+		}
+	}
+	lines := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return lines
+	return lines, nil
 }
 
 func printJSON(v any) error {

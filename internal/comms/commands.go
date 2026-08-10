@@ -834,18 +834,14 @@ func (b *Bus) DoMsgs() error {
 
 // DoEvents implements `comms events [N]`.
 func (b *Bus) DoEvents(n int) error {
-	data, err := os.ReadFile(b.Events)
+	lines, err := tailLines(b.Events, n)
 	if err != nil {
 		fmt.Println("(no events)")
 		return nil
 	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
+	if len(lines) == 0 {
 		fmt.Println("(no events)")
 		return nil
-	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
 	}
 	for _, l := range lines {
 		fmt.Println(l)

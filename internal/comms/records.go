@@ -237,6 +237,40 @@ func (b *Bus) inboxCount(agent string) int {
 	return cnt
 }
 
+// InboxCounts returns the number of unseen (not-yet-acked) messages per
+// recipient ship, computed in a single directory pass. This is equivalent to
+// calling inboxCount(agent) for every agent, but avoids re-scanning (and
+// re-parsing) the whole message store once per ship — with many ships that
+// made the board endpoint O(ships × msgs) instead of O(msgs).
+func (b *Bus) InboxCounts() map[string]int {
+	counts := make(map[string]int)
+	entries, err := os.ReadDir(b.MsgDir)
+	if err != nil {
+		return counts
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		agent := e.Name()
+		unseenDir := filepath.Join(b.MsgDir, agent, "unseen")
+		unseen, err := os.ReadDir(unseenDir)
+		if err != nil {
+			continue
+		}
+		n := 0
+		for _, f := range unseen {
+			if !f.IsDir() {
+				n++
+			}
+		}
+		if n > 0 {
+			counts[agent] = n
+		}
+	}
+	return counts
+}
+
 // knownShips returns the sorted set of every ship ID known to the fleet: the
 // union of the per-ship message dirs under MsgDir and the agents that have a
 // status record on the board. Broadcasts are fanned out to exactly this set
