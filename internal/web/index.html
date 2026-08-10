@@ -543,6 +543,11 @@
 </div>
 
 <script>
+// Max number of newest messages the Bus tab fetches per poll. The store can
+// hold tens of thousands of records; capping the payload keeps both the API
+// and the DOM render fast. The full history stays reachable per-ship via the
+// Funk/ship-chat views (?ship=), which use their own filtered endpoints.
+const BUS_MSG_LIMIT = 300;
 // api wraps fetch and rejects with a real Error carrying the server's error
 // message (if any), so callers can show a useful message instead of the raw
 // Response object.
@@ -1579,7 +1584,7 @@ async function loadBus(kind){
     let rows = [];
     if (kind==='inbox') rows = await api('/api/inbox');
     else if (kind==='asks') rows = await api('/api/asks');
-    else rows = await api('/api/msgs');
+    else rows = await api('/api/msgs?limit='+BUS_MSG_LIMIT);
     if (!rows.length){ el.innerHTML = '<div class="empty">'+t('bus.empty')+'</div>'; return; }
     if (threadMode && kind!=='asks'){
       // Build threads: messages with reply_to hang under their parent.

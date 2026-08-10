@@ -243,3 +243,65 @@ func TestRotateIfNeeded(t *testing.T) {
 	// Missing log file: no panic, no error.
 	b.rotateIfNeeded(1)
 }
+
+// TestRecentMsgRecords verifies that RecentMsgRecords returns the newest max
+// records across flat legacy files and per-target unseen/seen dirs, without
+// parsing the whole store.
+func TestRecentMsgRecords(t *testing.T) {
+	dir := t.TempDir()
+	b := &Bus{MsgDir: dir}
+
+	seedMsg(t, dir, "m1", 100, "A", "B", "old")
+	seedMsg(t, dir, "m2", 200, "B", "A", "newer")
+	// Per-target dirs (fan-out model).
+	for _, target := range []string{"A", "B"} {
+		if err := os.MkdirAll(filepath.Join(dir, target, "seen"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, target, "unseen"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedTo(t, dir, "A", "seen", "m3", 300, "B", "A", "seen copy")
+	seedTo(t, dir, "B", "unseen", "m4", 400, "A", "B", "newest")
+
+	// Newest 2: m4 and m3 (m3 newer than m2 by id even though epoch differs —
+	// selection is by id, which is zero-padded sequential).
+	got := b.RecentMsgRecords(2)
+	if len(got) != 2 {
+		t.Fatalf("RecentMsgRecords(2) = %d records, want 2", len(got))
+	}
+	if got[0].ID != "m4" || got[1].ID != "m3" {
+		t.Fatalf("RecentMsgRecords(2) order = %s/%s, want m4/m3", got[0].ID, got[1].ID)
+	}
+
+	// max >= store size: everything, newest first.
+	all := b.RecentMsgRecords(99)
+	if len(all) != 4 {
+		t.Fatalf("RecentMsgRecords(99) = %d records, want 4", len(all))
+	}
+	for i := 0; i < len(all)-1; i++ {
+		if all[i].ID < all[i+1].ID {
+			t.Fatalf("RecentMsgRecords(99) not newest-first at %d: %s before %s", i, all[i].ID, all[i+1].ID)
+		}
+	}
+
+	// max <= 0: nothing.
+	if got := b.RecentMsgRecords(0); len(got) != 0 {
+		t.Fatalf("RecentMsgRecords(0) = %d records, want 0", len(got))
+	}
+}
+
+// seedTo writes msgs/<target>/<kind>/<id>.json into dir.
+func seedTo(t *testing.T, dir, target, kind, id string, epoch int64, from, to, text string) {
+	t.Helper()
+	sub := filepath.Join(dir, target, kind)
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rec := fmt.Sprintf(`{"id":%q,"epoch":%d,"from":%q,"target":%q,"text":%q}`,
+		id, epoch, from, to, text)
+	if err := os.WriteFile(filepath.Join(sub, id+".json"), []byte(rec), 0644); err != nil {
+		t.Fatal(err)
+	}
+}

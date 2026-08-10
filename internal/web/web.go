@@ -300,20 +300,38 @@ func (s *Server) apiMsgs(w http.ResponseWriter, r *http.Request) {
 	// Optional ?ship=<name> filter: only messages involving that ship
 	// (sent by it, addressed to it, or a broadcast to all). Used by the
 	// per-ship conversation view in the frontend.
-	if ship := strings.TrimSpace(r.URL.Query().Get("ship")); ship != "" {
-		// Optional sort parameter: "age" (default, newest first), "age-asc" (oldest first)
-		sortBy := r.URL.Query().Get("sort")
-		msgs := s.bus.Conversation(ship)
-		if sortBy == "age-asc" {
-			// Reverse the default (newest first) to get oldest first
-			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
-				msgs[i], msgs[j] = msgs[j], msgs[i]
-			}
+	ship := strings.TrimSpace(r.URL.Query().Get("ship"))
+
+	// Optional ?limit=<n>: only the newest n messages (avoids parsing the
+	// whole store on every poll — the bus tab polls this continuously).
+	// When ?ship= is also given, the limit applies after the per-ship
+	// conversation filter.
+	var limit int
+	if v := r.URL.Query().Get("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+	}
+
+	if ship == "" {
+		if limit > 0 {
+			writeJSON(w, s.bus.RecentMsgRecordsJSON(limit))
+		} else {
+			writeJSON(w, s.bus.AllMsgRecordsJSON())
 		}
-		writeJSON(w, msgs)
 		return
 	}
-	writeJSON(w, s.bus.AllMsgRecordsJSON())
+
+	msgs := s.bus.Conversation(ship)
+	if limit > 0 && limit < len(msgs) {
+		msgs = msgs[:limit]
+	}
+	// Optional sort parameter: "age" (default, newest first), "age-asc" (oldest first)
+	if r.URL.Query().Get("sort") == "age-asc" {
+		// Reverse the default (newest first) to get oldest first
+		for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+			msgs[i], msgs[j] = msgs[j], msgs[i]
+		}
+	}
+	writeJSON(w, msgs)
 }
 
 func (s *Server) apiInbox(w http.ResponseWriter, r *http.Request) {

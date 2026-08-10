@@ -222,6 +222,54 @@ func (b *Bus) allMsgRecords() []msgRecord {
 	return out
 }
 
+// RecentMsgRecords returns up to max of the newest message records (largest
+// ids) without parsing the whole store. Message ids are globbed (readdir only,
+// no file parsing) across every target directory, the newest max files are
+// selected, and only those get parsed. The store can hold tens of thousands
+// of records, so the full allMsgRecords() scan is far too slow for a
+// polling web view.
+func (b *Bus) RecentMsgRecords(max int) []msgRecord {
+	if max <= 0 {
+		return nil
+	}
+	type idPath struct {
+		id   string
+		path string
+	}
+	var files []idPath
+	addDir := func(dir string) {
+		for _, id := range globSortedFiles(dir, "m", ".json") {
+			files = append(files, idPath{id, filepath.Join(dir, id+".json")})
+		}
+	}
+	// Legacy flat files (if any).
+	addDir(b.MsgDir)
+	entries, err := os.ReadDir(b.MsgDir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			target := e.Name()
+			addDir(filepath.Join(b.MsgDir, target, "unseen"))
+			addDir(filepath.Join(b.MsgDir, target, "seen"))
+		}
+	}
+	// Newest first: ids are zero-padded sequential, so lexicographic order
+	// equals chronological order.
+	sort.Slice(files, func(i, j int) bool { return files[i].id > files[j].id })
+	if len(files) > max {
+		files = files[:max]
+	}
+	var out []msgRecord
+	for _, f := range files {
+		if r, ok := parseMsgFile(f.id, f.path); ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (b *Bus) inboxCount(agent string) int {
 	cnt := 0
 	for _, m := range b.allMsgRecords() {

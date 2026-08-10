@@ -227,7 +227,18 @@ func (b *Bus) DoAsksJSON() error {
 // for programmatic callers (e.g. the web UI) that need the full list without
 // parsing stdout or re-deriving ack counts.
 func (b *Bus) AllMsgRecordsJSON() []msgEntryJSON {
-	msgs := b.allMsgRecords()
+	return b.msgRecordsToJSON(b.allMsgRecords())
+}
+
+// RecentMsgRecordsJSON returns up to max of the newest messages as a
+// JSON-shaped slice, parsing only the newest max files (the store can hold
+// tens of thousands of records, so a full scan is far too slow for a
+// polling web view).
+func (b *Bus) RecentMsgRecordsJSON(max int) []msgEntryJSON {
+	return b.msgRecordsToJSON(b.RecentMsgRecords(max))
+}
+
+func (b *Bus) msgRecordsToJSON(msgs []msgRecord) []msgEntryJSON {
 	out := make([]msgEntryJSON, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, msgEntryJSON{
