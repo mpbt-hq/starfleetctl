@@ -320,10 +320,12 @@ func (s *Server) apiMsgs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgs := s.bus.Conversation(ship)
-	if limit > 0 && limit < len(msgs) {
-		msgs = msgs[:limit]
+	if limit > 0 {
+		writeJSON(w, s.bus.ConversationRecentRecordsJSON(ship, limit))
+		return
 	}
+
+	msgs := s.bus.Conversation(ship)
 	// Optional sort parameter: "age" (default, newest first), "age-asc" (oldest first)
 	if r.URL.Query().Get("sort") == "age-asc" {
 		// Reverse the default (newest first) to get oldest first

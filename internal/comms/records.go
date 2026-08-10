@@ -232,17 +232,38 @@ func (b *Bus) RecentMsgRecords(max int) []msgRecord {
 	if max <= 0 {
 		return nil
 	}
-	type idPath struct {
+	files := b.conversationFiles()
+	if len(files) > max {
+		files = files[:max]
+	}
+	var out []msgRecord
+	for _, f := range files {
+		if r, ok := parseMsgFile(f.id, f.path); ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// conversationFiles returns all message files (id+path) across every target
+// dir plus legacy flat files, newest id first. Shared by the per-ship
+// conversation scans.
+func (b *Bus) conversationFiles() []struct {
+	id   string
+	path string
+} {
+	var files []struct {
 		id   string
 		path string
 	}
-	var files []idPath
 	addDir := func(dir string) {
 		for _, id := range globSortedFiles(dir, "m", ".json") {
-			files = append(files, idPath{id, filepath.Join(dir, id+".json")})
+			files = append(files, struct {
+				id   string
+				path string
+			}{id, filepath.Join(dir, id+".json")})
 		}
 	}
-	// Legacy flat files (if any).
 	addDir(b.MsgDir)
 	entries, err := os.ReadDir(b.MsgDir)
 	if err == nil {
@@ -255,17 +276,31 @@ func (b *Bus) RecentMsgRecords(max int) []msgRecord {
 			addDir(filepath.Join(b.MsgDir, target, "seen"))
 		}
 	}
-	// Newest first: ids are zero-padded sequential, so lexicographic order
-	// equals chronological order.
 	sort.Slice(files, func(i, j int) bool { return files[i].id > files[j].id })
-	if len(files) > max {
-		files = files[:max]
+	return files
+}
+
+// ConversationRecentRecords returns up to max of the newest messages that
+// involve ship (From==ship or Target==ship), parsing files newest-first and
+// stopping early — the store can hold tens of thousands of records, so a
+// full scan is far too slow for a polling web view.
+func (b *Bus) ConversationRecentRecords(ship string, max int) []msgRecord {
+	if max <= 0 {
+		return nil
 	}
 	var out []msgRecord
-	for _, f := range files {
-		if r, ok := parseMsgFile(f.id, f.path); ok {
-			out = append(out, r)
+	for _, f := range b.conversationFiles() {
+		if len(out) >= max {
+			break
 		}
+		r, ok := parseMsgFile(f.id, f.path)
+		if !ok {
+			continue
+		}
+		if r.From != ship && r.Target != ship {
+			continue
+		}
+		out = append(out, r)
 	}
 	return out
 }

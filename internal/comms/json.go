@@ -238,6 +238,15 @@ func (b *Bus) RecentMsgRecordsJSON(max int) []msgEntryJSON {
 	return b.msgRecordsToJSON(b.RecentMsgRecords(max))
 }
 
+// ConversationRecentRecordsJSON returns up to max of the newest messages
+// involving ship, newest first, parsing files newest-first and stopping
+// early (see ConversationRecentRecords).
+func (b *Bus) ConversationRecentRecordsJSON(ship string, max int) []msgEntryJSON {
+	msgs := b.msgRecordsToJSON(b.ConversationRecentRecords(ship, max))
+	sort.Slice(msgs, func(i, j int) bool { return msgs[i].AgeSeconds < msgs[j].AgeSeconds })
+	return msgs
+}
+
 func (b *Bus) msgRecordsToJSON(msgs []msgRecord) []msgEntryJSON {
 	out := make([]msgEntryJSON, 0, len(msgs))
 	for _, m := range msgs {

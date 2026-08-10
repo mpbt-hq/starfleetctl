@@ -292,6 +292,37 @@ func TestRecentMsgRecords(t *testing.T) {
 	}
 }
 
+// TestConversationRecentRecords verifies that the per-ship recent scan only
+// returns messages involving the ship and stops at max.
+func TestConversationRecentRecords(t *testing.T) {
+	dir := t.TempDir()
+	b := &Bus{MsgDir: dir}
+
+	seedMsg(t, dir, "m1", 100, "X", "B", "old unrelated")
+	seedMsg(t, dir, "m2", 200, "B", "A", "for A")
+	seedMsg(t, dir, "m3", 300, "C", "D", "unrelated")
+	seedMsg(t, dir, "m4", 400, "A", "B", "from A")
+
+	got := b.ConversationRecentRecords("A", 99)
+	if len(got) != 2 {
+		t.Fatalf("ConversationRecentRecords(A) = %d records, want 2", len(got))
+	}
+	for _, m := range got {
+		if m.From != "A" && m.Target != "A" {
+			t.Fatalf("ConversationRecentRecords(A) leaked %s → %s", m.From, m.Target)
+		}
+	}
+	// Newest first (m4, m2).
+	if got[0].ID != "m4" || got[1].ID != "m2" {
+		t.Fatalf("ConversationRecentRecords(A) order = %s/%s, want m4/m2", got[0].ID, got[1].ID)
+	}
+
+	// max caps the result.
+	if got := b.ConversationRecentRecords("A", 1); len(got) != 1 || got[0].ID != "m4" {
+		t.Fatalf("ConversationRecentRecords(A,1) = %+v, want only m4", got)
+	}
+}
+
 // seedTo writes msgs/<target>/<kind>/<id>.json into dir.
 func seedTo(t *testing.T, dir, target, kind, id string, epoch int64, from, to, text string) {
 	t.Helper()

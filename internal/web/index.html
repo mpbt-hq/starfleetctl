@@ -1113,7 +1113,7 @@ async function loadShip(name){
 async function loadShipChat(name){
   const el = document.getElementById('ship_chat');
   try {
-    const msgs = await api('/api/msgs?ship='+encodeURIComponent(name));
+    const msgs = await api('/api/msgs?ship='+encodeURIComponent(name)+'&limit='+BUS_MSG_LIMIT);
     if (!msgs.length){ el.innerHTML = '<div class="empty">'+t('bus.nomsgs')+'</div>'; return; }
     const byID = {}, roots = [], children = {};
     msgs.forEach(m=>{ byID[m.id]=m; });
@@ -1631,7 +1631,7 @@ async function loadTalk(){
   if (!el) return;
   const target = document.getElementById('talk_target')?.value || 'all';
   try {
-    const msgs = await api('/api/msgs?ship='+encodeURIComponent(target));
+    const msgs = await api('/api/msgs?ship='+encodeURIComponent(target)+'&limit='+BUS_MSG_LIMIT);
     if (!msgs.length){ el.innerHTML = '<div class="empty">'+t('bus.nomsgs')+'</div>'; return; }
     const byID = {}, roots = [], children = {};
     msgs.forEach(m=>{ byID[m.id]=m; });
