@@ -237,13 +237,38 @@ func age(epoch int64) string {
 	}
 }
 
+// MaxEventLogSize is the size at which events.log is rotated (64 MiB).
+const MaxEventLogSize = 64 << 20
+
+// EventLogKeep is the number of rotated events.log generations kept
+// (events.log.1 … events.log.<EventLogKeep>).
+const EventLogKeep = 3
+
 func (b *Bus) LogEvent(kind, note string) {
+	b.rotateIfNeeded(MaxEventLogSize)
 	f, err := os.OpenFile(b.Events, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return // best-effort, matches bash's `|| true`
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "%s\t%s\t%s\t%s\n", isots(), kind, b.ShipID, clean(note))
+}
+
+// rotateIfNeeded renames events.log to events.log.1 (shifting older
+// generations up, keeping EventLogKeep of them) once it exceeds maxSize.
+// Best-effort: concurrent writers may briefly append to the renamed inode,
+// which is acceptable for an audit log.
+func (b *Bus) rotateIfNeeded(maxSize int64) {
+	st, err := os.Stat(b.Events)
+	if err != nil || st.Size() < maxSize {
+		return
+	}
+	for i := EventLogKeep - 1; i >= 1; i-- {
+		src := b.Events + "." + strconv.Itoa(i)
+		dst := b.Events + "." + strconv.Itoa(i+1)
+		os.Rename(src, dst) // POSIX rename replaces the destination; ENOENT is fine
+	}
+	os.Rename(b.Events, b.Events+".1")
 }
 
 // ackedCount returns the number of ships who have acked (seen) a message

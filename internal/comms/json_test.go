@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -187,4 +188,58 @@ func TestInboxCounts(t *testing.T) {
 	if got["Enterprise"] != b.inboxCount("Enterprise") {
 		t.Fatalf("InboxCounts Enterprise %d != inboxCount %d", got["Enterprise"], b.inboxCount("Enterprise"))
 	}
+}
+
+// TestRotateIfNeeded verifies the events.log rotation: exceeding the size
+// threshold renames the log to .1 and shifts older generations.
+func TestRotateIfNeeded(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "events.log")
+	b := &Bus{Events: logPath}
+
+	if err := os.WriteFile(logPath, []byte("line1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Below threshold: no rotation.
+	b.rotateIfNeeded(1024)
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("events.log rotated below threshold: %v", err)
+	}
+
+	// Above threshold: rotated to .1, fresh log created on next write.
+	b.rotateIfNeeded(4)
+	if _, err := os.Stat(logPath + ".1"); err != nil {
+		t.Fatalf("events.log.1 missing after rotation: %v", err)
+	}
+	if _, err := os.Stat(logPath); err == nil {
+		t.Fatalf("events.log still present after rotation")
+	}
+
+	// Seed a chain .1/.2/.3 and verify shifting + dropping the oldest.
+	for i := 1; i <= 3; i++ {
+		if err := os.WriteFile(logPath+"."+strconv.Itoa(i), []byte("gen-"+strconv.Itoa(i)), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(logPath, []byte("new-current"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	b.rotateIfNeeded(1)
+	for _, gen := range []int{1, 2, 3} {
+		if _, err := os.Stat(logPath + "." + strconv.Itoa(gen)); err != nil {
+			t.Fatalf("events.log.%d missing: %v", gen, err)
+		}
+	}
+	// Generation 4 must not exist (only EventLogKeep generations are kept).
+	if _, err := os.Stat(logPath + ".4"); err == nil {
+		t.Fatalf("events.log.4 should have been dropped")
+	}
+	// The .1 content is now the previous current file.
+	data, err := os.ReadFile(logPath + ".1")
+	if err != nil || string(data) != "new-current" {
+		t.Fatalf("events.log.1 = %q (err=%v), want previous current file", data, err)
+	}
+
+	// Missing log file: no panic, no error.
+	b.rotateIfNeeded(1)
 }
