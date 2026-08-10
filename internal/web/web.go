@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -123,6 +124,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/sessions/", s.apiSessionDispatch)
 	s.mux.HandleFunc("/api/oclog", s.apiOCLog)
 	s.mux.HandleFunc("/", s.serveIndex)
+
+	// logging middleware: wrap the mux
+	wrapped := http.NewServeMux()
+	wrapped.Handle("/", loggingMiddleware(s.mux))
+	s.mux = wrapped
+}
+
+// loggingMiddleware logs requests
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("web: %s %s", r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Run starts the HTTP server (blocking). Registers the web frontend on the

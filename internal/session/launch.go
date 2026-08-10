@@ -735,7 +735,7 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 
 	// Starfleet-specific settings
 	shipConfig["instructions"] = []string{".starfleet-ai/var/sop.d/index.md"}
-	shipConfig["plugin"] = []string{"./plugins/starfleet-dispatch.ts"}
+	shipConfig["plugin"] = []string{"./.opencode/plugins/starfleet-dispatch.ts"}
 
 	// Write to temp file
 	configPath := opencodeConfigPath(root, shipID)
