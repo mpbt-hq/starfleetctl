@@ -146,6 +146,46 @@ func TestGenerateOpencodeConfigWorkspaceTools(t *testing.T) {
 	}
 }
 
+// TestGenerateOpencodeConfigQuestionPermission verifies that the "question" tool
+// is denied for background/auto ships (no human to answer) and left at the
+// opencode default for terminal ships.
+func TestGenerateOpencodeConfigQuestionPermission(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// background/auto ships: question denied (no human at the terminal).
+	for _, launchType := range []string{"background", "auto"} {
+		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false)
+		if err != nil {
+			t.Fatalf("generateOpencodeConfig(%q): %v", launchType, err)
+		}
+		if got := permRule(t, readShipConfig(t, cfgPath), "question", "**"); got != "deny" {
+			t.Errorf("%s: question ** = %q, want deny", launchType, got)
+		}
+	}
+
+	// terminal ships: no question rule (opencode default "ask" applies).
+	cfgPath, err := generateOpencodeConfig(root, "TestShip", "terminal", false)
+	if err != nil {
+		t.Fatalf("generateOpencodeConfig(terminal): %v", err)
+	}
+	perm, _ := readShipConfig(t, cfgPath)["permission"].(map[string]any)
+	if _, ok := perm["question"]; ok {
+		t.Errorf("terminal: question rule present, want absent (opencode default)")
+	}
+
+	// unrestricted: no question rule (allow everything).
+	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", true)
+	if err != nil {
+		t.Fatalf("generateOpencodeConfig(unrestricted): %v", err)
+	}
+	perm, _ = readShipConfig(t, cfgPath)["permission"].(map[string]any)
+	if _, ok := perm["question"]; ok {
+		t.Errorf("unrestricted: question rule present, want absent")
+	}
+}
+
 // TestGenerateOpencodeConfigUsername verifies every generated per-ship config
 // carries the ship ID as its username, so opencode sessions/commits are
 // attributed to the ship rather than the OS user.

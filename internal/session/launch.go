@@ -731,6 +731,15 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	}
 	permission["external_directory"] = externalDirRules
 
+	// Background/auto ships have no human at the terminal, so the
+	// "question" tool (which prompts the user for a decision) would block
+	// forever. Deny it — the LLM gets a fast tool error and must proceed
+	// autonomously. Terminal ships keep the default ("ask") so the human
+	// can answer.
+	if launchType != "terminal" && !unrestricted {
+		permission["question"] = map[string]string{"**": "deny"}
+	}
+
 	shipConfig["permission"] = permission
 
 	// Starfleet-specific settings
