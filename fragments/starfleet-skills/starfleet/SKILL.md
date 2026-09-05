@@ -90,10 +90,40 @@ starfleetctl task rm <slug> [--no-push]                # delete a task topic
 starfleetctl task purge [--no-push]                    # delete ALL done tasks
 ```
 
+### Working a task (mandatory cycle)
+
+When you **take on / work a task**, the following applies to every session:
+
+1. **Board status reflects reality.** Regularly call
+   `starfleetctl comms status <working|blocked|idle> "<what you're doing>"` — at task
+   start, on any state change, and after finishing. The fleet board must always show
+   where you are.
+2. **Task status moves with you.** While working, set the dashboard task status
+   (`starfleetctl task status <slug> in-progress`); when done, `done`. Do this even if
+   the task was assigned via comms — the dashboard is the cross-session source of truth.
+3. **Finish = report.** When a task is complete, submit a structured report
+   (`starfleetctl reports submit --title ... --body ... --taskref <slug>`) **and** notify
+   the commissioning ship via comms. "Done" is not done until both exist.
+4. **Questions you must ask back** (ambiguity, missing info, decisions needed):
+   - Record the open questions **in the task itself** (`dashboard topic write <slug> <file>`
+     + `dashboard topic commit <slug>`), so the praetor/assigner can answer asynchronously.
+   - Then submit a report whose **subject explicitly says questions need answering**
+     (e.g. `"Task <slug>: Rückfragen müssen beantwortet werden"` / "questions need answers"), and **list the questions in the report body**.
+   - Do **not** block the session waiting on the console — route questions through comms
+     and continue with whatever part of the task you can already do.
+
 ## Dashboard
 
-The dashboard is the cross-session "what's in flight" index. All access via CLI —
-**never** `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md`.
+The dashboard is the cross-session "what's in flight" index.
+
+> **⚠️ RULE — CLI only, never raw files.** All dashboard access goes through the
+> `starfleetctl dashboard` / `starfleetctl task` subcommands. **NEVER** use file tools
+> (`Read`/`Edit`/`Write`/`Glob`/`Grep`) on `DASHBOARD.md` or `dashboard/topics/*.md` —
+> not even to "just look". Direct file access is a **rule violation** (a fleet agent
+> once read the dashboard files directly instead of using starfleetctl; it is how the
+> cross-session index gets clobbered). If you want to read a topic, use
+> `dashboard topic show <slug>`; to list them, `dashboard topic list --json`; to modify,
+> `dashboard topic write <slug> <file>` + `dashboard topic commit <slug>`.
 
 ### Topic file format (frontmatter)
 

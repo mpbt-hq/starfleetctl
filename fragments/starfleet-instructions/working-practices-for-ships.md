@@ -48,6 +48,20 @@ cleared:
   `/.starfleet-ai/...` — that is outside the workspace and denied), access dashboard/session data via
   `starfleetctl` commands instead of raw files, or pick an allowed alternative. Then continue the
   task and report what you did.
+- **Dashboard & topics: CLI only, never raw files.** All access to the dashboard and its
+  topics goes through `starfleetctl dashboard`/`starfleetctl task` subcommands. **NEVER**
+  use `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md` —
+  not even "just to look". Read with `dashboard topic show <slug>`, list with
+  `dashboard topic list --json`, modify with `dashboard topic write <slug> <file>` +
+  `dashboard topic commit <slug>`. Direct file access is a rule violation.
+- **Keep the dashboard and reports current while working a task.** When you take on a
+  task: set your board status regularly (`comms status working/blocked/idle "<what>"`),
+  move the task status with you (`task status <slug> in-progress` → `done`), and on
+  completion submit a report (`reports submit --taskref <slug>`) plus a comms notification
+  to the commissioning ship. If you must ask clarifying questions, note them in the task
+  itself (`dashboard topic write/commit`) and submit a report whose subject explicitly
+  states that questions need answers (with the questions listed in the body) — never just
+  block on the console.
 - **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
    (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,
    no dashboard scanning, no proactive work — wait for a `tell`/`ask`/`broadcast` directive.
