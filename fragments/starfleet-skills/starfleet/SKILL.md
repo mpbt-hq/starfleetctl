@@ -88,6 +88,7 @@ starfleetctl task unassign <slug> [--no-push]          # clear assignment
 starfleetctl task status <slug> <status> [--no-push]   # set status
 starfleetctl task rm <slug> [--no-push]                # delete a task topic
 starfleetctl task purge [--no-push]                    # delete ALL done tasks
+starfleetctl task orphans [--json]                     # tasks assigned to vanished ships
 ```
 
 ### Working a task (mandatory cycle)

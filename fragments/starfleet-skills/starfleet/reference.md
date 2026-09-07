@@ -49,6 +49,7 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 | `task status <slug> <status>` | Set a task's status |
 | `task rm <slug>` | Delete a task topic from the dashboard |
 | `task purge [--no-push]` | Delete ALL tasks with status "done" |
+| `task orphans [--json]` | List tasks assigned to ships that no longer exist on the board (no status/health entry); `--json` for machine-readable output. Also available in the web UI on the Tasks page (⚠ Orphans) with one-click reassign to a free ship. |
 | `timer set --at/--every/--cron ...` | Fleet scheduling (one-time, interval, cron) |
 | `timer list/cancel` | List or cancel timers |
 | `logs scan [--capture]` | Scan ship logs for recurring failures, extract as tasks |

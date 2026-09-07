@@ -107,6 +107,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/asks", s.apiAsks)
 	s.mux.HandleFunc("/api/events", s.apiEvents)
 	s.mux.HandleFunc("/api/tasks", s.apiTasks)
+	s.mux.HandleFunc("/api/tasks/orphans", s.apiTasksOrphans)
 	s.mux.HandleFunc("/api/dashboard/reindex", s.apiDashboardReindex)
 	s.mux.HandleFunc("/api/tell", s.apiTell)
 	s.mux.HandleFunc("/api/cmd", s.apiCmd)
@@ -397,6 +398,24 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, metas)
+}
+
+// apiTasksOrphans handles GET /api/tasks/orphans — returns orphan tasks
+// (assigned to ships that no longer exist on the board).
+func (s *Server) apiTasksOrphans(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	orphans, err := task.RunOrphansOnly(s.Root)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if orphans == nil {
+		orphans = []task.OrphanTask{}
+	}
+	writeJSON(w, orphans)
 }
 
 // apiTopicDispatch routes /api/topic/<slug> — full-text view/edit of a

@@ -232,8 +232,10 @@
       </select>
       <button class="sec" id="tf_dir" onclick="taskToggleDir()" style="width:auto;padding:6px 10px">↑</button>
       <button class="sec" onclick="taskReindex()" data-i18n-title="reindex.title" title="DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)" data-i18n="reindex.btn" style="margin-left:auto;width:auto;padding:6px 12px">↻ Reindex</button>
+      <button class="sec" id="btn_orphans" onclick="toggleOrphans()" style="width:auto;padding:6px 12px" data-i18n="orphans.btn">⚠ Waisen (Orphans)</button>
     </div>
     <div class="card" id="tasklist"></div>
+    <div class="card" id="orphanlist" style="display:none"></div>
   </section>
 
   <section class="page" id="bus">
@@ -709,6 +711,9 @@ const I18N = {
     'task.assign.none': '(keine Zuweisung)', 'task.cat.none': 'Kategorie: (toplevel)',
     'task.status.btn': 'Status', 'task.emptybody': '(leer)',
     'task.assign.btn': 'Zuweisen', 'task.unassign.btn': 'Frei', 'task.detail.btn': 'Detail', 'task.delete.btn': 'Löschen',
+    'orphans.btn': 'Waisen (Orphans)', 'orphans.title': 'Orphan-Tasks (an verschollene Schiffe zugewiesen)',
+    'orphans.reassign': 'Neu zuweisen an freies Schiff', 'orphans.done': 'neu zugewiesen → ',
+    'orphans.none': 'Keine Orphan-Tasks.',
     'ship.launched': 'Schiff gestartet: ', 'ship.kv.toast': 'Toast',
     'bus.nomsgs': 'noch keine Nachrichten', 'bus.notinview': 'Nachricht {id} nicht in dieser Ansicht',
     'bus.empty': 'leer', 'bus.nolog': 'kein Log',
@@ -820,6 +825,9 @@ const I18N = {
     'task.assign.none': '(no assignment)', 'task.cat.none': 'Category: (toplevel)',
     'task.status.btn': 'Status', 'task.emptybody': '(empty)',
     'task.assign.btn': 'Assign', 'task.unassign.btn': 'Free', 'task.detail.btn': 'Details', 'task.delete.btn': 'Delete',
+    'orphans.btn': 'Orphans', 'orphans.title': 'Orphan tasks (assigned to vanished ships)',
+    'orphans.reassign': 'Reassign to free ship', 'orphans.done': 'reassigned → ',
+    'orphans.none': 'No orphan tasks.',
     'ship.launched': 'Ship launched: ', 'ship.kv.toast': 'Toast',
     'bus.nomsgs': 'no messages yet', 'bus.notinview': 'Message {id} not in this view',
     'bus.empty': 'empty', 'bus.nolog': 'no log',
@@ -1510,6 +1518,57 @@ async function taskReindex(){
     await api('/api/dashboard/reindex', {method:'POST'});
     toast(t('reindex.done'));
     loadTasks();
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
+}
+
+// --- Orphan tasks: assigned to ships that no longer exist on the board ---
+let orphansVisible = false;
+async function toggleOrphans(){
+  orphansVisible = !orphansVisible;
+  const el = document.getElementById('orphanlist');
+  el.style.display = orphansVisible ? '' : 'none';
+  const btn = document.getElementById('btn_orphans');
+  btn.classList.toggle('on', orphansVisible);
+  if (orphansVisible) loadOrphans();
+}
+async function loadOrphans(){
+  const el = document.getElementById('orphanlist');
+  if (!el) return;
+  const ships = [...new Set((taskState.board||[]).map(r=>r.agent))].sort();
+  const freeShips = (taskState.board||[]).filter(r=>r.state==='idle').map(r=>r.agent).sort();
+  const idles = freeShips.length ? freeShips : ships;
+  try {
+    const orphans = await api('/api/tasks/orphans');
+    if (!orphans.length){
+      el.innerHTML = '<div class="muted" data-i18n="orphans.none">Keine Orphan-Tasks.</div>';
+      return;
+    }
+    el.innerHTML = '<b data-i18n="orphans.title">Orphan-Tasks (an verschollene Schiffe zugewiesen)</b>' + orphans.map(o=>{
+      const target = (o.assigned_to||'').replace(/[^\w-]/g,'_');
+      const targetSel = '<select id="orph_reship_'+target+'" style="width:auto">' +
+        '<option value="__auto__">'+t('task.assign.auto')+'</option>' +
+        idles.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('') +
+        '</select>';
+      return `<div class="card">
+        <div class="row"><b class="grow">${esc(o.title||o.slug)}</b>
+          <span class="pill warn">${esc(o.status)}</span></div>
+        <div class="muted" style="margin-top:4px">${esc(o.slug)} · 👤 ${esc(o.assigned_to)}</div>
+        <div class="actions">
+          ${targetSel}
+          <button class="sec" onclick="orphanReassign('${esc(o.slug)}','orph_reship_${target}')">${t('orphans.reassign')}</button>
+          <button class="sec" onclick="taskDetail('${esc(o.slug)}')">${t('task.detail.btn')}</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e){ el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
+}
+async function orphanReassign(slug, selId){
+  const ship = document.getElementById(selId).value;
+  try {
+    await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({slug, assign: ship})});
+    toast(slug + ' ' + t('orphans.done') + (ship==='__auto__' ? t('task.assign.auto') : ship));
+    loadOrphans();
   } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 

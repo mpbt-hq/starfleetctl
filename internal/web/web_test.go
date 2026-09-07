@@ -317,3 +317,78 @@ func TestAPIBoardIncludesTimers(t *testing.T) {
 		t.Errorf("unexpected owner field leaked into TimerInfo: %v", tm["owner"])
 	}
 }
+
+// writeOrphanFixture creates a task assigned to a ship with (a) no board
+// entry = orphan, and (b) a live board entry = not an orphan.
+func writeOrphanFixture(t *testing.T, s *Server) {
+	t.Helper()
+	writeTopicAssigned := func(slug, assigned, status string) {
+		path := filepath.Join(s.dash.TopicsDir(), slug+".md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		src := "---\ntitle: " + slug + "\n" +
+			"category: active\nkind: task\nstatus: " + status + "\n" +
+			"assigned-to: \"" + assigned + "\"\ncreated-by: \"Enterprise\"\n" +
+			"created: \"2026-09-07T00:00:00Z\"\ndoc_ref: \"—\"\n" +
+			"---\n\nBody\n"
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTopicAssigned("task-vanished", "Stargazer", "assigned")
+	writeTopicAssigned("task-live", "Galactica", "assigned")
+	// Live heartbeat for Galactica only.
+	statusDir := filepath.Join(s.Root, ".starfleet-ai", "var", "comms", "status")
+	if err := os.MkdirAll(statusDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "Galactica.json"),
+		[]byte(`{"agent":"Galactica","state":"idle","epoch":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAPITasksOrphans verifies GET /api/tasks/orphans returns only the tasks
+// assigned to ships missing from the board.
+func TestAPITasksOrphans(t *testing.T) {
+	s := newTestServer(t)
+	writeOrphanFixture(t, s)
+
+	code, raw := apiGetRaw(t, s.Handler(), "/api/tasks/orphans")
+	if code != 200 {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	var rows []struct {
+		Slug       string `json:"slug"`
+		AssignedTo string `json:"assigned_to"`
+		Status     string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("unmarshal orphans: %v (body: %s)", err, raw)
+	}
+	if len(rows) != 1 || rows[0].Slug != "task-vanished" || rows[0].AssignedTo != "Stargazer" {
+		t.Fatalf("got %+v, want [task-vanished/Stargazer]", rows)
+	}
+}
+
+// TestAPITasksOrphansEmpty verifies the endpoint returns an empty JSON array
+// (not null) when no orphans exist.
+func TestAPITasksOrphansEmpty(t *testing.T) {
+	s := newTestServer(t)
+	writeOrphanFixture(t, s)
+	// Give Stargazer a board entry too -> no orphans remain.
+	statusDir := filepath.Join(s.Root, ".starfleet-ai", "var", "comms", "status")
+	if err := os.WriteFile(filepath.Join(statusDir, "Stargazer.json"),
+		[]byte(`{"agent":"Stargazer","state":"idle","epoch":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, raw := apiGetRaw(t, s.Handler(), "/api/tasks/orphans")
+	if code != 200 {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if strings.TrimSpace(string(raw)) != "[]" {
+		t.Fatalf("body = %s, want []", raw)
+	}
+}

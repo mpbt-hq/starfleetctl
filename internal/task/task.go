@@ -13,9 +13,11 @@
 package task
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -71,6 +73,8 @@ const usage = `task <command> [args…]
                                       comms status idle.
   rm <slug>                         delete a task topic from the dashboard.
   purge [--no-push]                 delete ALL tasks with status "done".
+  orphans [--json]                  list tasks assigned to ships that no longer
+                                    exist on the fleet board.
 
 Run 'starfleetctl task <command> --help' for command-specific help.
 `
@@ -106,6 +110,8 @@ func Run(root string, args []string) int {
 		return runRm(root, args[1:])
 	case "purge":
 		return runPurge(root, args[1:])
+	case "orphans":
+		return runOrphans(root, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "task: unknown command: %s\n\n%s", args[0], usage)
 		return 2
@@ -831,6 +837,131 @@ func RunDelete(root, slug string, noPush bool) (int, error) {
 		return code, fmt.Errorf("task rm exited with code %d", code)
 	}
 	return 0, nil
+}
+
+// OrphanTask is one task assigned to a ship that no longer exists on the
+// fleet board.
+type OrphanTask struct {
+	Slug       string `json:"slug"`
+	AssignedTo string `json:"assigned_to"`
+	Status     string `json:"status"`
+	Title      string `json:"title,omitempty"`
+}
+
+// FindOrphans loads every dashboard task and returns those whose Assigned-To
+// ship has no board entry on the fleet (no status/health record / not on the
+// board). A task with an empty assigned-to or whose ship still appears on the
+// board (including a stale one) is not an orphan.
+func FindOrphans(root string) ([]OrphanTask, error) {
+	d, err := dashboard.New(root)
+	if err != nil {
+		return nil, err
+	}
+	metas, err := d.LoadAllTopics()
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := comms.New(root)
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]bool)
+	for _, e := range b.BoardEntries() {
+		if e.Agent != "" {
+			live[e.Agent] = true
+		}
+	}
+
+	var out []OrphanTask
+	for _, m := range metas {
+		if m.Kind != "task" {
+			continue
+		}
+		// Completed tasks need no reassignment; the __auto__ sentinel is a
+		// capture-time routing marker (flagship delegation), not a ship that
+		// vanished.
+		if m.Status == "done" {
+			continue
+		}
+		assigned := strings.TrimSpace(m.AssignedTo)
+		if assigned == "" || assigned == "—" || assigned == "-" || assigned == "__auto__" {
+			continue
+		}
+		// A ship that still has a board entry is assumed to exist (even if
+		// stale/offline); only genuinely unknown assignments are orphans.
+		if live[assigned] {
+			continue
+		}
+		out = append(out, OrphanTask{
+			Slug:       m.Slug,
+			AssignedTo: assigned,
+			Status:     m.Status,
+			Title:      m.Title,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out, nil
+}
+
+// RunOrphansOnly is the programmatic (web/API) counterpart to `task orphans`.
+// It returns the orphan tasks or an error.
+func RunOrphansOnly(root string) ([]OrphanTask, error) {
+	return FindOrphans(root)
+}
+
+const orphansUsage = `task orphans [--json]
+
+Lists tasks assigned to ships that no longer exist on the fleet board
+(no status/health record / not on the board).
+
+Options:
+  --json      print machine-readable JSON instead of a table.
+  -h, --help  this help.
+
+Exit codes:
+  0  OK (possibly zero orphans found)
+  2  bad arguments
+`
+
+func runOrphans(root string, args []string) int {
+	jsonOut := false
+	for _, a := range args {
+		switch a {
+		case "--json":
+			jsonOut = true
+		case "-h", "--help":
+			fmt.Print(orphansUsage)
+			return 0
+		default:
+			fmt.Fprintln(os.Stderr, "task orphans: unknown argument:", a)
+			return 2
+		}
+	}
+
+	orphans, err := FindOrphans(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task orphans:", err)
+		return 1
+	}
+
+	if jsonOut {
+		if err := json.NewEncoder(os.Stdout).Encode(orphans); err != nil {
+			fmt.Fprintln(os.Stderr, "task orphans:", err)
+			return 1
+		}
+		return 0
+	}
+
+	if len(orphans) == 0 {
+		fmt.Println("task orphans: no orphan tasks found")
+		return 0
+	}
+	fmt.Printf("Found %d orphan task(s) assigned to ships not on the board:\n", len(orphans))
+	for _, o := range orphans {
+		fmt.Printf("  %-50s assigned-to: %-12s status: %s\n", o.Slug, o.AssignedTo, o.Status)
+	}
+	return 0
 }
 
 // --- Task lifecycle commands (begin/log/progress/done) ---
