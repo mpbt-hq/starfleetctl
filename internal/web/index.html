@@ -2376,6 +2376,20 @@ async function webRestart(){
   } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
+// ESC key closes any open modal
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape'){
+    const repModal = document.getElementById('rep_modal');
+    const taskModal = document.getElementById('task_modal');
+    const sopModal = document.getElementById('sop_modal');
+    const shipModal = document.getElementById('ship_overlay');
+    if (repModal && repModal.style.display !== 'none') closeRepModal();
+    else if (taskModal && taskModal.style.display !== 'none') closeTaskModal();
+    else if (sopModal && sopModal.style.display !== 'none') closeSOPModal();
+    else if (shipModal && shipModal.style.display !== 'none') history.back();
+  }
+});
+
 applyI18n();
 loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
