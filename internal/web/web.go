@@ -1253,7 +1253,7 @@ func webRestart(root string) error {
 // Body: {"name":"", "model":"provider/model", "parent":"", "unrestricted":false}.
 //
 //	name         — optional; empty => next free ship name
-//	model        — optional opencode model id (provider derived from it)
+//	model        — REQUIRED opencode model id (provider derived from it)
 //	parent       — optional ship to hang under; empty => flagship (Enterprise),
 //	               since a web-GUI launch is treated as an auto-launch under the
 //	               flagship. The launch_type is always "auto" for web launches.
@@ -1284,6 +1284,10 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		p.Provider = r.FormValue("provider")
 		p.Parent = r.FormValue("parent")
 		p.Unrestricted = r.FormValue("unrestricted") == "true" || r.FormValue("unrestricted") == "on"
+	}
+	if p.Model == "" {
+		writeErr(w, 400, "model is required")
+		return
 	}
 	shipID, err := session.LaunchShip(s.Root, session.LaunchShipOpts{
 		Name:         p.Name,

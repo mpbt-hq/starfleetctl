@@ -271,7 +271,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		// Generate per-ship temp opencode config for local/terminal ships too.
 		// Local ships use "ask" as default (matching old terminal.json behavior),
 		// not "deny" like background ships.
-		opencodeConfigPath, err := generateOpencodeConfig(root, shipID, "terminal", false)
+		opencodeConfigPath, err := generateOpencodeConfig(root, shipID, "terminal", false, model)
 		if err != nil {
 			return nil, fmt.Errorf("generate opencode config: %w", err)
 		}
@@ -317,7 +317,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 // .starfleet-ai/var/ships/.
 func runShipRun(root string, args []string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		fmt.Print(`session ship-run [--name <id>] [--model <model>] [-- <args...>]
+		fmt.Print(`session ship-run [--name <id>] [--model <model>]
 
 Start an opencode control-agent session in ship role, detached in the
 background (like run-opencode.ship, but as a detachable termctl terminal).
@@ -327,19 +327,24 @@ Returns immediately; the terminal keeps running until stopped via
 Flags:
   --name <id>         explicit ship ID (default: next free ship name). The caller
                        may pre-allocate the name; if given, it is reserved here.
-  --model <model>     opencode model (e.g. nvidia/nvidia/nemotron-3-nano-30b-a3b).
-                       The provider is derived from the model id (the part before
-                       the first '/'); pass --provider to override.
+  --model <model>     opencode model (e.g. nvidia/nemotron-3-ultra-550b-a55b).
+                       REQUIRED. The provider is derived from the model id
+                       (the part before the first '/'); pass --provider to override.
   --parent <ship>     ship this one is launched under (default: flagship Enterprise).
                        Auto-launches from the web GUI hang under the flagship; a ship
                        spawned by another AI lists that ship as parent.
   --launch-type <t>   how the ship was started: "terminal" (direct at a terminal),
                        "background" (detached, the default here), or "auto" (web/timer).
   --unrestricted      unrestricted permissions (allow all, bypass ask/deny)
-  --                  everything after is passed verbatim to opencode
+
+Task assignment:
+  Ships receive tasks via the comms bus, NOT via extra arguments.
+  1. Capture a task:  starfleetctl task capture "Titel" --desc "..." --assign auto
+  2. Assign to ship:  starfleetctl task assign <slug> <ship>
+  3. Ship polls inbox and executes the directive.
 
 Example:
-  starfleetctl session ship-run --name Voyager --model my/model -- --workspace /foo
+  starfleetctl session ship-run --name Voyager --model nvidia/nemotron-3-ultra-550b-a55b
 `)
 		return 0
 	}
@@ -392,6 +397,13 @@ Example:
 		}
 	}
 
+	if len(oaArgs) > 0 {
+		fmt.Fprintln(os.Stderr, "session ship-run: extra arguments after -- are not supported")
+		fmt.Fprintln(os.Stderr, "  Tasks are assigned via 'starfleetctl task assign <slug> <ship>' and delivered over comms.")
+		fmt.Fprintln(os.Stderr, "  Extra args would be passed as positional arguments to opencode, which interprets them as workspace paths.")
+		return 2
+	}
+
 	shipID, err := LaunchShip(root, LaunchShipOpts{
 		Name:         name,
 		Model:        model,
@@ -419,8 +431,8 @@ type LaunchShipOpts struct {
 	Provider     string   // explicit provider override (when the model id has none)
 	Parent       string   // ship launched under; empty => flagship
 	LaunchType   string   // "terminal" | "background" | "auto"; empty => "background"
-	ExtraArgs    []string // passed verbatim to opencode after --prompt
 	Unrestricted bool     // unrestricted permissions (allow all)
+	ExtraArgs    []string // extra args passed to opencode after --prompt
 }
 
 // LaunchShip starts a detached opencode control-agent ship and returns its
@@ -478,15 +490,18 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	inner += "cd " + shellQuote(root) + "; "
 	// Generate per-ship temp opencode config with provider settings from user config
 	// and launch-type-specific permissions. This replaces the static auto/terminal configs.
-	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted)
+	// Pass model so a default fallback can be set in the config.
+	effectiveModel := model
+	if effectiveModel == "" {
+		effectiveModel = "nvidia/nemotron-3-ultra-550b-a55b"
+	}
+	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel)
 	if err != nil {
 		return "", fmt.Errorf("generate opencode config: %w", err)
 	}
 	inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
 	inner += "exec " + shellQuote(resolveClientPath("opencode"))
-	if model != "" {
-		inner += " --model " + shellQuote(model)
-	}
+	inner += " --model " + shellQuote(effectiveModel)
 	shipPrompt := "You are fleet ship " + name + ", report to flagship " + flagship + "."
 	if launchType == "background" || launchType == "auto" {
 		shipPrompt += " You were launched in " + launchType + " mode (detached, no human at your " +
@@ -495,9 +510,6 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 			"and report results back over the bus."
 	}
 	inner += " --prompt " + shellQuote(shipPrompt) + " "
-	for _, a := range o.ExtraArgs {
-		inner += shellQuote(a) + " "
-	}
 
 	vars := &LaunchVars{
 		ShipID:      name,
@@ -605,7 +617,7 @@ func opencodeConfigPath(root, shipID string) string {
 // generateOpencodeConfig creates a per-ship temp opencode config by merging
 // the user's provider config with launch-type-specific permissions and
 // starfleet-specific settings (plugin, instructions, username).
-func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) (string, error) {
+func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, model string) (string, error) {
 	// Load starfleetctl config for provider_mode setting
 	cfg, err := config.Load(root)
 	if err != nil {
@@ -628,6 +640,7 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	shipConfig := map[string]any{
 		"$schema":  "https://opencode.ai/config.json",
 		"username": shipID,
+		"model":    model,
 	}
 
 	// Copy provider config from user config (unless model-proxy-only mode)
@@ -736,8 +749,10 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool) 
 	// forever. Deny it — the LLM gets a fast tool error and must proceed
 	// autonomously. Terminal ships keep the default ("ask") so the human
 	// can answer.
+	// Note: "question" only accepts a single action string per opencode schema,
+	// not a pattern map like other tools.
 	if launchType != "terminal" && !unrestricted {
-		permission["question"] = map[string]string{"**": "deny"}
+		permission["question"] = "deny"
 	}
 
 	shipConfig["permission"] = permission
@@ -959,7 +974,8 @@ func RunTermctl(root string, args []string) int {
 						_ = bus.DoClear()
 					} else {
 						fmt.Fprintf(os.Stderr, "termctl-run: CRASH for %s — setting crashed status\n", shipID)
-						_ = bus.DoStatus("crashed", "ship exited unexpectedly (crash/OOM/model error)", comms.StatusPatch{})
+						logPath := LogPath(wroot, shipID)
+						_ = bus.DoStatus("crashed", fmt.Sprintf("ship exited unexpectedly — check log: %s", logPath), comms.StatusPatch{})
 						// TODO: trigger auto-restart with backoff
 					}
 				}

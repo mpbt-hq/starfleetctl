@@ -169,26 +169,19 @@
   <section class="page on" id="status">
     <div class="card">
       <b data-i18n="ship.new">Neues Schiff</b>
-      <div class="grid2" style="margin-top:8px">
-        <input id="ns_name" data-i18n-ph="ns_name.ph" placeholder="Name (leer = freier)">
-        <select id="ns_model"><option value="" data-i18n="ns_model.ph">Modell wählen...</option></select>
-      </div>
-      <div class="grid2" style="margin-top:8px">
-        <input id="ns_parent" data-i18n-ph="ns_parent.ph" placeholder="Übergeordnet (leer = Flagship)">
-        <select id="ns_provider"><option value="" data-i18n="ns_provider.ph">Provider (aus Modell)</option>
-          <option value="openai">openai</option>
-          <option value="anthropic">anthropic</option>
-          <option value="google">google</option>
-          <option value="nvidia">nvidia</option>
-          <option value="mistral">mistral</option>
-          <option value="meta">meta</option></select>
-      </div>
-      <div style="margin-top:8px">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="ns_unrestricted">
-          <span data-i18n="ns_unrestricted">Uneingeschränkte Berechtigungen (allow all)</span>
-        </label>
-      </div>
+<div class="grid2" style="margin-top:8px">
+         <input id="ns_name" data-i18n-ph="ns_name.ph" placeholder="Name (leer = freier)">
+         <select id="ns_model"><option value="" data-i18n="ns_model.ph">Modell wählen...</option></select>
+       </div>
+       <div style="margin-top:8px">
+         <input id="ns_parent" data-i18n-ph="ns_parent.ph" placeholder="Übergeordnet (leer = Flagship)" style="width:100%;">
+       </div>
+       <div style="margin-top:8px">
+         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+           <input type="checkbox" id="ns_unrestricted">
+           <span data-i18n="ns_unrestricted">Uneingeschränkte Berechtigungen (allow all)</span>
+         </label>
+       </div>
       <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start">Starten</button></div>
     </div>
     <div class="card" id="board"></div>
@@ -635,10 +628,10 @@ const I18N = {
     'h1.title': '★ Fleet Console',
     'tab.fleet': 'Flotte', 'tab.tasks': 'Tasks', 'tab.bus': 'Bus', 'tab.talk': 'Funk',
     'tab.log': 'Log', 'tab.sessions': 'Sitzungen', 'tab.timers': 'Timer',
-    'tab.reports': 'Berichte', 'tab.files': 'Files',
+    'tab.reports': 'Berichte', 'tab.files': 'Files', 'tab.sops': 'SOPs',
     'ship.new': 'Neues Schiff', 'ns_name.ph': 'Name (leer = freier)',
     'ns_model.ph': 'Modell wählen...', 'ns_parent.ph': 'Übergeordnet (leer = Flagship)',
-    'ns_provider.ph': 'Provider (aus Modell)', 'ns_unrestricted': 'Uneingeschränkte Berechtigungen (allow all)',
+    'ns_unrestricted': 'Uneingeschränkte Berechtigungen (allow all)',
     'ship.start': 'Starten',
     'task.new': 'Neue Aufgabe', 't_title.ph': 'Titel', 't_desc.ph': 'Beschreibung (optional)',
     't_ship.ph': "Ship (leer=offen, 'auto'=freier)",
@@ -746,10 +739,10 @@ const I18N = {
     'h1.title': '★ Fleet Console',
     'tab.fleet': 'Fleet', 'tab.tasks': 'Tasks', 'tab.bus': 'Bus', 'tab.talk': 'Radio',
     'tab.log': 'Log', 'tab.sessions': 'Sessions', 'tab.timers': 'Timer',
-    'tab.reports': 'Reports', 'tab.files': 'Files',
+    'tab.reports': 'Reports', 'tab.files': 'Files', 'tab.sops': 'SOPs',
     'ship.new': 'New ship', 'ns_name.ph': 'Name (empty = auto)',
     'ns_model.ph': 'Choose model...', 'ns_parent.ph': 'Parent (empty = Flagship)',
-    'ns_provider.ph': 'Provider (from model)', 'ns_unrestricted': 'Unrestricted permissions (allow all)',
+    'ns_unrestricted': 'Unrestricted permissions (allow all)',
     'ship.start': 'Launch',
     'task.new': 'New task', 't_title.ph': 'Title', 't_desc.ph': 'Description (optional)',
     't_ship.ph': "Ship (empty=open, 'auto'=auto)",
@@ -1751,12 +1744,9 @@ async function loadModels(){
       sel.appendChild(og);
     }
     // Auto-set provider on model change
-    sel.addEventListener('change', function(){
-      const opt = this.options[this.selectedIndex];
-      const prov = opt?.dataset?.provider || '';
-      if (prov) document.getElementById('ns_provider').value = prov;
-      localStorage.setItem('fleet_model', this.value);
-    });
+sel.addEventListener('change', function(){
+       localStorage.setItem('fleet_model', this.value);
+     });
   } catch(e){ /* models.yaml not found — fallback to empty dropdown */ }
 }
 
@@ -1764,22 +1754,21 @@ async function loadModels(){
 // taken from the explicit select when set, otherwise derived server-side from
 // the model id. Web launches are auto-launches under the flagship.
 async function shipLaunch(){
-  const name = document.getElementById('ns_name').value.trim();
-  const model = document.getElementById('ns_model').value.trim();
-  const parent = document.getElementById('ns_parent').value.trim();
-  const provider = document.getElementById('ns_provider').value.trim();
-  const unrestricted = document.getElementById('ns_unrestricted').checked;
-  const body = { name, model, parent, unrestricted };
-  if (provider) body.provider = provider;
-  try {
-    const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body)});
-    toast(t('ship.launched')+(r.ship_id||name||'?'));
-    document.getElementById('ns_name').value=''; document.getElementById('ns_model').selectedIndex=0;
-    document.getElementById('ns_parent').value=''; document.getElementById('ns_provider').value='';
-    document.getElementById('ns_unrestricted').checked=false;
-    refresh();
-  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
+const name = document.getElementById('ns_name').value.trim();
+   const model = document.getElementById('ns_model').value.trim();
+   if (!model) { toast(t('ship.nomodel'), true); return; }
+   const parent = document.getElementById('ns_parent').value.trim();
+   const unrestricted = document.getElementById('ns_unrestricted').checked;
+   const body = { name, model, parent, unrestricted };
+   try {
+     const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
+       body: JSON.stringify(body)});
+toast(t('ship.launched')+(r.ship_id||name||'?'));
+      document.getElementById('ns_name').value='';
+      document.getElementById('ns_parent').value='';
+      document.getElementById('ns_unrestricted').checked=false;
+      refresh();
+   } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 let threadMode = false;
