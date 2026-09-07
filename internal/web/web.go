@@ -588,11 +588,43 @@ func (s *Server) apiCmd(w http.ResponseWriter, r *http.Request) {
 //	POST   {slug, ship?}                     -> task assign
 //	POST   {slug}                            -> task unassign
 //	POST   {slug, status}                    -> task status
+//	DELETE {slug}                            -> task delete (rm)
 func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodDelete:
+		var p struct {
+			Slug string `json:"slug"`
+		}
+		if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				writeErr(w, 400, "bad json: "+err.Error())
+				return
+			}
+		} else {
+			p.Slug = r.FormValue("slug")
+		}
+		if p.Slug == "" {
+			writeErr(w, 400, "need slug")
+			return
+		}
+		code, err := task.RunDelete(s.Root, p.Slug, true)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if code != 0 {
+			writeErr(w, 422, fmt.Sprintf("task delete exited with code %d", code))
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	case http.MethodPost:
+		// fall through to existing logic
+	default:
 		writeErr(w, 405, "method not allowed")
 		return
 	}
+
 	var p struct {
 		Title    string `json:"title"`
 		Desc     string `json:"desc"`

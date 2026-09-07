@@ -395,6 +395,7 @@
           <div id="task_m_meta" class="muted" style="margin-top:6px;font-size:12px"></div>
         </div>
         <button class="sec" onclick="taskDetailEdit()" style="width:auto;padding:4px 10px" data-i18n="task.edit">Bearbeiten</button>
+        <button class="sec" onclick="taskDeleteFromModal()" style="width:auto;padding:4px 10px;font-size:16px;background:var(--bad);color:#1a0606" data-i18n="task.delete.btn">Löschen</button>
         <button class="sec" onclick="closeTaskModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
       </div>
       <div id="task_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></div>
@@ -647,7 +648,7 @@ const I18N = {
     'task.worker': ' bearbeitet gerade', 'task.assign.auto': 'auto — Flagschiff (delegiert)',
     'task.assign.none': '(keine Zuweisung)', 'task.cat.none': 'Kategorie: (toplevel)',
     'task.status.btn': 'Status', 'task.emptybody': '(leer)',
-    'task.assign.btn': 'Zuweisen', 'task.unassign.btn': 'Frei', 'task.detail.btn': 'Detail',
+    'task.assign.btn': 'Zuweisen', 'task.unassign.btn': 'Frei', 'task.detail.btn': 'Detail', 'task.delete.btn': 'Löschen',
     'ship.launched': 'Schiff gestartet: ',
     'bus.nomsgs': 'noch keine Nachrichten', 'bus.notinview': 'Nachricht {id} nicht in dieser Ansicht',
     'bus.empty': 'leer', 'bus.nolog': 'kein Log',
@@ -752,7 +753,7 @@ const I18N = {
     'task.worker': ' working', 'task.assign.auto': 'auto — flagship (delegated)',
     'task.assign.none': '(no assignment)', 'task.cat.none': 'Category: (toplevel)',
     'task.status.btn': 'Status', 'task.emptybody': '(empty)',
-    'task.assign.btn': 'Assign', 'task.unassign.btn': 'Free', 'task.detail.btn': 'Details',
+    'task.assign.btn': 'Assign', 'task.unassign.btn': 'Free', 'task.detail.btn': 'Details', 'task.delete.btn': 'Delete',
     'ship.launched': 'Ship launched: ',
     'bus.nomsgs': 'no messages yet', 'bus.notinview': 'Message {id} not in this view',
     'bus.empty': 'empty', 'bus.nolog': 'no log',
@@ -1398,6 +1399,20 @@ async function taskStatus(slug){
 async function taskUnassign(slug){
   try { await api('/api/task', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({slug, unassign:true})}); toast(t('task.free')); loadTasks(); }
+  catch(e){ toast(t('err.prefix')+esc(e.message), true); }
+}
+async function taskDelete(slug){
+  if (!confirm('Task "' + slug + '" wirklich löschen?')) return;
+  try { await api('/api/task', {method:'DELETE', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({slug})}); toast('Task gelöscht'); loadTasks(); }
+  catch(e){ toast(t('err.prefix')+esc(e.message), true); }
+}
+async function taskDeleteFromModal(){
+  const slug = taskDetailSlug;
+  if (!slug) return;
+  if (!confirm('Task "' + slug + '" wirklich löschen?')) return;
+  try { await api('/api/task', {method:'DELETE', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({slug})}); toast('Task gelöscht'); closeTaskModal(); loadTasks(); }
   catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 // --- Task full-text detail: view (GET /api/topic/<slug>) + edit (POST) ---

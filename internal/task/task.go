@@ -819,6 +819,20 @@ func RunCaptureStatus(root, slug, status string, noPush bool) (int, error) {
 	return 0, nil
 }
 
+// RunDelete deletes a task topic from the dashboard. noPush suppresses the
+// git push.
+func RunDelete(root, slug string, noPush bool) (int, error) {
+	args := []string{slug}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runRm(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task rm exited with code %d", code)
+	}
+	return 0, nil
+}
+
 // --- Task lifecycle commands (begin/log/progress/done) ---
 
 const beginUsage = `task begin <slug> [--no-push]
