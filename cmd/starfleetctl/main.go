@@ -30,6 +30,7 @@ import (
 	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/selfinstall"
 	"github.com/metux/starfleetctl/internal/session"
+	"github.com/metux/starfleetctl/internal/services"
 	"github.com/metux/starfleetctl/internal/shipnames"
 	"github.com/metux/starfleetctl/internal/sop"
 	"github.com/metux/starfleetctl/internal/task"
@@ -245,6 +246,11 @@ func main() {
 	case "session":
 		os.Exit(session.Run(root, os.Args[2:]))
 	case "run":
+		if flagship(os.Args[2:]) {
+			if err := services.FlagshipAutostart(root); err != nil {
+				fmt.Fprintln(os.Stderr, "run: services:", err)
+			}
+		}
 		os.Exit(session.RunCmd(root, os.Args[2:]))
 	case "worktree":
 		os.Exit(worktree.Run(root, os.Args[2:]))
@@ -325,4 +331,18 @@ func exists(path string) bool {
 func isDir(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.IsDir()
+}
+
+// flagship reports whether --flagship appears in args before the first --,
+// i.e. whether RunCmd is being invoked as a flagship session.
+func flagship(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "--flagship" {
+			return true
+		}
+	}
+	return false
 }

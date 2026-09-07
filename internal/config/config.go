@@ -18,6 +18,18 @@ type Config struct {
 	Comms      CommsConfig      `yaml:"comms"`
 	Fleet      FleetConfig      `yaml:"fleet"`
 	ModelProxy ModelProxyConfig `yaml:"model_proxy"`
+	Services   ServicesConfig   `yaml:"services"`
+}
+
+// ServicesConfig holds daemon lifecycle configuration
+// (.starfleet-ai/conf/services.yaml). It decides which companion daemons are
+// pulled up automatically when the flagship (starfleetctl run --flagship)
+// starts — replacing the need for hand-rolled cron autostart entries.
+type ServicesConfig struct {
+	// Autostart is the ordered list of service names to start automatically
+	// when the flagship session boots. Supported names: web, model-proxy,
+	// timer. Empty (default) means everything stays on-demand.
+	Autostart []string `yaml:"autostart"`
 }
 
 // ModelProxyConfig holds the model-proxy daemon configuration
@@ -169,6 +181,7 @@ func Load(root string) (*Config, error) {
 		{"comms.yaml", "comms", &cfg.Comms},
 		{"fleet.yaml", "fleet", &cfg.Fleet},
 		{"model-proxy.yaml", "model_proxy", &cfg.ModelProxy},
+		{"services.yaml", "services", &cfg.Services},
 	} {
 		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)
 		data, err := os.ReadFile(path)
