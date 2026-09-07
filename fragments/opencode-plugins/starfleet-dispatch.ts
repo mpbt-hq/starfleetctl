@@ -360,6 +360,19 @@ export const plugin = async ({ client, $ }: any) => {
             })()
             return true
           }
+          case 'toast': {
+            // toast <variant> <title> <message> [duration]
+            const parts = args.split(/\s+/)
+            if (parts.length < 3) { tickLog(`command toast from=${msg.from}: need variant, title, message`); return true }
+            const variant = parts[0]
+            const title = parts[1]
+            const message = parts.slice(2).join(' ')
+            const duration = parts[3] ? parseInt(parts[3], 10) : 5000
+            const src = `[command toast from=${msg.from}]`
+            tickLog(`${src}: ${variant} "${title}"`)
+            bus({ cmd: 'toast', variant, title, message, duration })
+            return true
+          }
           default: {
             tickLog(`unknown command from=${msg.from}: ${verb}`)
             return true
@@ -466,7 +479,8 @@ export const plugin = async ({ client, $ }: any) => {
   }
 
   const heartbeatTimer = setInterval(() => {
-    bus({ cmd: 'health', touch: true, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel, task: currentTask })
+    const state = currentTask ? 'working' : 'idle'
+    bus({ cmd: 'health', touch: true, state, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel, task: currentTask })
   }, HEARTBEAT_MS)
 
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
@@ -503,14 +517,24 @@ export const plugin = async ({ client, $ }: any) => {
     retryCooldownUntil = now + RETRY_COOLDOWN_MS
     appLog('warn', `session retry status: ${detail}`)
     tickLog(`MODEL RETRY (quota/zen): ${detail}`)
-    toastBus('warning', 'starfleet-dispatch', `model retry: ${detail}`, 6000)
 
-    // Delegate policy to starfleetctl — plugin just executes.
+    // Delegate policy to starfleetctl FIRST, then decide on toast.
     const r = bus({
       cmd: 'error-handle', detail, source: 'retry-status',
       ship: aid(), pid: process.pid, current_model: currentModel.model || '',
       session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
     })
+    tickLog(`RETRY-STATUS bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'}`)
+
+    // Only toast for non-auto-restart errors.
+    const isAutoRestart = r.ok && r.action === 'retry' && r.tag &&
+      ['resource-exhausted', 'nim-overload', 'streaming-response-failed', 'no-provider'].includes(r.tag)
+    if (!isAutoRestart) {
+      toastBus('warning', 'starfleet-dispatch', `model retry: ${detail}`, 6000)
+    } else {
+      tickLog(`RETRY-STATUS: auto-restart error (${r.tag}), skipping toast`)
+    }
+
     if (r.ok && r.action) {
       await executeAction(r.action, r.target_model || '', detail, client, currentSessionID, hasSwitchedToFallback)
     }
@@ -530,9 +554,8 @@ const logPollTimer = setInterval(async () => {
   const msg = `LOG ERROR detected: ${errDetail}`
   appLog('warn', msg)
   tickLog(`LOG-MONITOR: ${msg}`)
-  toastBus('warning', 'starfleet-dispatch', msg, 8000)
 
-  // Delegate policy to starfleetctl.
+  // Delegate policy to starfleetctl FIRST, then decide on toast.
   const r = bus({
     cmd: 'error-handle', detail: errDetail, source: 'log-monitor',
     ship: aid(), pid: process.pid, current_model: currentModel.model || '',
@@ -540,6 +563,18 @@ const logPollTimer = setInterval(async () => {
   })
   tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
   appLog('warn', `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}`)
+
+  // Only toast for non-auto-restart errors (action != 'retry' or tag not auto-restart)
+  // Transient errors (resource-exhausted, nim-overload, etc.) are absorbed by
+  // the proxy and retried — no need to notify the user/fleet with a toast.
+  const isAutoRestart = r.ok && r.action === 'retry' && r.tag &&
+    ['resource-exhausted', 'nim-overload', 'streaming-response-failed', 'no-provider'].includes(r.tag)
+  if (!isAutoRestart) {
+    toastBus('warning', 'starfleet-dispatch', msg, 8000)
+  } else {
+    tickLog(`LOG-MONITOR: auto-restart error (${r.tag}), skipping toast`)
+  }
+
   if (r.ok && r.action) {
     if (r.action === 'retry') {
       logMonitorCooldownUntil = Date.now() + LOG_COOLDOWN_MS

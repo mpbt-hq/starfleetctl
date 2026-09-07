@@ -28,19 +28,22 @@ type BoardEntryJSON struct {
 	Stale      bool   `json:"stale"`
 	// Structured detail (status/<ship>.json); absent when the ship never
 	// reported one. Mirrors the fields of StatusDetail.
-	Task       string `json:"task,omitempty"`
-	Progress   int    `json:"progress,omitempty"`
-	Blocker    string `json:"blocker,omitempty"`
-	ETA        string `json:"eta,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	LaunchType string `json:"launch_type,omitempty"`
-	Parent     string `json:"parent,omitempty"`
-	Provider   string `json:"provider,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Server     string `json:"server,omitempty"`
-	ErrorTag   string `json:"error_tag,omitempty"`
-	Updated    string `json:"updated,omitempty"`
-	Unattached bool   `json:"unattached,omitempty"`
+	Task         string `json:"task,omitempty"`
+	Progress     int    `json:"progress,omitempty"`
+	Blocker      string `json:"blocker,omitempty"`
+	ETA          string `json:"eta,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	LaunchType   string `json:"launch_type,omitempty"`
+	Parent       string `json:"parent,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Server       string `json:"server,omitempty"`
+	ErrorTag     string `json:"error_tag,omitempty"`
+	Updated      string `json:"updated,omitempty"`
+	Unattached   bool   `json:"unattached,omitempty"`
+	ToastVariant string `json:"toast_variant,omitempty"`
+	ToastTitle   string `json:"toast_title,omitempty"`
+	ToastMessage string `json:"toast_message,omitempty"`
 }
 
 // BoardEntries returns the same board data that `comms board --json`
@@ -100,6 +103,15 @@ func (b *Bus) BoardEntries() []BoardEntryJSON {
 		}
 		if r.Unattached {
 			e.Unattached = r.Unattached
+		}
+		if r.ToastVariant != "" {
+			e.ToastVariant = r.ToastVariant
+		}
+		if r.ToastTitle != "" {
+			e.ToastTitle = r.ToastTitle
+		}
+		if r.ToastMessage != "" {
+			e.ToastMessage = r.ToastMessage
 		}
 		out = append(out, e)
 	}
