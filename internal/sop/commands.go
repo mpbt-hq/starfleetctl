@@ -94,10 +94,11 @@ func (s *SOP) DoWrite(slug, src string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.FragmentsDir(), 0o755); err != nil {
+	targetPath := s.fragmentPath(slug)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.fragmentPath(slug), data, 0o644); err != nil {
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
 		return err
 	}
 	return s.DoReindex()
@@ -177,6 +178,11 @@ func (s *SOP) DoReindex() error {
 	}
 
 	return nil
+}
+
+// LoadAllFragments returns all fragment metadata (public wrapper for loadAllFragments).
+func (s *SOP) LoadAllFragments() ([]FragmentMeta, []string, error) {
+	return s.loadAllFragments()
 }
 
 // DoCommit stages, commits, and (unless push is false) pushes ONE fragment

@@ -162,6 +162,7 @@
   <div class="tab" data-p="timers" onclick="show('timers', true)" data-i18n="tab.timers">Timer</div>
   <div class="tab" data-p="reports" onclick="show('reports', true);loadReports()" data-i18n="tab.reports">Berichte</div>
   <div class="tab" data-p="files" onclick="show('files', true)" data-i18n="tab.files">Files</div>
+  <div class="tab" data-p="sops" onclick="show('sops', true);loadSOPs()" data-i18n="tab.sops">SOPs</div>
 </div>
 
 <main>
@@ -416,6 +417,35 @@
     </div>
   </div>
 
+  <!-- SOP detail modal (full text view + edit) -->
+  <div id="sop_modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSOPModal()">
+    <div class="modal" style="max-width:760px">
+      <div class="row" style="align-items:flex-start">
+        <div class="grow">
+          <div class="muted" style="font-size:12px">Slug:</div>
+          <b id="sop_m_title"></b>
+          <div id="sop_m_meta" class="muted" style="margin-top:6px;font-size:12px"></div>
+        </div>
+        <button class="sec" onclick="sopDetailEdit()" style="width:auto;padding:4px 10px" data-i18n="task.edit">Bearbeiten</button>
+        <button class="sec" onclick="closeSOPModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
+      </div>
+      <pre id="sop_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></pre>
+      <div id="sop_m_edit" style="display:none;margin-top:12px">
+        <input id="sop_m_edit_slug" data-i18n-ph="sop_slug.ph" placeholder="Slug" style="width:100%;box-sizing:border-box">
+        <input id="sop_m_edit_title" data-i18n-ph="sop_title.ph" placeholder="Titel" style="width:100%;margin-top:8px;box-sizing:border-box">
+        <div class="grid2" style="margin-top:8px">
+          <input type="number" id="sop_m_edit_order" value="0" data-i18n-ph="sop_order.ph" placeholder="Order">
+          <input id="sop_m_edit_owner" data-i18n-ph="sop_owner.ph" placeholder="Owner">
+        </div>
+        <textarea id="sop_m_edit_body" data-i18n-ph="sop_body.ph" placeholder="Body (Markdown)..." style="width:100%;min-height:280px;margin-top:8px;box-sizing:border-box;font:13px/1.5 ui-monospace,monospace"></textarea>
+        <div class="row" style="margin-top:8px;gap:8px">
+          <button onclick="sopDetailSave()" data-i18n="save">Speichern</button>
+          <button class="sec" onclick="showSOPBody()" data-i18n="cancel">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <section class="page" id="files">
     <div class="card">
       <div class="row" style="align-items:center">
@@ -449,6 +479,34 @@
         <textarea id="file_editor_content" style="width:100%;height:70vh;box-sizing:border-box;font:13px/1.4 ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical"></textarea>
       </div>
     </div>
+  </section>
+
+  <section class="page" id="sops">
+    <div class="card">
+      <b data-i18n="sop.new">Neues SOP</b>
+      <input id="sop_slug" data-i18n-ph="sop_slug.ph" placeholder="Slug (z.B. project/my-sop)" style="margin-top:8px">
+      <input id="sop_title" data-i18n-ph="sop_title.ph" placeholder="Titel" style="margin-top:8px">
+      <div class="grid2" style="margin-top:8px">
+        <input type="number" id="sop_order" value="0" data-i18n-ph="sop_order.ph" placeholder="Reihenfolge (Order)">
+        <input id="sop_owner" data-i18n-ph="sop_owner.ph" placeholder="Owner (optional)">
+      </div>
+      <div class="actions"><button onclick="sopNew()" data-i18n="sop.create">Erstellen</button></div>
+    </div>
+    <div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
+      <span class="muted" data-i18n="filter.label">Filter:</span>
+      <select id="sopf_cat" onchange="loadSOPs()">
+        <option value="" data-i18n="sopf_cat.all">Kategorie: alle</option>
+        <option value="local">local</option>
+        <option value="xlibre">xlibre</option>
+        <option value="starfleet-instructions">starfleet-instructions (read-only)</option>
+      </select>
+      <span class="muted" data-i18n="sort.label">Sortieren:</span>
+      <select id="sopf_sort" onchange="loadSOPs()">
+        <option value="order" selected data-i18n="sopf_sort.order">Order</option>
+        <option value="slug" data-i18n="sopf_sort.slug">Slug</option>
+      </select>
+    </div>
+    <div class="card" id="soplist"></div>
   </section>
 
   <section class="page" id="sessions">
@@ -619,13 +677,18 @@ const I18N = {
     'task_m_text.ph': 'Task-Volltext (Markdown-Body)...', 'save': 'Speichern', 'cancel': 'Abbrechen',
     'files.title': 'Dateien', 'file.download': 'Download', 'file.edit': 'Bearbeiten',
     'file.save': 'Speichern', 'file.cancel': 'Abbrechen',
+    'sop.new': 'Neues SOP', 'sop_slug.ph': 'Slug (z.B. project/my-sop)',
+    'sop_title.ph': 'Titel', 'sop_order.ph': 'Reihenfolge (Order)',
+    'sop_owner.ph': 'Owner (optional)', 'sop.starfleet': 'Starfleet-Instructions (installiert in .starfleet-ai/var/sop.d/starfleet-instructions/)',
+    'sop.create': 'Erstellen', 'sop_body.ph': 'Body (Markdown)...',
+    'sopf_cat.all': 'Kategorie: alle', 'sopf_sort.order': 'Order', 'sopf_sort.slug': 'Slug',
     'sess.title': 'opencode-Sitzungen', 'sess_filter.ph': 'Filter: Schiff',
     'sess.agent.all': 'alle Modes',
     'sess.note': 'opencode-DB wird read-only gelesen — auch Sessions ohne termctl-Terminal',
     'sess.log': 'opencode.log', 'sess.refresh': 'Aktualisieren', 'sess.loading': 'Lade…',
     'sess.last50': 'letzte 50', 'sess.last200': 'letzte 200',
     'ship.switch': 'Switch', 'ship.stop': 'Stop', 'ship.chat': 'Chat', 'ship.screen': 'Terminal',
-    'ship.hist': 'Verlauf', 'term.auto': 'Auto-Update: an', 'term.autooff': 'Auto-Update: aus',
+    'ship.hist': 'Verlauf', 'term.auto': 'Auto-Update: an', 'term.autooff': 'Auto-Update: aus', 'term.toggle': 'Terminal', 'term.x11toggle': 'X11-Term', 'term.x11sent': 'X11-Terminal-Befehl gesendet an ',
     'term.scrollback': 'Scrollback', 'term.live': 'Live-Screen', 'term.loading': 'Lade Terminal...',
     'ship_msg.ph': 'Nachricht an Schiff…', 'ship.send': 'Senden',
     // dynamic strings (JS)
@@ -725,13 +788,18 @@ const I18N = {
     'task_m_text.ph': 'Task full text (Markdown body)...', 'save': 'Save', 'cancel': 'Cancel',
     'files.title': 'Files', 'file.download': 'Download', 'file.edit': 'Edit',
     'file.save': 'Save', 'file.cancel': 'Cancel',
+    'sop.new': 'New SOP', 'sop_slug.ph': 'Slug (e.g. project/my-sop)',
+    'sop_title.ph': 'Title', 'sop_order.ph': 'Order',
+    'sop_owner.ph': 'Owner (optional)', 'sop.starfleet': 'Starfleet-Instructions (installed in .starfleet-ai/var/sop.d/starfleet-instructions/)',
+    'sop.create': 'Create', 'sop_body.ph': 'Body (Markdown)...',
+    'sopf_cat.all': 'Category: all', 'sopf_sort.order': 'Order', 'sopf_sort.slug': 'Slug',
     'sess.title': 'opencode sessions', 'sess_filter.ph': 'Filter: ship',
     'sess.agent.all': 'all modes',
     'sess.note': 'opencode DB read read-only — including sessions without termctl terminal',
     'sess.log': 'opencode.log', 'sess.refresh': 'Refresh', 'sess.loading': 'Loading…',
     'sess.last50': 'last 50', 'sess.last200': 'last 200',
     'ship.switch': 'Switch', 'ship.stop': 'Stop', 'ship.chat': 'Chat', 'ship.screen': 'Terminal',
-    'ship.hist': 'History', 'term.auto': 'Auto-update: on', 'term.autooff': 'Auto-update: off',
+    'ship.hist': 'History', 'term.auto': 'Auto-update: on', 'term.autooff': 'Auto-update: off', 'term.toggle': 'Terminal', 'term.x11toggle': 'X11-Term', 'term.x11sent': 'X11-terminal command sent to ',
     'term.scrollback': 'Scrollback', 'term.live': 'Live screen', 'term.loading': 'Loading terminal...',
     'ship_msg.ph': 'Message to ship…', 'ship.send': 'Send',
     // dynamic strings (JS)
@@ -842,6 +910,130 @@ async function refresh(){
   else if (cur==='timers') await loadTimers();
   else if (cur==='reports') await loadReports();
   else if (cur==='files') await loadFiles();
+  else if (cur==='sops') await loadSOPs();
+}
+
+// --- SOP tab ---
+let sopFilterCat = '';
+let sopFilterSort = 'order';
+
+async function loadSOPs(){
+  const el = document.getElementById('soplist');
+  sopFilterCat = document.getElementById('sopf_cat').value;
+  sopFilterSort = document.getElementById('sopf_sort').value;
+  try {
+    const data = await api('/api/sop' + (sopFilterCat ? '?category='+encodeURIComponent(sopFilterCat) : ''));
+    if (!data.fragments || !data.fragments.length){
+      el.innerHTML = '<div class="empty">'+t('empty.tasks')+'</div>';
+      return;
+    }
+    let frags = data.fragments;
+    // Sort
+    frags = [...frags].sort((a,b)=>{
+      if (sopFilterSort === 'slug') return a.slug.localeCompare(b.slug);
+      return a.order - b.order;
+    });
+    el.innerHTML = frags.map(f=>{
+      const badge = f.is_starfleet ? '<span class="pill ok">⭐ starfleet</span>' : '';
+      return `<div class="card">
+        <div class="row"><b class="grow"><span class="task-title-link" onclick="sopDetail('${esc(f.slug)}')">${esc(f.slug)}</span></b>
+          <span class="pill dim">Order: ${f.order}</span> ${badge}</div>
+        <div class="muted" style="margin-top:4px">${esc(f.title)} ${f.owner?'· 👤 '+esc(f.owner):''}${data.warnings && data.warnings.some(w=>w.includes(f.slug))?' · <span class=\"pill warn\">⚠ parse</span>':''}</div>
+        <div class="actions">
+          <button class="sec" onclick="sopEdit('${esc(f.slug)}')">${t('task.edit')}</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e){
+    el.innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>';
+  }
+}
+
+async function sopNew(){
+  const slug = document.getElementById('sop_slug').value.trim();
+  const title = document.getElementById('sop_title').value.trim();
+  const order = parseInt(document.getElementById('sop_order').value) || 0;
+  const owner = document.getElementById('sop_owner').value.trim();
+  if (!slug || !title){
+    toast(t('task.titlemissing'), true);
+    return;
+  }
+  try {
+    await api('/api/sop', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({slug, title, body: '(fill in)\n', order, owner})});
+    toast(t('task.captured'));
+    document.getElementById('sop_slug').value='';
+    document.getElementById('sop_title').value='';
+    document.getElementById('sop_order').value='0';
+    document.getElementById('sop_owner').value='';
+    loadSOPs();
+  } catch(e){
+    toast(t('err.prefix')+esc(e.message), true);
+  }
+}
+
+async function sopDetail(slug){
+  try {
+    const data = await api('/api/sop/'+encodeURIComponent(slug));
+    document.getElementById('sop_m_title').textContent = data.slug;
+    document.getElementById('sop_m_meta').innerHTML =
+      'Title: ' + esc(data.title) + '<br>' +
+      'Order: ' + data.order + '<br>' +
+      'Owner: ' + esc(data.owner || '—') + '<br>' +
+      'Starfleet: ' + (data.is_starfleet ? 'Ja' : 'Nein') + '<br>' +
+      'Slug: ' + esc(data.slug);
+    document.getElementById('sop_m_body').textContent = data.body || '';
+    document.getElementById('sop_m_edit_slug').value = data.slug;
+    document.getElementById('sop_m_edit_title').value = data.title;
+    document.getElementById('sop_m_edit_order').value = data.order;
+    document.getElementById('sop_m_edit_owner').value = data.owner || '';
+    document.getElementById('sop_m_edit_body').value = data.body || '';
+    showSOPBody();
+    document.getElementById('sop_modal').style.display = 'flex';
+  } catch(e){
+    toast(t('err.prefix')+esc(e.message), true);
+  }
+}
+
+function closeSOPModal(){
+  document.getElementById('sop_modal').style.display = 'none';
+}
+
+function showSOPBody(){
+  document.getElementById('sop_m_edit').style.display = 'none';
+  const el = document.getElementById('sop_m_body');
+  el.textContent = document.getElementById('sop_m_edit_body').value || '';
+  el.style.display = '';
+}
+
+function sopDetailEdit(){
+  document.getElementById('sop_m_body').style.display = 'none';
+  document.getElementById('sop_m_edit').style.display = 'block';
+}
+
+async function sopDetailSave(){
+  const slug = document.getElementById('sop_m_edit_slug').value.trim();
+  const title = document.getElementById('sop_m_edit_title').value.trim();
+  const order = parseInt(document.getElementById('sop_m_edit_order').value) || 0;
+  const owner = document.getElementById('sop_m_edit_owner').value.trim();
+  const body = document.getElementById('sop_m_edit_body').value;
+  if (!slug || !title){
+    toast(t('task.titlemissing'), true);
+    return;
+  }
+  try {
+    await api('/api/sop/'+encodeURIComponent(slug), {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({title, body, order, owner, commit_msg: 'web: sop update '+slug})});
+    toast(t('task.updated'));
+    closeSOPModal();
+    loadSOPs();
+  } catch(e){
+    toast(t('err.prefix')+esc(e.message), true);
+  }
+}
+
+async function sopEdit(slug){
+  sopDetail(slug);
 }
 
 // --- Files tab ---

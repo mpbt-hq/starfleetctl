@@ -207,3 +207,24 @@ func (s *SOP) loadAllFragments() ([]FragmentMeta, []string, error) {
 	})
 	return metas, warnings, nil
 }
+
+// ErrFragmentNoFrontmatter is returned when a fragment file lacks a leading "---".
+var ErrFragmentNoFrontmatter = errFragmentNoFrontmatter
+
+// ErrFragmentUnterminated is returned when a fragment file's frontmatter lacks a closing "---".
+var ErrFragmentUnterminated = errFragmentUnterminated
+
+// FragmentPath returns the absolute filesystem path for a fragment slug.
+func (s *SOP) FragmentPath(slug string) string {
+	return s.fragmentPath(slug)
+}
+
+// ParseFragmentFile parses a fragment file's frontmatter and body.
+func ParseFragmentFile(data []byte) (FragmentMeta, string, error) {
+	return parseFragmentFile(data)
+}
+
+// WriteFragmentFile writes a fragment file with the given metadata and body.
+func WriteFragmentFile(path string, m FragmentMeta, body string) error {
+	return writeFragmentFile(path, m, body)
+}

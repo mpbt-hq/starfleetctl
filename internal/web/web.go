@@ -12,6 +12,7 @@ package web
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -35,6 +36,7 @@ import (
 	"github.com/metux/starfleetctl/internal/ocsessions"
 	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/session"
+	"github.com/metux/starfleetctl/internal/sop"
 	"github.com/metux/starfleetctl/internal/task"
 	"github.com/metux/starfleetctl/internal/timer"
 )
@@ -48,6 +50,7 @@ type Server struct {
 	Addr string
 	bus  *comms.Bus
 	dash *dashboard.Dashboard
+	sop  *sop.SOP
 	mux  *http.ServeMux
 }
 
@@ -85,7 +88,11 @@ func New(root, addr string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("web: dashboard: %w", err)
 	}
-	s := &Server{Root: root, Addr: addr, bus: b, dash: d, mux: http.NewServeMux()}
+	sopInst, err := sop.New(root)
+	if err != nil {
+		return nil, fmt.Errorf("web: sop: %w", err)
+	}
+	s := &Server{Root: root, Addr: addr, bus: b, dash: d, sop: sopInst, mux: http.NewServeMux()}
 	s.routes()
 	return s, nil
 }
@@ -119,6 +126,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/files", s.apiFileList)
 	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
 	s.mux.HandleFunc("/api/files/save", s.apiFileSave)
+	s.mux.HandleFunc("/api/sop", s.apiSOPList)      // GET list
+	s.mux.HandleFunc("/api/sop/", s.apiSOPDispatch) // GET/POST /api/sop/<slug>
 	s.mux.HandleFunc("/api/reports", s.apiReports)
 	s.mux.HandleFunc("/api/reports/", s.apiReportDispatch)
 	s.mux.HandleFunc("/api/sessions", s.apiSessions)
@@ -518,6 +527,264 @@ func (s *Server) apiDashboardReindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// apiSOPList handles GET /api/sop — returns all SOP fragments as JSON.
+// Also handles POST /api/sop for creating new fragments.
+func (s *Server) apiSOPList(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		category := strings.TrimSpace(r.URL.Query().Get("category"))
+		metas, warnings, err := s.sop.LoadAllFragments()
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		type frag struct {
+			Slug        string `json:"slug"`
+			Title       string `json:"title"`
+			Order       int    `json:"order"`
+			Owner       string `json:"owner,omitempty"`
+			IsStarfleet bool   `json:"is_starfleet"`
+		}
+		var out []frag
+		for _, m := range metas {
+			if category != "" && category != "all" {
+				// Check if slug starts with category/
+				if category == "starfleet-instructions" {
+					if !m.IsStarfleet {
+						continue
+					}
+				} else if !strings.HasPrefix(m.Slug, category+"/") && m.Slug != category {
+					continue
+				}
+			}
+			out = append(out, frag{m.Slug, m.Title, m.Order, m.Owner, m.IsStarfleet})
+		}
+		writeJSON(w, map[string]any{"fragments": out, "warnings": warnings})
+	case http.MethodPost:
+		s.apiSOPCreate(w, r)
+	default:
+		writeErr(w, 405, "method not allowed")
+	}
+}
+
+// apiSOPDispatch routes /api/sop/<slug> — full fragment view/edit:
+//
+//	GET  /api/sop/<slug>             -> get fragment (frontmatter + body)
+//	POST /api/sop/<slug>             -> update fragment
+func (s *Server) apiSOPDispatch(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimPrefix(r.URL.Path, "/api/sop/")
+	if slug == "" {
+		writeErr(w, 400, "slug required — /api/sop/<slug>")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.apiSOPGet(w, slug)
+	case http.MethodPost:
+		s.apiSOPUpdate(w, r, slug)
+	default:
+		writeErr(w, 405, "method not allowed")
+	}
+}
+
+// apiSOPCreate handles POST /api/sop — creates a new SOP fragment.
+// Body: {slug, title, body, order?, owner?, is_starfleet?, commit_msg?, push?}
+func (s *Server) apiSOPCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	var p struct {
+		Slug        string  `json:"slug"`
+		Title       string  `json:"title"`
+		Body        string  `json:"body"`
+		Order       *int    `json:"order"`
+		Owner       *string `json:"owner"`
+		IsStarfleet *bool   `json:"is_starfleet"`
+		CommitMsg   string  `json:"commit_msg"`
+		Push        *bool   `json:"push"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if p.Slug == "" || p.Title == "" {
+		writeErr(w, 400, "slug and title are required")
+		return
+	}
+	order := 0
+	if p.Order != nil {
+		order = *p.Order
+	}
+	owner := ""
+	if p.Owner != nil {
+		owner = *p.Owner
+	}
+	isStarfleet := false
+	if p.IsStarfleet != nil {
+		isStarfleet = *p.IsStarfleet
+	}
+	// Determine target directory
+	var targetDir string
+	if isStarfleet {
+		targetDir = s.sop.StarfleetFragmentsDir()
+	} else {
+		targetDir = s.sop.FragmentsDir()
+	}
+	// Check if already exists
+	targetPath := filepath.Join(targetDir, p.Slug+".md")
+	if _, err := os.Stat(targetPath); err == nil {
+		writeErr(w, 409, "fragment already exists: "+p.Slug)
+		return
+	}
+	// Create the fragment
+	m := sop.FragmentMeta{Slug: p.Slug, Title: p.Title, Order: order, Owner: owner, IsStarfleet: isStarfleet}
+	tmpDir := filepath.Join(config.WorkDir(s.Root), "tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		writeErr(w, 500, "tmp dir: "+err.Error())
+		return
+	}
+	tmp, err := os.CreateTemp(tmpDir, "sop.*.md")
+	if err != nil {
+		writeErr(w, 500, "temp file: "+err.Error())
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	body := p.Body
+	if body == "" {
+		body = "(fill in)\n"
+	}
+	if err := sop.WriteFragmentFile(tmpName, m, body); err != nil {
+		tmp.Close()
+		writeErr(w, 500, "write: "+err.Error())
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		writeErr(w, 500, "close: "+err.Error())
+		return
+	}
+	if err := s.sop.DoWrite(p.Slug, tmpName); err != nil {
+		writeErr(w, 500, "write+reindex: "+err.Error())
+		return
+	}
+	msg := strings.TrimSpace(p.CommitMsg)
+	if msg == "" {
+		msg = "web: sop create " + p.Slug
+	}
+	push := true
+	if p.Push != nil {
+		push = *p.Push
+	}
+	if err := s.sop.DoCommit(p.Slug, msg, push); err != nil {
+		writeErr(w, 500, "commit: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "slug": p.Slug})
+}
+
+func (s *Server) apiSOPGet(w http.ResponseWriter, slug string) {
+	data, err := os.ReadFile(s.sop.FragmentPath(slug))
+	if err != nil {
+		writeErr(w, 404, err.Error())
+		return
+	}
+	m, body, perr := sop.ParseFragmentFile(data)
+	if perr != nil && !errors.Is(perr, sop.ErrFragmentNoFrontmatter) && !errors.Is(perr, sop.ErrFragmentUnterminated) {
+		writeErr(w, 500, perr.Error())
+		return
+	}
+	writeJSON(w, map[string]any{
+		"slug":         m.Slug,
+		"title":        m.Title,
+		"order":        m.Order,
+		"owner":        m.Owner,
+		"body":         body,
+		"is_starfleet": m.IsStarfleet,
+		"parse_error":  perr != nil,
+	})
+}
+
+func (s *Server) apiSOPUpdate(w http.ResponseWriter, r *http.Request, slug string) {
+	var p struct {
+		Title     string  `json:"title"`
+		Body      string  `json:"body"`
+		Order     *int    `json:"order"`
+		Owner     *string `json:"owner"`
+		CommitMsg string  `json:"commit_msg"`
+		Push      *bool   `json:"push"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	// Load existing fragment to preserve fields not provided
+	existing, _, _ := s.sop.LoadAllFragments()
+	var existingMeta sop.FragmentMeta
+	found := false
+	for _, m := range existing {
+		if m.Slug == slug {
+			existingMeta = m
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, 404, "fragment not found: "+slug)
+		return
+	}
+	// Build updated metadata
+	m := existingMeta
+	if p.Title != "" {
+		m.Title = p.Title
+	}
+	if p.Order != nil {
+		m.Order = *p.Order
+	}
+	if p.Owner != nil {
+		m.Owner = *p.Owner
+	}
+	// Write fragment to temp file, then use DoWrite (which reindexes)
+	tmpDir := filepath.Join(config.WorkDir(s.Root), "tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		writeErr(w, 500, "tmp dir: "+err.Error())
+		return
+	}
+	tmp, err := os.CreateTemp(tmpDir, "sop.*.md")
+	if err != nil {
+		writeErr(w, 500, "temp file: "+err.Error())
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := sop.WriteFragmentFile(tmpName, m, p.Body); err != nil {
+		tmp.Close()
+		writeErr(w, 500, "write: "+err.Error())
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		writeErr(w, 500, "close: "+err.Error())
+		return
+	}
+	if err := s.sop.DoWrite(slug, tmpName); err != nil {
+		writeErr(w, 500, "write+reindex: "+err.Error())
+		return
+	}
+	msg := strings.TrimSpace(p.CommitMsg)
+	if msg == "" {
+		msg = "web: sop update " + slug
+	}
+	push := true
+	if p.Push != nil {
+		push = *p.Push
+	}
+	if err := s.sop.DoCommit(slug, msg, push); err != nil {
+		writeErr(w, 500, "commit: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "slug": slug})
 }
 
 // apiIdentity reports the web server's own fleet identity (what the bus sees
