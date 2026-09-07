@@ -27,6 +27,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/X11Libre/go-x11proto/tk/term/termctl"
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
@@ -1048,6 +1049,8 @@ func (s *Server) apiShipDispatch(w http.ResponseWriter, r *http.Request) {
 		s.apiShipStop(w, r, id)
 	case "dimensions":
 		s.apiShipDimensions(w, r)
+	case "x11term":
+		s.apiShipX11Term(w, r, id)
 	default:
 		writeErr(w, 404, "unknown action: "+action)
 	}
@@ -1167,6 +1170,47 @@ func (s *Server) apiShipDimensions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ship_id": id, "rows": rows, "cols": cols})
+}
+
+// apiShipX11Term toggles the ship's termctl terminal visibility on the host X display.
+func (s *Server) apiShipX11Term(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+
+	pipePath, ok := session.ResolvePipe(s.Root, id)
+	if !ok {
+		writeErr(w, 404, "no running terminal for "+id)
+		return
+	}
+
+	// Check current attach status via termctl pipe
+	rem, err := termctl.OpenPipe(pipePath)
+	if err != nil {
+		writeErr(w, 500, "failed to open termctl pipe: "+err.Error())
+		return
+	}
+
+	// We can't query status over FIFO, so we track state via a simple file
+	// or we just try detach first, if it fails we attach
+	display := os.Getenv("DISPLAY")
+	if display == "" {
+		display = ":0"
+	}
+
+	// Try to detach first; if it fails (not attached), attach
+	if err := rem.Detach(); err != nil {
+		// If detach fails, try to attach
+		if err := rem.Attach(display); err != nil {
+			writeErr(w, 500, "failed to attach: "+err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "ship_id": id, "action": "attached"})
+		return
+	}
+
+	writeJSON(w, map[string]any{"ok": true, "ship_id": id, "action": "detached"})
 }
 
 // apiStoreFile serves files from the agent file store.

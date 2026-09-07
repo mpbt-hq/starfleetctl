@@ -511,6 +511,8 @@
       <select id="ship_model_switch" style="font-size:11px;width:auto;max-width:160px;margin-left:6px;display:none"></select>
       <button class="sec" id="ship_model_btn" style="font-size:11px;padding:3px 8px;display:none" onclick="shipSwitchModel()" data-i18n="ship.switch">Switch</button>
       <span style="flex:1"></span>
+      <span class="pill" onclick="shipToggleTerminal()" id="ship_term_btn" data-i18n="term.toggle">Terminal</span>
+      <span class="pill" onclick="shipToggleX11Term()" id="ship_x11term_btn" data-i18n="term.x11toggle">X11-Term</span>
       <span class="pill" style="background:#c33;color:#fff;cursor:pointer" onclick="shipStop()" data-i18n="ship.stop">Stop</span>
       <button class="x" onclick="history.back()">×</button>
     </header>
@@ -1036,6 +1038,8 @@ async function loadBoard(){
 
 let shipCurrent = null;
 async function openShip(name){
+  // Close any existing ship first to stop its terminal interval
+  if (shipCurrent !== null) closeShip();
   shipCurrent = name;
   document.getElementById('ship_name').textContent = name;
   document.getElementById('ship_overlay').classList.add('on');
@@ -1206,6 +1210,26 @@ function shipTab(tab){
     stopTermAutoUpdate();
     if (tab==='hist') loadShipHist(shipCurrent);
   }
+}
+
+function shipToggleTerminal(){
+  const screenTab = document.querySelector('#ship_overlay .tabs .tab[data-s="screen"]');
+  if (!screenTab) return;
+  if (screenTab.classList.contains('on')) {
+    // Already on terminal tab - switch to chat
+    shipTab('chat');
+  } else {
+    // Switch to terminal tab
+    shipTab('screen');
+  }
+}
+
+async function shipToggleX11Term(){
+  if (!shipCurrent) return;
+  try {
+    const r = await api('/api/ship/'+encodeURIComponent(shipCurrent)+'/x11term', {method:'POST'});
+    toast(t('term.x11sent') + shipCurrent + ': ' + (r.action || r.error || 'done'));
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 function termAutoToggle(){
