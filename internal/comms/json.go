@@ -119,6 +119,7 @@ type inboxEntryJSON struct {
 	Text       string `json:"text"`
 	ReplyTo    string `json:"reply_to,omitempty"`
 	Type       string `json:"type,omitempty"`
+	Attach     string `json:"attach,omitempty"`
 }
 
 // DoInboxJSON implements `comms inbox --json`.
@@ -136,6 +137,7 @@ func (b *Bus) DoInboxJSON() error {
 			Text:       m.Text,
 			ReplyTo:    m.ReplyTo,
 			Type:       m.Type,
+			Attach:     m.Attach,
 		})
 	}
 	return printJSON(orEmpty(out))
@@ -150,6 +152,7 @@ type msgEntryJSON struct {
 	Text       string `json:"text"`
 	ReplyTo    string `json:"reply_to,omitempty"`
 	Type       string `json:"type,omitempty"`
+	Attach     string `json:"attach,omitempty"`
 }
 
 // DoMsgsJSON implements `comms msgs --json`.
@@ -167,6 +170,7 @@ func (b *Bus) DoMsgsJSON() error {
 			Text:       m.Text,
 			ReplyTo:    m.ReplyTo,
 			Type:       m.Type,
+			Attach:     m.Attach,
 		})
 	}
 	return printJSON(out)
@@ -192,6 +196,7 @@ func (b *Bus) Conversation(ship string) []msgEntryJSON {
 			Text:       m.Text,
 			ReplyTo:    m.ReplyTo,
 			Type:       m.Type,
+			Attach:     m.Attach,
 		})
 	}
 	// Sort by age (newest first)
@@ -259,6 +264,7 @@ func (b *Bus) msgRecordsToJSON(msgs []msgRecord) []msgEntryJSON {
 			Text:       m.Text,
 			ReplyTo:    m.ReplyTo,
 			Type:       m.Type,
+			Attach:     m.Attach,
 		})
 	}
 	return out
@@ -280,6 +286,7 @@ func (b *Bus) AllInboxRecordsJSON() []inboxEntryJSON {
 			Text:       m.Text,
 			ReplyTo:    m.ReplyTo,
 			Type:       m.Type,
+			Attach:     m.Attach,
 		})
 	}
 	return out

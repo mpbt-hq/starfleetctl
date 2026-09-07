@@ -1554,10 +1554,15 @@ function msgCard(r, indented){
   const tag = r.target ? `<span class="pill dim">→${esc(r.target)}</span>` :
               (r.acked!==undefined ? `<span class="pill ${r.acked?'ok':'warn'}">${r.acked?'✓':'…'}</span>` : '');
   const q = r.question ? esc(r.question) : esc(r.text);
+  let attachHtml = '';
+  if (r.attach) {
+    attachHtml = `<div style="margin-top:6px"><a href="/api/store/${encodeURIComponent(r.attach)}" target="_blank" class="pill" style="background:var(--chip);color:var(--acc)">📎 ${esc(r.attach)}</a></div>`;
+  }
   return `<div class="card" style="${indented?'margin-left:18px;border-left:3px solid var(--acc)':''}">
     <div class="row"><span class="agent grow">${esc(r.id)}</span>${tag}
       <span class="muted">${age(r.age_seconds)}</span></div>
     <div style="margin-top:6px">${q}</div>
+    ${attachHtml}
     <div class="row" style="margin-top:4px">
       ${r.from?`<span class="muted">${t('bus.from')}${esc(r.from)}</span>`:''}
       ${r.reply_to?`<a class="pill dim" href="#" onclick="jumpToMsg('${esc(r.reply_to)}');return false">↩ ${esc(r.reply_to)}</a>`:''}
