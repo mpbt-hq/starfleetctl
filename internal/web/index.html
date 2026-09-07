@@ -375,6 +375,7 @@
       <div class="row" style="align-items:flex-start">
         <div class="grow"><b id="rep_m_title"></b></div>
         <button class="sec" onclick="closeRepModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
+        <button class="sec" onclick="deleteReport()" style="width:auto;padding:4px 10px;font-size:16px;background:var(--bad);color:#1a0606" data-i18n="rep.delete">Löschen</button>
       </div>
       <div id="rep_m_subtitle" class="muted" style="margin-top:4px;font-size:14px"></div>
       <div id="rep_m_meta" class="muted" style="margin-top:4px;font-size:12px"></div>
@@ -2041,7 +2042,9 @@ async function loadReports(){
 async function openRepModal(id){
   try {
     const r = await api('/api/reports/'+id);
-    document.getElementById('rep_m_title').textContent = r.title || '—';
+    const titleEl = document.getElementById('rep_m_title');
+    titleEl.textContent = r.title || '—';
+    titleEl.dataset.reportId = id;
     document.getElementById('rep_m_subtitle').textContent = r.subtitle || '';
     const ago = /* relative time */
       (()=>{ const d=Date.now()/1000-r.created; if(d<60)return t('rel.justnow'); if(d<3600)return t('rel.before')+Math.floor(d/60)+'m'; if(d<86400)return t('rel.before')+Math.floor(d/3600)+'h'; return t('rel.before')+Math.floor(d/86400)+'t'; })();
@@ -2068,6 +2071,19 @@ async function openRepModal(id){
 
 function closeRepModal(){
   document.getElementById('rep_modal').style.display = 'none';
+}
+
+async function deleteReport(){
+  const titleEl = document.getElementById('rep_m_title');
+  const id = titleEl?.dataset?.reportId;
+  if (!id) return;
+  if (!confirm('Report "' + titleEl.textContent + '" wirklich löschen?')) return;
+  try {
+    await api('/api/reports/' + encodeURIComponent(id), {method: 'DELETE'});
+    toast('Report gelöscht');
+    closeRepModal();
+    loadReports();
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 function showTaskFromReport(slug){
