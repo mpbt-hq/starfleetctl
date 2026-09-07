@@ -1351,13 +1351,14 @@ function renderTasks(){
     const worker = workers[r.slug];
     const assignOpts = '<option value="__auto__">'+t('task.assign.auto')+'</option>' +
       ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    const displayTitle = r.title || r.slug;
     return `<div class="card">
-      <div class="row"><b class="grow"><span class="task-title-link" onclick="taskDetail('${esc(r.slug)}')">${esc(r.title)}</span></b>
+      <div class="row"><b class="grow"><span class="task-title-link" onclick="taskDetail('${esc(r.slug)}')">${esc(displayTitle)}</span></b>
         <span class="pill ${cls}">${esc(r.status)}</span></div>
       <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)}${t('task.worker')}`:''}</div>
       <div class="actions">
         <select id="st_${esc(r.slug)}" style="width:auto">
-          ${['open','assigned','in-progress','done','parked'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}
+          ${['open','offen','assigned','in-progress','done','parked'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}
         </select>
         <button class="sec" onclick="taskStatus('${esc(r.slug)}')">${t('task.status.btn')}</button>
         <select id="as_${esc(r.slug)}" style="width:auto">${assignOpts}</select>
@@ -1423,7 +1424,7 @@ async function taskDetail(slug){
     catSel.innerHTML = '<option value="">'+i18nT('task.cat.none')+'</option>' + cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
     catSel.value = taskDetailCat;
     // Status select: known statuses + the task's current one if unknown.
-    const statuses = ['open','assigned','in-progress','parked','done'];
+    const statuses = ['open','offen','assigned','in-progress','parked','done'];
     if (t.status && !statuses.includes(t.status)) statuses.unshift(t.status);
     document.getElementById('task_m_status').innerHTML =
       statuses.map(s=>`<option value="${esc(s)}"${s===t.status?' selected':''}>${esc(s)}</option>`).join('');
