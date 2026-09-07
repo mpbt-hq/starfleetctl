@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/envkeys"
 )
 
 // IsRunning checks whether something is already listening on the proxy's
@@ -100,8 +102,10 @@ func Daemonize(root string) (int, error) {
 }
 
 // daemonEnv returns the environment for the daemon child: the caller's env,
-// plus any model-proxy env refs (e.g. NIM_API_KEY) that are missing but can
-// be resolved from the user's opencode config.
+// plus any model-proxy env refs (e.g. NIM_API_KEY, OPENCODE_API_KEY) that are
+// missing but can be resolved from the user's opencode config or their shell
+// profile. Daemons spawned by cron / run-opencode.flagship never source the
+// login-shell profile, so keys exported there would otherwise be lost.
 func daemonEnv(cfg *Config) []string {
 	env := os.Environ()
 	have := map[string]bool{}
@@ -115,6 +119,8 @@ func daemonEnv(cfg *Config) []string {
 			continue
 		}
 		if v, ok := lookupUserConfigKey(ref); ok {
+			env = append(env, ref+"="+v)
+		} else if v, ok := envkeys.ResolveMissing(ref); ok {
 			env = append(env, ref+"="+v)
 		}
 	}

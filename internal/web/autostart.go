@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/config"
+	"github.com/metux/starfleetctl/internal/envkeys"
 )
 
 const (
@@ -107,13 +108,24 @@ func Daemonize(root, addr, logFile string) (int, error) {
 	env := os.Environ()
 
 	// Ensure API keys are available for background ships launched by this web server.
-	// Cron-spawned daemons may lack NIM_API_KEY/GROQ_API_KEY in env — load from user opencode config.
-	if !hasEnv(env, "NIM_API_KEY") || !hasEnv(env, "GROQ_API_KEY") {
+	// Cron-spawned daemons may lack NIM_API_KEY/GROQ_API_KEY/OPENCODE_API_KEY in
+	// env — load from user opencode config, falling back to the shell profile.
+	if !hasEnv(env, "NIM_API_KEY") || !hasEnv(env, "GROQ_API_KEY") || !hasEnv(env, "OPENCODE_API_KEY") {
 		if keys, err := loadOpencodeAPIKeys(); err == nil {
 			for k, v := range keys {
 				if !hasEnv(env, k) {
 					env = append(env, k+"="+v)
 				}
+			}
+		}
+		// Keys that live only in ~/.profile (e.g. OPENCODE_API_KEY) are not in
+		// the opencode config — back-fill those from the shell profile too.
+		for _, k := range []string{"NIM_API_KEY", "GROQ_API_KEY", "OPENCODE_API_KEY"} {
+			if hasEnv(env, k) {
+				continue
+			}
+			if v, ok := envkeys.ResolveMissing(k); ok {
+				env = append(env, k+"="+v)
 			}
 		}
 	}
