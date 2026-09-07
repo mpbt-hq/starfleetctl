@@ -393,7 +393,6 @@ func parseStatusFile(path string) (comms.StatusRecord, bool) {
 	return rec, true
 }
 
-
 // newTestRoot returns a temp workspace root with a git repo, the dashboard
 // topics dir and a comms status dir, so both dashboard.New and comms.New
 // resolve against it exactly like the CLI does.
