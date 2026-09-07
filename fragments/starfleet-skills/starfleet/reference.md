@@ -47,6 +47,11 @@ Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` 
 | `task assign <slug> [<ship>]` | Assign a task to a ship |
 | `task unassign <slug>` | Clear a task assignment |
 | `task status <slug> <status>` | Set a task's status |
+| `task begin <slug>` | Start working on a task (status in-progress + comms working) |
+| `task log <slug> <text>` | Append timestamped work-log entry to the task body |
+| `task progress <slug> <0-100> [note]` | Update progress + log + comms status |
+| `task done <slug>` | Complete a task (status done + comms idle) |
+| `task sweep-stale` | Mark tasks of dead/stale ships as interrupted (batch) |
 | `task rm <slug>` | Delete a task topic from the dashboard |
 | `task purge [--no-push]` | Delete ALL tasks with status "done" |
 | `task orphans [--json]` | List tasks assigned to ships that no longer exist on the board (no status/health entry); `--json` for machine-readable output. Also available in the web UI on the Tasks page (⚠ Orphans) with one-click reassign to a free ship. |

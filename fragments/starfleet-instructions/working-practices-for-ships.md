@@ -54,11 +54,14 @@ cleared:
   not even "just to look". Read with `dashboard topic show <slug>`, list with
   `dashboard topic list --json`, modify with `dashboard topic write <slug> <file>` +
   `dashboard topic commit <slug>`. Direct file access is a rule violation.
-- **Keep the dashboard and reports current while working a task.** When you take on a
-  task: set your board status regularly (`comms status working/blocked/idle "<what>"`),
-  move the task status with you (`task status <slug> in-progress` → `done`), and on
-  completion submit a report (`reports submit --taskref <slug>`) plus a comms notification
-  to the commissioning ship. If you must ask clarifying questions, note them in the task
+- **Keep the dashboard and reports current while working a task — capture-first.** When you
+  take on a task: every non-trivial task is **captured into the dashboard first** (even one
+  handed to you over comms, even if you'll finish it immediately) and then driven through the
+  **lifecycle** `task begin <slug>` → `task log`/`task progress` → `task done`, which keeps
+  both the dashboard status and your board status in sync. On completion submit a report
+  (`reports submit --taskref <slug>`) plus a comms notification to the commissioning ship.
+  A `working`/`building` status with no task and no note is flagged **unattached** — attach to
+  a task or pass a `--note`. If you must ask clarifying questions, note them in the task
   itself (`dashboard topic write/commit`) and submit a report whose subject explicitly
   states that questions need answers (with the questions listed in the body) — never just
   block on the console.
