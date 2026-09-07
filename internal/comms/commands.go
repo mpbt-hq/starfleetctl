@@ -296,6 +296,22 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 		noteSuffix = " — " + note
 	}
 	fmt.Printf("comms: '%s'%s → %s%s\n", b.ShipID, suffix, state, noteSuffix)
+
+	// Loud unattached hint: a ship reporting working/building without naming a
+	// task and without a note is detached from the task workflow (no dashboard
+	// task, no progress, invisible to the capture-first lifecycle). Print an
+	// explicit follow-up command so the ship (and a human watching the
+	// console) knows exactly how to attach to a task instead of silently
+	// reporting an unattached working state.
+	if rec.Unattached {
+		fmt.Fprintln(os.Stderr, "⚠ working/building ohne Task-Zuordnung (unattached):")
+		fmt.Fprintln(os.Stderr, "  Bitte zuerst via Task-Lebenszyklus anbinden (capture-first):")
+		fmt.Fprintln(os.Stderr, "    starfleetctl task begin <slug>   # Task starten")
+		fmt.Fprintln(os.Stderr, "    starfleetctl task log <slug> <text>")
+		fmt.Fprintln(os.Stderr, "    starfleetctl task progress <slug> <0-100> [note]")
+		fmt.Fprintln(os.Stderr, "  oder, wenn wirklich keine Task-Zuordnung: --note angeben,")
+		fmt.Fprintln(os.Stderr, "  damit der Status ehrlich als unattached erkennbar bleibt.")
+	}
 	return nil
 }
 

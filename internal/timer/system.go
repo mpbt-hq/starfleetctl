@@ -13,6 +13,7 @@ import (
 
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/sop"
+	"github.com/metux/starfleetctl/internal/task"
 )
 
 // runSystemCommand dispatches a system timer command by verb.
@@ -29,6 +30,8 @@ func runSystemCommand(root string, cmd []string) error {
 		return runReindex(root)
 	case "web":
 		return runWeb(root, args)
+	case "sweep-stale":
+		return runSweepStale(root)
 	default:
 		return fmt.Errorf("system command: unknown verb: %s", verb)
 	}
@@ -75,6 +78,17 @@ func runWeb(root string, args []string) error {
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("web %s: %w (output: %s)", cmd, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// runSweepStale runs `task sweep-stale` in-process: it marks tasks assigned to
+// stale/dead ships as interrupted (batch commit, no push — the timer worker
+// must not block on a possibly-unreachable git remote).
+func runSweepStale(root string) error {
+	code, err := task.RunSweepStale(root, true)
+	if err != nil {
+		return fmt.Errorf("sweep-stale: %w (exit %d)", err, code)
 	}
 	return nil
 }

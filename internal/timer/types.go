@@ -16,8 +16,8 @@
 // Timer types:
 //
 //   - "ship" / "command": fire comms directives to ships via bus.DoPost().
-//   - "system": execute workspace-level commands (reindex, web, …) directly
-//     in the worker process — no agent involvement needed.
+//   - "system": execute workspace-level commands (reindex, web, sweep-stale, …)
+//     directly in the worker process — no agent involvement needed.
 //
 // A single worker daemon (timer worker) polls all timer directories every 2s,
 // resolves fleet targets at fire time, and sends comms directives via

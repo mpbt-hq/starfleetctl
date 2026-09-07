@@ -71,6 +71,9 @@ const usage = `task <command> [args…]
                                       comms status idle.
   rm <slug>                         delete a task topic from the dashboard.
   purge [--no-push]                 delete ALL tasks with status "done".
+  sweep-stale [--no-push]           mark tasks assigned to dead/stale ships as
+                                    interrupted (status assigned|in-progress),
+                                    leaving the assignment intact. Batch-commit.
 
 Run 'starfleetctl task <command> --help' for command-specific help.
 `
@@ -106,6 +109,8 @@ func Run(root string, args []string) int {
 		return runRm(root, args[1:])
 	case "purge":
 		return runPurge(root, args[1:])
+	case "sweep-stale":
+		return runSweepStale(root, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "task: unknown command: %s\n\n%s", args[0], usage)
 		return 2
@@ -1202,6 +1207,131 @@ func RunDoneOnly(root, slug string, noPush bool) (int, error) {
 	code := runDone(root, args)
 	if code != 0 {
 		return code, fmt.Errorf("task done exited with code %d", code)
+	}
+	return 0, nil
+}
+
+const sweepStaleUsage = `task sweep-stale [--no-push]
+
+Sweep stale tasks: for every board ship whose heartbeat is stale (state not
+idle and last heartbeat older than the bus TTL), any open tasks (status
+assigned|in-progress) assigned to that ship are marked 'interrupted'. The
+assignment stays intact — a returning ship resumes via 'task begin'. Writes a
+work-log entry and does a single batch commit + reindex.
+
+Exit codes:
+  0  sweep completed (may mark zero tasks)
+  2  bad arguments
+`
+
+// runSweepStale implements `task sweep-stale` — park the tasks of ships whose
+// heartbeat has expired while they were working (state != idle). Intended to be
+// triggered periodically by a system timer. Batch-commits all updates in one go.
+func runSweepStale(root string, args []string) int {
+	noPush := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--no-push":
+			noPush = true
+		case "-h", "--help":
+			fmt.Print(sweepStaleUsage)
+			return 0
+		default:
+			fmt.Fprintln(os.Stderr, "task sweep-stale: unknown argument: "+args[i])
+			return 2
+		}
+	}
+
+	// Discover stale ships from the board (their heartbeat expired while in an
+	// active state — idle ships are intentionally not stale).
+	b, err := comms.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task sweep-stale: comms:", err)
+		return 1
+	}
+	staleShips := make(map[string]bool)
+	for _, r := range b.AllStatusRecords() {
+		if b.IsStale(r.Epoch, r.State) {
+			staleShips[r.Agent] = true
+		}
+	}
+	if len(staleShips) == 0 {
+		fmt.Println("task-sweep-stale: no stale ships")
+		return 0
+	}
+
+	d, err := dashboard.New(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task sweep-stale:", err)
+		return 1
+	}
+
+	topics, err := d.LoadAllTopics()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "task sweep-stale:", err)
+		return 1
+	}
+
+	shipID := os.Getenv("STARFLEET_SHIP_ID")
+	if shipID == "" {
+		shipID = "unknown"
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	interrupted := 0
+	for _, t := range topics {
+		if t.Status != "assigned" && t.Status != "in-progress" {
+			continue
+		}
+		if !staleShips[t.AssignedTo] {
+			continue
+		}
+		m, body, err := d.DoTopicLoad(t.Slug)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "task sweep-stale: load %s: %v\n", t.Slug, err)
+			continue
+		}
+		m.Status = "interrupted"
+		body = fmt.Sprintf("%s\n- %s %s: Schiff nicht mehr präsent (Heartbeat abgelaufen) — task interrupted\n", body, now, shipID)
+		if err := d.DoTopicUpdate(t.Slug, m, body); err != nil {
+			fmt.Fprintf(os.Stderr, "task sweep-stale: update %s: %v\n", t.Slug, err)
+			continue
+		}
+		b.LogEvent("sweep-stale", fmt.Sprintf("task %s -> interrupted (ship %s stale)", t.Slug, t.AssignedTo))
+		interrupted++
+	}
+
+	if interrupted == 0 {
+		fmt.Println("task-sweep-stale: no tasks assigned to stale ships")
+		return 0
+	}
+
+	// Single batch commit for all swept topics, then refresh the index.
+	if err := d.DoTopicCommitAll("task: sweep-stale — interrupted tasks of dead ships", !noPush); err != nil {
+		fmt.Fprintln(os.Stderr, "task sweep-stale:", err)
+		return 1
+	}
+	if err := d.DoReindex(); err != nil {
+		fmt.Fprintf(os.Stderr, "task: dashboard reindex failed (%v)\n", err)
+	} else if err := d.DoCommit("reindex: sweep-stale", !noPush); err != nil {
+		fmt.Fprintf(os.Stderr, "task: dashboard reindex commit failed (%v)\n", err)
+	}
+
+	fmt.Printf("task-sweep-stale: interrupted=%d ships=%d\n", interrupted, len(staleShips))
+	return 0
+}
+
+// RunSweepStale runs `task sweep-stale` without a push (system timers run it
+// in the worker process; the workspace repo is not always the push target).
+// Returns the process exit code and an error wrapping non-zero exits.
+func RunSweepStale(root string, noPush bool) (int, error) {
+	args := []string{}
+	if noPush {
+		args = append(args, "--no-push")
+	}
+	code := runSweepStale(root, args)
+	if code != 0 {
+		return code, fmt.Errorf("task sweep-stale exited with code %d", code)
 	}
 	return 0, nil
 }
