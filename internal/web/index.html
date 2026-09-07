@@ -251,6 +251,7 @@
     <div class="row" style="margin-bottom:8px">
       <span class="muted" data-i18n="view.label">Ansicht:</span>
       <button class="sec" id="btn_thread" onclick="toggleThread()" style="width:auto;padding:6px 12px" data-i18n="threads.off">💬 Threads: aus</button>
+      <button class="sec" id="btn_purge" onclick="purgeOldMsgs()" style="width:auto;padding:6px 12px;margin-left:8px" data-i18n="bus.purge">🗑 Alte löschen</button>
     </div>
     <div class="card" id="busbody"></div>
   </section>
@@ -592,6 +593,7 @@ const I18N = {
     'reindex.btn': '↻ Reindex',
     'bus.directives': 'Direktiven', 'bus.inbox': 'Inbox', 'bus.asks': 'Fragen',
     'view.label': 'Ansicht:', 'threads.off': '💬 Threads: aus', 'threads.on': '💬 Threads: an',
+    'bus.purge': '🗑 Alte löschen', 'bus.purge.prompt': 'Nachrichten älter als (z.B. 7d, 30d, leer=alle):', 'bus.purge.confirm': 'Auch alle Nachrichten von toten Ships löschen? (OK=Ja, Abbrechen=Nein)', 'bus.purge.done': 'Alte Nachrichten gelöscht.',
     'talk.to': 'Nachricht an', 'talk.all': '📡 ganze Flotte (all)', 'talk.text.ph': 'Text…',
     'talk.send': 'Senden',
     'talk.hint': 'Hinweis: Nachrichten gehen über comms (comms tell / broadcast). Ships holen sie via inbox ab.',
@@ -697,6 +699,7 @@ const I18N = {
     'reindex.btn': '↻ Reindex',
     'bus.directives': 'Directives', 'bus.inbox': 'Inbox', 'bus.asks': 'Questions',
     'view.label': 'View:', 'threads.off': '💬 Threads: off', 'threads.on': '💬 Threads: on',
+    'bus.purge': '🗑 Purge old', 'bus.purge.prompt': 'Older than (e.g. 7d, 30d, empty=all):', 'bus.purge.confirm': 'Also delete all messages from dead ships? (OK=Yes, Cancel=No)', 'bus.purge.done': 'Old messages purged.',
     'talk.to': 'Message to', 'talk.all': '📡 whole fleet (all)', 'talk.text.ph': 'Text…',
     'talk.send': 'Send',
     'talk.hint': 'Note: messages go over comms (comms tell / broadcast). Ships pick them up via inbox.',
@@ -1560,6 +1563,21 @@ async function shipLaunch(){
 }
 
 let threadMode = false;
+
+async function purgeOldMsgs() {
+  const olderThan = prompt(t('bus.purge.prompt'));
+  if (olderThan === null) return; // cancelled
+  const all = confirm(t('bus.purge.confirm'));
+  try {
+    await api('/api/purge', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({olderThan: olderThan || '', all})});
+    toast(t('bus.purge.done'));
+    await loadBus(curBus);
+  } catch(e) {
+    toast(t('err.prefix')+esc(e.message), true);
+  }
+}
+
 function toggleThread(){
   threadMode = !threadMode;
   const b = document.getElementById('btn_thread');

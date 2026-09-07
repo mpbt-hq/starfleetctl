@@ -123,6 +123,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/sessions", s.apiSessions)
 	s.mux.HandleFunc("/api/sessions/", s.apiSessionDispatch)
 	s.mux.HandleFunc("/api/oclog", s.apiOCLog)
+	s.mux.HandleFunc("/api/purge", s.apiPurge)
 	s.mux.HandleFunc("/", s.serveIndex)
 
 	// logging middleware: wrap the mux
@@ -350,6 +351,26 @@ func (s *Server) apiEvents(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(v, "%d", &n)
 	}
 	writeJSON(w, s.bus.TailEvents(n))
+}
+
+func (s *Server) apiPurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed — POST required")
+		return
+	}
+	var req struct {
+		OlderThan string `json:"olderThan"`
+		All       bool   `json:"all"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	if err := s.bus.DoPurgeOld(req.OlderThan, req.All); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
