@@ -49,9 +49,12 @@ func (b *Bus) DoErrorIsAbort(detail string) error {
 // does not look model-API related.
 func ClassifyModelError(detail string) string {
 	d := strings.ToLower(detail)
-	// Transient NIM/API errors: "AI_APICallError: ... |transient" or similar
-	// These are temporary failures needing restart, NOT permanent rate limits.
-	isTransient := strings.Contains(d, "transient") || strings.Contains(d, "ai_apicallerror")
+	// If the plugin already tagged the detail as quota or transient, honor that.
+	// Note: We don't return immediately here because we need to check if it's
+	// a rate limit error marked as transient, which should be treated as nim-overload.
+	isQuota := strings.Contains(d, "|quota")
+	isTransient := strings.Contains(d, "|transient") || strings.Contains(d, "transient") || strings.Contains(d, "ai_apicallerror")
+
 	// NIM overload: server-side 5xx or connection-level failures OR NIM 429 format
 	// NIM 429 errors look like: 'Too Many Requests: {"status":429,"title":"Too Many Requests"}'
 	// These are transient capacity issues, NOT zen rate limits.
@@ -95,6 +98,14 @@ func ClassifyModelError(detail string) string {
 	if noProviderRe.MatchString(d) {
 		return "no-provider"
 	}
+	// If none of the specific patterns matched but we know it's transient, tag as transient.
+	if isTransient {
+		return "transient"
+	}
+	// If none of the specific patterns matched but we know it's quota, tag as quota.
+	if isQuota {
+		return "quota"
+	}
 	return ""
 }
 
@@ -102,7 +113,7 @@ func ClassifyModelError(detail string) string {
 // affected ship should be told to simply re-run its last prompt (resume),
 // rather than only notifying the flagship.
 func isAutoRestartTag(tag string) bool {
-	return tag == "streaming-response-failed" || tag == "nim-overload" || tag == "resource-exhausted" || tag == "no-provider"
+	return tag == "streaming-response-failed" || tag == "nim-overload" || tag == "resource-exhausted" || tag == "no-provider" || tag == "transient"
 }
 
 // IsUserAbort reports whether a session.error detail is a user-initiated

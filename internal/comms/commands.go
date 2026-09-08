@@ -564,7 +564,7 @@ func (b *Bus) DoBoard() error {
 		fmt.Println("(no ships reporting — none have run 'comms status' yet)")
 		return nil
 	}
-	fmt.Printf("%-18s  %-12s  %-10s  %-6s  %-5s  %-22s  %s\n", "AGENT", "PROJECT", "STATE", "AGE", "INBOX", "ATTACH", "NOTE")
+	fmt.Printf("%-18s  %-12s  %-10s  %-20s  %-6s  %-5s  %-22s  %s\n", "AGENT", "PROJECT", "STATE", "TASK", "AGE", "INBOX", "ATTACH", "NOTE")
 	for _, r := range recs {
 		p := r.Project
 		if p == "" {
@@ -578,8 +578,16 @@ func (b *Bus) DoBoard() error {
 		if b.stale(r.Epoch, r.State) {
 			mark = " [STALE]"
 		}
-		fmt.Printf("%-18s  %-12s  %-10s  %-6s  %-5d  %-22s  %s%s\n",
-			r.Agent, p, r.State, age(r.Epoch), b.inboxCount(r.Agent), h, r.Note, mark)
+		task := r.Task
+		if task == "" {
+			task = "-"
+		}
+		// Truncate task to 20 characters for display
+		if len(task) > 20 {
+			task = task[:17] + "..."
+		}
+		fmt.Printf("%-18s  %-12s  %-10s  %-20s  %-6s  %-5d  %-22s  %s%s\n",
+			r.Agent, p, r.State, task, age(r.Epoch), b.inboxCount(r.Agent), h, r.Note, mark)
 	}
 	return nil
 }
