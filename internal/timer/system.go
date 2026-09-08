@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/sop"
 	"github.com/metux/starfleetctl/internal/task"
@@ -32,6 +33,8 @@ func runSystemCommand(root string, cmd []string) error {
 		return runWeb(root, args)
 	case "sweep-stale":
 		return runSweepStale(root)
+	case "purge":
+		return runPurge(root, args)
 	default:
 		return fmt.Errorf("system command: unknown verb: %s", verb)
 	}
@@ -89,6 +92,36 @@ func runSweepStale(root string) error {
 	code, err := task.RunSweepStale(root, true)
 	if err != nil {
 		return fmt.Errorf("sweep-stale: %w (exit %d)", err, code)
+	}
+	return nil
+}
+
+// runPurge runs `comms purge` in-process to remove old directives from dead ships.
+// args can include "--older-than <dur>" and/or "--all".
+func runPurge(root string, args []string) error {
+	olderThan := ""
+	all := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--older-than":
+			if i+1 < len(args) {
+				olderThan = args[i+1]
+				i++
+			} else {
+				return fmt.Errorf("purge: --older-than requires a duration")
+			}
+		case "--all":
+			all = true
+		default:
+			return fmt.Errorf("purge: unknown option: %s", args[i])
+		}
+	}
+	bus, err := comms.New(root)
+	if err != nil {
+		return fmt.Errorf("purge: comms: %w", err)
+	}
+	if err := bus.DoPurgeOld(olderThan, all); err != nil {
+		return fmt.Errorf("purge: %w", err)
 	}
 	return nil
 }

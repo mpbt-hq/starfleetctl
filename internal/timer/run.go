@@ -30,6 +30,8 @@ Usage:
   timer set --cron "0 */6 * * *" --type system --cmd reindex       system command
   timer set --every 5m --type system --cmd web                     system command
   timer set --every 5m --type system --cmd "web restart"           system command (force)
+  timer set --cron "0 3 * * *" --type system --cmd "purge --older-than 30d"  purge old msgs
+  timer set --cron "0 4 * * 0" --type system --cmd "purge --all"   weekly full purge
 
 Flags for set:
   --name <key>                      unique timer key (auto-generated if omitted)
@@ -60,6 +62,8 @@ System commands (type=system, executed directly in worker):
   reindex                          refresh agent instructions + dashboard index
   web                              start web server (idempotent — skips if running)
   web restart                      force web server restart
+  sweep-stale                      mark tasks on stale ships as interrupted
+  purge [--older-than <dur>] [--all]  remove old comms messages from dead ships
 `
 
 // Run dispatches a `timer` invocation given the resolved workspace root.
