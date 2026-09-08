@@ -33,6 +33,7 @@ import (
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/filestore"
+	"github.com/metux/starfleetctl/internal/modelproxy"
 	"github.com/metux/starfleetctl/internal/ocsessions"
 	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/session"
@@ -1849,15 +1850,9 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Parse YAML manually (minimal: extract id, provider, label, context)
-	type ModelEntry struct {
-		ID       string `json:"id"`
-		Provider string `json:"provider"`
-		Label    string `json:"label"`
-		Context  int    `json:"context"`
-	}
-	var models []ModelEntry
+	var models []modelEntry
 	lines := strings.Split(string(data), "\n")
-	var cur ModelEntry
+	var cur modelEntry
 	inModels := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -1872,7 +1867,7 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 			if cur.ID != "" {
 				models = append(models, cur)
 			}
-			cur = ModelEntry{ID: strings.Trim(strings.TrimPrefix(trimmed, "- id:"), " \"")}
+			cur = modelEntry{ID: strings.Trim(strings.TrimPrefix(trimmed, "- id:"), " \"")}
 		} else if strings.HasPrefix(trimmed, "provider:") {
 			cur.Provider = strings.Trim(strings.TrimPrefix(trimmed, "provider:"), " \"")
 		} else if strings.HasPrefix(trimmed, "label:") {
@@ -1884,7 +1879,106 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 	if cur.ID != "" {
 		models = append(models, cur)
 	}
-	writeJSON(w, models)
+	writeJSON(w, filterAvailableModels(s.Root, models))
+}
+
+// modelEntry mirrors the JSON shape apiModels returns to the frontend.
+type modelEntry struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider"`
+	Label    string `json:"label"`
+	Context  int    `json:"context"`
+}
+
+// filterAvailableModels drops models whose provider is proxied through the
+// model-proxy but which the provider currently does NOT serve (e.g. filtered
+// out of the free tier by the model filter). Selecting such a model would make
+// opencode silently fall back to the last-used/default model instead of the
+// chosen one, so the web model dropdown must not offer it. Models from
+// providers that are not in the model-proxy config are kept as-is, and if a
+// proxied provider cannot be queried the affected models are kept too (an
+// empty dropdown would be worse than showing all).
+func filterAvailableModels(root string, models []modelEntry) []modelEntry {
+	mpCfg, err := modelproxy.Load(root)
+	if err != nil || len(mpCfg.Providers) == 0 {
+		return models
+	}
+	proxied := make(map[string]bool, len(mpCfg.Providers))
+	for _, p := range mpCfg.Providers {
+		proxied[p.ID] = true
+	}
+	type providerCache struct {
+		available modelSet
+	}
+	cache := make(map[string]providerCache)
+	var availableFor func(string) modelSet
+	availableFor = func(provider string) modelSet {
+		if c, ok := cache[provider]; ok {
+			return c.available
+		}
+		var prov *modelproxy.Provider
+		for i := range mpCfg.Providers {
+			if mpCfg.Providers[i].ID == provider {
+				prov = &mpCfg.Providers[i]
+				break
+			}
+		}
+		if prov == nil {
+			cache[provider] = providerCache{}
+			return nil
+		}
+		cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers}
+		ids := cfg.ModelListFor(*prov)
+		if ids == nil {
+			cache[provider] = providerCache{}
+			return nil
+		}
+		set := make(modelSet, len(ids))
+		for _, id := range ids {
+			set[id] = true
+		}
+		cache[provider] = providerCache{available: set}
+		return set
+	}
+
+	filtered := make([]modelEntry, 0, len(models))
+	for _, m := range models {
+		if !proxied[m.Provider] {
+			filtered = append(filtered, m)
+			continue
+		}
+		set := availableFor(m.Provider)
+		if set == nil {
+			// Cannot determine availability — keep the model rather than
+			// risk an empty dropdown.
+			filtered = append(filtered, m)
+			continue
+		}
+		bare := bareModelID(m.Provider, m.ID)
+		if set.has(bare) {
+			filtered = append(filtered, m)
+			continue
+		}
+		// Model is not served by the provider — drop it from the dropdown.
+	}
+	return filtered
+}
+
+// modelSet is a small set of model IDs for availability lookup.
+type modelSet map[string]bool
+
+func (s modelSet) has(id string) bool { return s[id] }
+
+// bareModelID strips the leading "<provider>/" prefix from a proxied model id
+// (e.g. "nim-proxy/nvidia/nemotron-3-ultra-550b-a55b" -> "nvidia/nemotron-3-
+// ultra-550b-a55b"), which is the form the proxy reports in /v1/models. If the
+// id does not start with the provider prefix it is returned unchanged.
+func bareModelID(provider, id string) string {
+	prefix := provider + "/"
+	if strings.HasPrefix(id, prefix) {
+		return id[len(prefix):]
+	}
+	return id
 }
 
 // apiTimerWorker handles worker start/stop/status.
