@@ -97,6 +97,12 @@ type Provider struct {
 	// used in the generated opencode config instead of the proxy's endpoint
 	// and the ship-specific key.
 	Direct bool
+	// ModelFilter controls which models are exposed. Options:
+	// - "" or "all" (default): no filtering
+	// - "free-only": auto-filter free models (zen-proxy: "-free" suffix;
+	//   nim-proxy/nvidia: built-in known-free list)
+	// - comma-separated list: explicit allowlist of model IDs
+	ModelFilter string
 	// Retry tuning (defaults applied).
 	MaxRetries   int
 	RetryDelayMS int
@@ -138,11 +144,12 @@ func Load(root string) (*Config, error) {
 		extractEnvRefs(p.APIKey, refs)
 		extractEnvRefs(p.BaseURL, refs)
 		prov := Provider{
-			ID:      strings.TrimSpace(p.ID),
-			Name:    p.Name,
-			BaseURL: strings.TrimRight(expandEnv(p.BaseURL), "/"),
-			APIKey:  expandEnv(p.APIKey),
-			Direct:  p.Direct,
+			ID:          strings.TrimSpace(p.ID),
+			Name:        p.Name,
+			BaseURL:     strings.TrimRight(expandEnv(p.BaseURL), "/"),
+			APIKey:      expandEnv(p.APIKey),
+			Direct:      p.Direct,
+			ModelFilter: strings.TrimSpace(p.ModelFilter),
 		}
 		if prov.ID == "" {
 			return nil, fmt.Errorf("model-proxy: provider without id in config")

@@ -59,6 +59,12 @@ type ModelProxyProvider struct {
 	BaseURL string `yaml:"base_url"`
 	APIKey  string `yaml:"api_key"`
 	Direct  bool   `yaml:"direct"`
+	// ModelFilter controls which models are exposed. Options:
+	// - "" or "all" (default): no filtering
+	// - "free-only": auto-filter free models (zen-proxy: "-free" suffix;
+	//   nim-proxy: built-in known-free list)
+	// - comma-separated list: explicit allowlist of model IDs
+	ModelFilter string `yaml:"model_filter"`
 	// MaxRetries retries a request when the upstream reports a transient
 	// error (429/5xx/conn-reset). Default 3.
 	MaxRetries int `yaml:"max_retries"`

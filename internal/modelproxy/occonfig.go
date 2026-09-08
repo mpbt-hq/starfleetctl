@@ -69,11 +69,11 @@ func (c *Config) modelInfoFor(prov Provider) []ModelInfo {
 	return infos
 }
 
-// modelListFor returns the model IDs served by one provider, best-effort:
+// ModelListFor returns the model IDs served by one provider, best-effort:
 // first via the running local proxy (its /v1/models query), falling back to a
 // direct upstream query so config generation still works before the daemon
 // has been started.
-func (c *Config) modelListFor(prov Provider) []string {
+func (c *Config) ModelListFor(prov Provider) []string {
 	client := &http.Client{Timeout: 10 * time.Second}
 	// Prefer the local proxy: it has fresher data and shares the code path
 	// ships actually use. Query is per-provider, so no cross-talk.
@@ -92,6 +92,16 @@ func (c *Config) modelListFor(prov Provider) []string {
 					if m.ID != "" {
 						ids = append(ids, m.ID)
 					}
+				}
+				// Apply the provider's model filter to local-proxy results.
+				infos := make([]ModelInfo, len(ids))
+				for i, id := range ids {
+					infos[i] = ModelInfo{ID: id}
+				}
+				infos = applyModelFilter(prov, infos)
+				ids = make([]string, len(infos))
+				for i, m := range infos {
+					ids[i] = m.ID
 				}
 				sort.Strings(ids)
 				return ids
@@ -283,7 +293,7 @@ func checkModels(root string) error {
 		return nil
 	}
 	for _, prov := range cfg.Providers {
-		models := cfg.modelListFor(prov)
+		models := cfg.ModelListFor(prov)
 		fmt.Printf("%s (%s): %d models\n", prov.ID, prov.BaseURL, len(models))
 		for _, id := range models {
 			fmt.Printf("  %s\n", id)
