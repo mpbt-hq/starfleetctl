@@ -64,6 +64,7 @@ System commands (type=system, executed directly in worker):
   web restart                      force web server restart
   sweep-stale                      mark tasks on stale ships as interrupted
   purge [--older-than <dur>] [--all]  remove old comms messages from dead ships
+  model-check                      verify model catalog health (listing check)
 `
 
 // Run dispatches a `timer` invocation given the resolved workspace root.

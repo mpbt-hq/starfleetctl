@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/dashboard"
+	"github.com/metux/starfleetctl/internal/modelproxy"
+	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/sop"
 	"github.com/metux/starfleetctl/internal/task"
 )
@@ -35,6 +38,8 @@ func runSystemCommand(root string, cmd []string) error {
 		return runSweepStale(root)
 	case "purge":
 		return runPurge(root, args)
+	case "model-check":
+		return runModelCheck(root)
 	default:
 		return fmt.Errorf("system command: unknown verb: %s", verb)
 	}
@@ -122,6 +127,56 @@ func runPurge(root string, args []string) error {
 	}
 	if err := bus.DoPurgeOld(olderThan, all); err != nil {
 		return fmt.Errorf("purge: %w", err)
+	}
+	return nil
+}
+
+// runModelCheck runs the model health check (listing only, no probe) and
+// submits a report via the reports store. It also updates the persisted
+// health state used by the web console.
+func runModelCheck(root string) error {
+	report, err := modelproxy.RunCheck(root, false)
+	if err != nil {
+		return fmt.Errorf("model-check: %w", err)
+	}
+	// Persist health state
+	state := modelproxy.LoadHealthState(root)
+	state.Merge(report)
+	if err := modelproxy.WriteHealthState(root, state); err != nil {
+		return fmt.Errorf("model-check: persist: %w", err)
+	}
+	// Submit report
+	store, err := reports.NewStore(root)
+	if err != nil {
+		return fmt.Errorf("model-check: reports store: %w", err)
+	}
+	var body strings.Builder
+	body.WriteString("Model health check (automated)\n\n")
+	body.WriteString(fmt.Sprintf("Run: %s\n", report.At.Format(time.RFC3339)))
+	body.WriteString(fmt.Sprintf("Total models: %d\n", report.Total))
+	body.WriteString(fmt.Sprintf("  OK:        %d\n", report.OK))
+	body.WriteString(fmt.Sprintf("  Not served:%d\n", report.NotServed))
+	body.WriteString(fmt.Sprintf("  Degraded:  %d\n", report.Degraded))
+	body.WriteString(fmt.Sprintf("  Failed:    %d\n", report.Failed))
+	body.WriteString(fmt.Sprintf("  Unknown:   %d\n", report.Unknown))
+	body.WriteString("\nDetails:\n")
+	for _, mh := range report.Models {
+		if mh.Status != modelproxy.StatusOK {
+			body.WriteString(fmt.Sprintf("  [%-11s] %s — %s\n", mh.Status, mh.ID, mh.Detail))
+		}
+	}
+	rec := &reports.ReportRecord{
+		ID:    fmt.Sprintf("r-%d", time.Now().UnixNano()),
+		Title: "Model health check",
+		Subtitle: fmt.Sprintf("%d models checked — %d OK, %d not-served, %d degraded, %d failed, %d unknown",
+			report.Total, report.OK, report.NotServed, report.Degraded, report.Failed, report.Unknown),
+		Ship:    "system",
+		Body:    body.String(),
+		Tags:    []string{"model-health", "timer"},
+		Created: time.Now().Unix(),
+	}
+	if _, err := store.Create(rec); err != nil {
+		return fmt.Errorf("model-check: submit report: %w", err)
 	}
 	return nil
 }

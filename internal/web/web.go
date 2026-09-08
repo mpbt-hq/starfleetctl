@@ -116,6 +116,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/topic/", s.apiTopicDispatch)
 	s.mux.HandleFunc("/api/identity", s.apiIdentity)
 	s.mux.HandleFunc("/api/models", s.apiModels)
+	s.mux.HandleFunc("/api/models/check", s.apiModelCheck)
 	s.mux.HandleFunc("/api/timers", s.apiTimers)
 	s.mux.HandleFunc("/api/timer", s.apiTimerCreate)
 	s.mux.HandleFunc("/api/timer/", s.apiTimerDispatch)
@@ -1879,15 +1880,46 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 	if cur.ID != "" {
 		models = append(models, cur)
 	}
+	// Enrich with health state from persisted check.
+	healthState := modelproxy.LoadHealthState(s.Root)
+	for i := range models {
+		if mh, ok := healthState.Get(models[i].ID); ok {
+			models[i].Health = &mh
+		}
+	}
 	writeJSON(w, filterAvailableModels(s.Root, models))
+}
+
+// apiModelCheck runs a model health check and persists the state.
+// POST /api/models/check?probe=1 triggers a listing+probe check.
+// Returns the check report as JSON.
+func (s *Server) apiModelCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	probe := r.URL.Query().Get("probe") == "1"
+	report, err := modelproxy.RunCheck(s.Root, probe)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	state := modelproxy.LoadHealthState(s.Root)
+	state.Merge(report)
+	if err := modelproxy.WriteHealthState(s.Root, state); err != nil {
+		writeErr(w, 500, "persist state: "+err.Error())
+		return
+	}
+	writeJSON(w, report)
 }
 
 // modelEntry mirrors the JSON shape apiModels returns to the frontend.
 type modelEntry struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-	Label    string `json:"label"`
-	Context  int    `json:"context"`
+	ID       string                  `json:"id"`
+	Provider string                  `json:"provider"`
+	Label    string                  `json:"label"`
+	Context  int                     `json:"context"`
+	Health   *modelproxy.ModelHealth `json:"health,omitempty"`
 }
 
 // filterAvailableModels drops models whose provider is proxied through the

@@ -182,7 +182,8 @@
            <span data-i18n="ns_unrestricted">Uneingeschränkte Berechtigungen (allow all)</span>
          </label>
        </div>
-      <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start">Starten</button></div>
+      <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start">Starten</button>
+        <button onclick="modelCheck()" data-i18n="model.check">Prüfen</button></div>
     </div>
     <div class="card" id="board"></div>
   </section>
@@ -633,6 +634,9 @@ const I18N = {
     'tab.reports': 'Berichte', 'tab.files': 'Files', 'tab.sops': 'SOPs',
     'ship.new': 'Neues Schiff', 'ns_name.ph': 'Name (leer = freier)',
     'ns_model.ph': 'Modell wählen...', 'ns_parent.ph': 'Übergeordnet (leer = Flagship)',
+    'model.check': 'Modelle prüfen', 'model.health.ok': 'OK — Modell verfügbar', 'model.health.degraded': 'Degradiert — nur transient Fehler',
+    'model.health.failed': 'Fehlgeschlagen — harter Fehler', 'model.health.not-served': 'Nicht serviert — gefiltert/entfernt',
+    'model.health.unknown': 'Unbekannt — Provider nicht erreichbar',
     'ns_unrestricted': 'Uneingeschränkte Berechtigungen (allow all)',
     'ship.start': 'Starten',
     'task.new': 'Neue Aufgabe', 't_title.ph': 'Titel', 't_desc.ph': 'Beschreibung (optional)',
@@ -747,6 +751,9 @@ const I18N = {
     'tab.reports': 'Reports', 'tab.files': 'Files', 'tab.sops': 'SOPs',
     'ship.new': 'New ship', 'ns_name.ph': 'Name (empty = auto)',
     'ns_model.ph': 'Choose model...', 'ns_parent.ph': 'Parent (empty = Flagship)',
+    'model.check': 'Check models', 'model.health.ok': 'OK — model available', 'model.health.degraded': 'Degraded — transient errors only',
+    'model.health.failed': 'Failed — hard error', 'model.health.not-served': 'Not served — filtered/removed',
+    'model.health.unknown': 'Unknown — provider unreachable',
     'ns_unrestricted': 'Unrestricted permissions (allow all)',
     'ship.start': 'Launch',
     'task.new': 'New task', 't_title.ph': 'Title', 't_desc.ph': 'Description (optional)',
@@ -1795,7 +1802,23 @@ async function loadModels(){
       for (const m of list) {
         const opt = document.createElement('option');
         opt.value = m.id;
-        opt.textContent = m.label + ' (' + Math.round(m.context/1000) + 'k)';
+        let label = m.label + ' (' + Math.round(m.context/1000) + 'k)';
+        // Health badge: color dot + tooltip
+        if (m.health) {
+          const st = m.health.status;
+          let dot = '●';
+          let cls = '';
+          switch(st) {
+            case 'ok': cls = 'style="color:#22c55e"'; break;       // green
+            case 'degraded': cls = 'style="color:#f59e0b"'; break; // amber
+            case 'failed': cls = 'style="color:#ef4444"'; break;    // red
+            case 'not-served': cls = 'style="color:#6b7280"'; break; // gray
+            case 'unknown': cls = 'style="color:#9ca3af"'; break;   // lighter gray
+          }
+          const detail = m.health.detail ? ' — '+m.health.detail : '';
+          label = '<span '+cls+' title="'+t('model.health.'+st)+detail+'">'+dot+'</span> '+label;
+        }
+        opt.innerHTML = label;
         opt.dataset.provider = m.provider;
         if (m.id === prev) opt.selected = true;
         og.appendChild(opt);
@@ -1803,9 +1826,9 @@ async function loadModels(){
       sel.appendChild(og);
     }
     // Auto-set provider on model change
-sel.addEventListener('change', function(){
-       localStorage.setItem('fleet_model', this.value);
-     });
+    sel.addEventListener('change', function(){
+      localStorage.setItem('fleet_model', this.value);
+    });
   } catch(e){ /* models.yaml not found — fallback to empty dropdown */ }
 }
 
@@ -1828,6 +1851,22 @@ toast(t('ship.launched')+(r.ship_id||name||'?'));
       document.getElementById('ns_unrestricted').checked=false;
       refresh();
    } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
+}
+
+async function modelCheck(){
+  const btn = event?.target;
+  const orig = btn?.textContent || '';
+  if(btn) { btn.disabled = true; btn.textContent = t('model.check')+'…'; }
+  try {
+    const r = await api('/api/models/check', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({probe:true})});
+    toast(t('model.check')+' OK ('+r.ok+' ok, '+r.not_served+' n/a, '+r.degraded+' deg, '+r.failed+' fail)');
+    loadModels();
+  } catch(e){
+    toast(t('err.prefix')+esc(e.message), true);
+  } finally {
+    if(btn) { btn.disabled = false; btn.textContent = orig; }
+  }
 }
 
 let threadMode = false;
