@@ -89,8 +89,13 @@ func (c *catalogStore) lookup(id string) catalogModel {
 			return cat[cand[0]]
 		}
 	}
-	// Fallback: lexical label derivation for catalog-unknown models.
-	return catalogModel{Label: deriveLabel(id)}
+	// Fallback: lexical label derivation + context/output estimate for
+	// catalog-unknown models (brand-new zen models, NIM long tail).
+	return catalogModel{
+		Label:   deriveLabel(id),
+		Context: estimateContext(id),
+		Output:  estimateOutput(id),
+	}
 }
 
 // parseOpencodeCatalog parses the `opencode models --verbose` listing. The
@@ -198,4 +203,83 @@ func parseOpencodeCatalog(output string) map[string]catalogModel {
 		byID[d.ID] = catalogModel{Label: d.Name, Context: d.Limit.Context, Output: d.Limit.Output, Caps: caps}
 	}
 	return byID
+}
+
+// estimateContext returns a conservative context window estimate for a
+// catalog-unknown model based on its ID. Used as last-resort fallback so
+// opencode configs don't get zero context limits.
+func estimateContext(id string) int {
+	l := strings.ToLower(id)
+	base := l
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	// Known large-context models
+	switch {
+	case strings.Contains(base, "128k") || strings.Contains(base, "128000"):
+		return 131072
+	case strings.Contains(base, "256k") || strings.Contains(base, "256000"):
+		return 262144
+	case strings.Contains(base, "512k") || strings.Contains(base, "512000"):
+		return 524288
+	case strings.Contains(base, "1m") || strings.Contains(base, "1000000") || strings.Contains(base, "1024k") || strings.Contains(base, "1048576"):
+		return 1048576
+	case strings.Contains(base, "200k") || strings.Contains(base, "204800"):
+		return 204800
+	case strings.Contains(base, "100k") || strings.Contains(base, "1048576"):
+		return 1048576
+	}
+	// Provider-specific defaults
+	switch {
+	case strings.HasPrefix(l, "nvidia/"):
+		// NIM models often have large context
+		return 131072
+	case strings.HasPrefix(l, "opencode/") || strings.Contains(l, "zen"):
+		return 1000000 // zen models typically have large context
+	case strings.HasPrefix(l, "google/") || strings.Contains(l, "gemini"):
+		return 1048576
+	case strings.HasPrefix(l, "meta/") || strings.Contains(l, "llama"):
+		return 131072
+	case strings.HasPrefix(l, "mistralai/") || strings.Contains(l, "mistral"):
+		return 131072
+	case strings.HasPrefix(l, "deepseek-ai/") || strings.Contains(l, "deepseek"):
+		return 1048576
+	case strings.HasPrefix(l, "anthropic/") || strings.Contains(l, "claude"):
+		return 200000
+	}
+	return 131072 // safe default
+}
+
+// estimateOutput returns a conservative output token estimate.
+func estimateOutput(id string) int {
+	l := strings.ToLower(id)
+	base := l
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	// Reasoning models often have larger output
+	if strings.Contains(base, "reasoning") || strings.Contains(base, "nemotron") {
+		return 65536
+	}
+	if strings.Contains(base, "vision") || strings.Contains(base, "vlm") {
+		return 8192
+	}
+	// Provider-specific defaults
+	switch {
+	case strings.HasPrefix(l, "nvidia/"):
+		return 65536
+	case strings.HasPrefix(l, "opencode/") || strings.Contains(l, "zen"):
+		return 131072
+	case strings.HasPrefix(l, "google/") || strings.Contains(l, "gemini"):
+		return 65536
+	case strings.HasPrefix(l, "meta/") || strings.Contains(l, "llama"):
+		return 16384
+	case strings.HasPrefix(l, "mistralai/") || strings.Contains(l, "mistral"):
+		return 16384
+	case strings.HasPrefix(l, "deepseek-ai/") || strings.Contains(l, "deepseek"):
+		return 384000
+	case strings.HasPrefix(l, "anthropic/") || strings.Contains(l, "claude"):
+		return 64000
+	}
+	return 16384 // safe default
 }

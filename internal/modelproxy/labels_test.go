@@ -102,10 +102,10 @@ func TestLookupFallbacks(t *testing.T) {
 		{"deepseek-ai/deepseek-v4-flash", "DeepSeek V4 Flash", 1048576},
 		// Basename match: bare zen-proxy id resolves to the vendor-prefixed entry.
 		{"deepseek-v4-flash", "DeepSeek V4 Flash", 1048576},
-		// Lexical fallback for catalog-unknown models.
-		{"claude-fable-5", "Claude Fable 5", 0},
-		{"nvidia/llama-3.1-nemotron-51b-instruct", "Llama 3.1 Nemotron 51B Instruct", 0},
-		{"gpt-5.6-sol", "GPT 5.6 Sol", 0},
+		// Lexical fallback for catalog-unknown models (now with estimated context/output).
+		{"claude-fable-5", "Claude Fable 5", 200000},
+		{"nvidia/llama-3.1-nemotron-51b-instruct", "Llama 3.1 Nemotron 51B Instruct", 131072},
+		{"gpt-5.6-sol", "GPT 5.6 Sol", 131072},
 	}
 	for _, c := range cases {
 		m := cat.lookup(c.id)
