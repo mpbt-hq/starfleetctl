@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
@@ -494,6 +495,11 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	effectiveModel := model
 	if effectiveModel == "" {
 		effectiveModel = "nvidia/nemotron-3-ultra-550b-a55b"
+	}
+	// Validate that the requested model is available from the provider
+	// (avoids silent fallback to default model when model is filtered out)
+	if err := validateModelAvailable(root, effectiveModel); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ model validation: %v\n", err)
 	}
 	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel)
 	if err != nil {
@@ -1002,4 +1008,58 @@ func RunTermctl(root string, args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "termctl-run: Run() returned\n")
 	return 0
+}
+
+// validateModelAvailable checks if the requested model is available from the
+// configured model-proxy provider. Returns an error if the model is not found
+// in the provider's model list (which would cause opencode to silently fall
+// back to the default model).
+func validateModelAvailable(root, model string) error {
+	if model == "" {
+		return nil // will use default
+	}
+	provider := providerFromModel(model)
+	if provider == "" {
+		return nil // can't determine provider
+	}
+	// Load model-proxy config
+	mpCfg, err := modelproxy.Load(root)
+	if err != nil {
+		return fmt.Errorf("model-proxy config: %w", err)
+	}
+	// Find the provider
+	var prov *modelproxy.Provider
+	for i := range mpCfg.Providers {
+		if mpCfg.Providers[i].ID == provider {
+			prov = &mpCfg.Providers[i]
+			break
+		}
+	}
+	if prov == nil {
+		return nil // provider not in model-proxy, skip validation
+	}
+	// Query available models from the proxy (tries local proxy first, falls back to upstream)
+	cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers}
+	if mpCfg.ListenAddr == "" {
+		cfg.ListenAddr = "127.0.0.1:8443"
+	}
+	available := cfg.ModelListFor(*prov)
+	if available == nil {
+		return fmt.Errorf("could not query models from provider %q", provider)
+	}
+	// Check if model is in the list (model may have provider/ prefix)
+	baseModel := model
+	if i := strings.IndexByte(model, '/'); i >= 0 {
+		// Check if the first component matches the provider ID
+		prefix := model[:i]
+		if prefix == provider {
+			baseModel = model[i+1:]
+		}
+	}
+	for _, m := range available {
+		if m == model || m == baseModel {
+			return nil // model is available
+		}
+	}
+	return fmt.Errorf("model %q not found in provider %q (available: %d models) — opencode will fall back to default", model, provider, len(available))
 }

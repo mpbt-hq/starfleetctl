@@ -261,10 +261,25 @@ func execClientDirect(root, client, shipID, systemPrompt, prompt, model string, 
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			// Cleanup on error (crash)
+			if bus, errComm := comms.New(root); errComm == nil {
+				_ = bus.DoStatus("crashed", "ship exited unexpectedly", comms.StatusPatch{})
+				_ = shipnames.New(root).DoRelease(shipID)
+			}
 			return exitErr.ExitCode()
 		}
 		fmt.Fprintln(os.Stderr, "run:", err)
+		// Cleanup on other error
+		if bus, errComm := comms.New(root); errComm == nil {
+			_ = bus.DoStatus("crashed", "ship exited unexpectedly", comms.StatusPatch{})
+			_ = shipnames.New(root).DoRelease(shipID)
+		}
 		return 1
+	}
+	// Success: clear heartbeat and release name
+	if bus, errComm := comms.New(root); errComm == nil {
+		_ = bus.DoClear()
+		_ = shipnames.New(root).DoRelease(shipID)
 	}
 	return 0
 }
