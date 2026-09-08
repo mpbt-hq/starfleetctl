@@ -196,7 +196,12 @@ func fetchModelInfo(prov Provider) ([]ModelInfo, error) {
 			infos = append(infos, m)
 		}
 	}
-	return infos, nil
+	// Apply the provider's model filter (model_filter in model-proxy.yaml):
+	// "" / "all" pass everything through; "free-only" keeps only free-tier
+	// models; anything else is a comma-separated explicit allowlist. Applied
+	// here so proxy serving, config generation and `model-proxy models` all
+	// see the same filtered listing.
+	return applyModelFilter(prov, infos), nil
 }
 
 // handleModels serves GET /v1/models — the consolidated list of all upstream
@@ -216,7 +221,9 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 		if providerID != "" && prov.ID != providerID {
 			continue
 		}
-		for _, m := range p.providerModelInfo(prov) {
+		// Apply the provider's model filter to the models this proxy serves.
+		filtered := applyModelFilter(prov, p.providerModelInfo(prov))
+		for _, m := range filtered {
 			m.OwnedBy = prov.ID
 			data = append(data, m)
 		}
@@ -378,6 +385,17 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		upstreamReq.Header.Set("Content-Type", "application/json")
 		if prov.APIKey != "" {
 			upstreamReq.Header.Set("Authorization", "Bearer "+prov.APIKey)
+		}
+		// Forward headers that upstream providers (especially zen-proxy / OpenCode Zen)
+		// require to validate the request origin. Zen checks User-Agent, Origin, Referer
+		// to confirm the request comes from OpenCode's console.
+		if prov.ID == "zen-proxy" {
+			forwardHeaders := []string{"User-Agent", "Origin", "Referer", "X-OpenCode-Client", "X-OpenCode-Version"}
+			for _, h := range forwardHeaders {
+				if v := r.Header.Get(h); v != "" {
+					upstreamReq.Header.Set(h, v)
+				}
+			}
 		}
 		return upstreamReq, bytes.NewReader(payload), nil
 	}
