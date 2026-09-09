@@ -251,8 +251,13 @@ func (m *Models) merge(existMap map[string]yamlModel, scanMap map[string]scanned
 	var out []yamlModel
 	seen := make(map[string]bool)
 
-	// Active models — in scan order (provider-sorted).
+	// Active models — in scan order (provider-sorted). Scan sources overlap
+	// (opencode catalog + model-proxy both list e.g. ollama models), so the
+	// same id can appear more than once; only the first occurrence is kept.
 	for _, s := range scanOrder {
+		if seen[s.id] {
+			continue
+		}
 		seen[s.id] = true
 		entry := yamlModel{
 			ID:       s.id,
