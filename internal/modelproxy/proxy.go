@@ -386,17 +386,10 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		if prov.APIKey != "" {
 			upstreamReq.Header.Set("Authorization", "Bearer "+prov.APIKey)
 		}
-		// Forward headers that upstream providers (especially zen-proxy / OpenCode Zen)
-		// require to validate the request origin. Zen checks User-Agent, Origin, Referer
-		// to confirm the request comes from OpenCode's console.
-		if prov.ID == "zen-proxy" {
-			forwardHeaders := []string{"User-Agent", "Origin", "Referer", "X-OpenCode-Client", "X-OpenCode-Version"}
-			for _, h := range forwardHeaders {
-				if v := r.Header.Get(h); v != "" {
-					upstreamReq.Header.Set(h, v)
-				}
-			}
-		}
+		// Stamp any provider-configured headers (e.g. a User-Agent override for
+		// upstreams like OpenCode Zen that validate the client to grant
+		// anonymous/free capacity).
+		prov.applyUpstreamHeaders(upstreamReq)
 		return upstreamReq, bytes.NewReader(payload), nil
 	}
 

@@ -70,6 +70,16 @@ type ModelProxyProvider struct {
 	MaxRetries int `yaml:"max_retries"`
 	// RetryDelayMS sleeps between retries. Default 1000.
 	RetryDelayMS int `yaml:"retry_delay_ms"`
+	// Type selects the provider class, which drives upstream-specific
+	// request handling (headers, body tweaks, ...). Empty = generic
+	// OpenAI-compatible. Known types:
+	//   - "opencode-zen": OpenCode Zen — gates anonymous/free capacity by
+	//     validating the User-Agent, so the proxy stamps an opencode UA.
+	Type string `yaml:"type"`
+	// UserAgent, when set, is sent as the upstream request's User-Agent
+	// header (overrides the type's default). Mainly relevant for
+	// "opencode-zen", whose free tier requires an "opencode/<version>" UA.
+	UserAgent string `yaml:"user_agent"`
 }
 
 // FleetConfig holds fleet-wide identity settings.

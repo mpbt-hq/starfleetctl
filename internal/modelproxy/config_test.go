@@ -4,6 +4,8 @@
 package modelproxy
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,5 +108,55 @@ func TestLoadNoConfigFile(t *testing.T) {
 	}
 	if len(cfg.Providers) != 0 {
 		t.Fatalf("providers = %d, want 0", len(cfg.Providers))
+	}
+}
+
+func TestApplyUpstreamHeaders(t *testing.T) {
+	tests := []struct {
+		name      string
+		prov      Provider
+		wantSet   bool
+		wantValue string
+	}{
+		{
+			name:    "generic provider untouched",
+			prov:    Provider{ID: "nim-proxy", Type: ""},
+			wantSet: false,
+		},
+		{
+			name:    "explicit opencode-zen type uses default UA",
+			prov:    Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			wantSet: true, wantValue: "opencode/1.18.30",
+		},
+		{
+			name:    "opencode-zen type honors user_agent override",
+			prov:    Provider{ID: "zen-proxy", Type: "opencode-zen", UserAgent: "opencode/9.9.9"},
+			wantSet: true, wantValue: "opencode/9.9.9",
+		},
+		{
+			name:    "legacy zen- prefixed id still classified",
+			prov:    Provider{ID: "zen-proxy"},
+			wantSet: true, wantValue: "opencode/1.18.30",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1", nil)
+			tt.prov.applyUpstreamHeaders(req)
+			got, ok := req.Header["User-Agent"]
+			if !tt.wantSet {
+				if ok {
+					t.Fatalf("User-Agent = %v, want unset", got)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("User-Agent unset, want %q", tt.wantValue)
+			}
+			if got[0] != tt.wantValue {
+				t.Fatalf("User-Agent = %q, want %q", got[0], tt.wantValue)
+			}
+		})
 	}
 }

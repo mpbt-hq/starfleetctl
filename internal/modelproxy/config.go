@@ -11,6 +11,7 @@ package modelproxy
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -106,6 +107,13 @@ type Provider struct {
 	// Retry tuning (defaults applied).
 	MaxRetries   int
 	RetryDelayMS int
+	// Type is the provider class, driving upstream-specific request
+	// handling. Empty = generic OpenAI-compatible. See
+	// Provider.applyUpstreamHeaders for the known types.
+	Type string
+	// UserAgent overrides the upstream request's User-Agent header
+	// (type-dependent; mainly for "opencode-zen").
+	UserAgent string
 }
 
 // Load reads and resolves the model-proxy configuration for the workspace
@@ -168,10 +176,44 @@ func Load(root string) (*Config, error) {
 		if prov.RetryDelayMS <= 0 {
 			prov.RetryDelayMS = 1000
 		}
+		prov.Type = strings.TrimSpace(p.Type)
+		prov.UserAgent = strings.TrimSpace(p.UserAgent)
 		out.Providers = append(out.Providers, prov)
 		for r := range refs {
 			out.EnvRefs = append(out.EnvRefs, r)
 		}
 	}
 	return out, nil
+}
+
+// typeOpenCodeZen identifies the OpenCode Zen provider class (and is also
+// accepted as a fallback when the provider id starts with "zen-", matching
+// the pre-type name-based routing used before the Type field existed).
+const typeOpenCodeZen = "opencode-zen"
+
+// defaultOpenCodeZenUserAgent is the request User-Agent OpenCode Zen expects
+// of its official client ("opencode/<version>"). It satisfies the free-tier
+// gate while allowing a provider-level user_agent override.
+const defaultOpenCodeZenUserAgent = "opencode/1.18.30"
+
+// applyUpstreamHeaders sets any provider-class-specific headers on an
+// outgoing upstream request. Known types:
+//
+//	opencode-zen — OpenCode Zen gates anonymous/free capacity by validating
+//	the User-Agent (must look like its official client). The generic
+//	@ai-sdk/openai-compatible client that ships send their own UA, which the
+//	gate rejects ("free tier can only be used in OpenCode"), so we stamp an
+//	opencode UA here. Configurable via the provider's user_agent.
+//
+// Add new cases here as further per-provider requirements arise.
+func (p *Provider) applyUpstreamHeaders(req *http.Request) {
+	zen := p.Type == typeOpenCodeZen || strings.HasPrefix(p.ID, "zen-")
+	if !zen {
+		return
+	}
+	ua := p.UserAgent
+	if ua == "" {
+		ua = defaultOpenCodeZenUserAgent
+	}
+	req.Header.Set("User-Agent", ua)
 }
