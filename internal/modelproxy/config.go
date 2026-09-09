@@ -10,12 +10,16 @@
 package modelproxy
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/metux/starfleetctl/internal/config"
 )
@@ -197,23 +201,83 @@ const typeOpenCodeZen = "opencode-zen"
 const defaultOpenCodeZenUserAgent = "opencode/1.18.30"
 
 // applyUpstreamHeaders sets any provider-class-specific headers on an
-// outgoing upstream request. Known types:
+// outgoing upstream request. from is the client's original request (may be
+// nil, e.g. the health check has no client). Known types:
 //
-//	opencode-zen — OpenCode Zen gates anonymous/free capacity by validating
-//	the User-Agent (must look like its official client). The generic
-//	@ai-sdk/openai-compatible client that ships send their own UA, which the
-//	gate rejects ("free tier can only be used in OpenCode"), so we stamp an
-//	opencode UA here. Configurable via the provider's user_agent.
+//	opencode-zen — OpenCode Zen. Its free tier only accepts requests that are
+//	indistinguishable from the official opencode client: it validates the
+//	User-Agent (must be "opencode/<version>") and requires the x-opencode-*
+//	identity headers the client always sends (session/client/project).
+//	Verified against the live gateway:
+//	- only the opencode UA            -> HTTP 400 MissingSessionID
+//	- identity headers, no opencode UA -> HTTP 429 FreeUsageLimitError
+//	- opencode UA + session/client/project -> HTTP 200
+//	The @ai-sdk/openai-compatible client that ships pointed at the proxy does
+//	not send x-opencode-* itself, but it DOES send its real, per-conversation
+//	session id as X-Session-Id — forward that verbatim as x-opencode-session
+//	so Zen's per-session prefix cache actually hits across turns. Everything
+//	the client doesn't provide is synthesized (fresh random request id per
+//	request; a sticky bad session id would route every retry to a broken
+//	upstream replica, see opencode issue #46011).
 //
 // Add new cases here as further per-provider requirements arise.
-func (p *Provider) applyUpstreamHeaders(req *http.Request) {
+func (p *Provider) applyUpstreamHeaders(up *http.Request, from *http.Request) {
 	zen := p.Type == typeOpenCodeZen || strings.HasPrefix(p.ID, "zen-")
 	if !zen {
 		return
 	}
-	ua := p.UserAgent
-	if ua == "" {
-		ua = defaultOpenCodeZenUserAgent
+	// User-Agent: forward the client's opencode UA verbatim when it already
+	// looks like the official client, otherwise use the override/default.
+	if ua := headerFrom(from, "User-Agent"); ua != "" && strings.HasPrefix(ua, "opencode/") {
+		up.Header.Set("User-Agent", ua)
+	} else if p.UserAgent != "" {
+		up.Header.Set("User-Agent", p.UserAgent)
+	} else {
+		up.Header.Set("User-Agent", defaultOpenCodeZenUserAgent)
 	}
-	req.Header.Set("User-Agent", ua)
+	// x-opencode-session: prefer the client's own session id (real one, keeps
+	// the prefix cache warm), in either spelling it may arrive with.
+	if v := headerFrom(from, "x-opencode-session"); v != "" {
+		up.Header.Set("x-opencode-session", v)
+	} else if v := headerFrom(from, "X-Session-Id"); v != "" {
+		up.Header.Set("x-opencode-session", v)
+	} else {
+		up.Header.Set("x-opencode-session", "ses_"+randHex(16))
+	}
+	if v := headerFrom(from, "x-opencode-client"); v != "" {
+		up.Header.Set("x-opencode-client", v)
+	} else {
+		up.Header.Set("x-opencode-client", "cli")
+	}
+	if v := headerFrom(from, "x-opencode-project"); v != "" {
+		up.Header.Set("x-opencode-project", v)
+	} else {
+		up.Header.Set("x-opencode-project", "global")
+	}
+	if v := headerFrom(from, "x-opencode-request"); v != "" {
+		up.Header.Set("x-opencode-request", v)
+	} else {
+		up.Header.Set("x-opencode-request", "msg_"+randHex(16))
+	}
+}
+
+// headerFrom reads a header from the client request, tolerating a nil
+// request (health-check probes have no client request).
+func headerFrom(r *http.Request, key string) string {
+	if r == nil {
+		return ""
+	}
+	return r.Header.Get(key)
+}
+
+// randHex returns n random bytes encoded as lowercase hex, for synthesizing
+// OpenCode Zen x-opencode-session / x-opencode-request ids.
+func randHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand can only fail on a bespoke, non-portable setup; fall
+		// back to a timestamp so the request is still well-formed.
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(b)
 }

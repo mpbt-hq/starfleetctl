@@ -388,8 +388,9 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		}
 		// Stamp any provider-configured headers (e.g. a User-Agent override for
 		// upstreams like OpenCode Zen that validate the client to grant
-		// anonymous/free capacity).
-		prov.applyUpstreamHeaders(upstreamReq)
+		// anonymous/free capacity). Passes the original client request so
+		// client-supplied identity (session id) can be forwarded to Zen.
+		prov.applyUpstreamHeaders(upstreamReq, r)
 		return upstreamReq, bytes.NewReader(payload), nil
 	}
 

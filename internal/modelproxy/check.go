@@ -339,7 +339,7 @@ func probeModel(prov Provider, model string) (string, int, bool) {
 		if prov.APIKey != "" {
 			req.Header.Set("Authorization", "Bearer "+prov.APIKey)
 		}
-		prov.applyUpstreamHeaders(req)
+		prov.applyUpstreamHeaders(req, nil) // health probe has no client request
 		resp, err := client.Do(req)
 		if err != nil {
 			msg := err.Error()

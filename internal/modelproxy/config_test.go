@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -113,49 +114,114 @@ func TestLoadNoConfigFile(t *testing.T) {
 
 func TestApplyUpstreamHeaders(t *testing.T) {
 	tests := []struct {
-		name      string
-		prov      Provider
-		wantSet   bool
-		wantValue string
+		name          string
+		prov          Provider
+		from          map[string]string // client request headers ("" = absent)
+		wantUA        string
+		wantSession   string
+		wantClient    string
+		wantProject   string
+		wantReqPrefix string
 	}{
 		{
-			name:    "generic provider untouched",
-			prov:    Provider{ID: "nim-proxy", Type: ""},
-			wantSet: false,
+			name:   "generic provider untouched",
+			prov:   Provider{ID: "nim-proxy", Type: ""},
+			from:   map[string]string{"User-Agent": "opencode/1.18.30"},
+			wantUA: "",
 		},
 		{
-			name:    "explicit opencode-zen type uses default UA",
-			prov:    Provider{ID: "zen-proxy", Type: "opencode-zen"},
-			wantSet: true, wantValue: "opencode/1.18.30",
+			name:        "opencode-zen forwards client session id as x-opencode-session",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			from:        map[string]string{"X-Session-Id": "ses_realid", "User-Agent": "opencode/1.18.30"},
+			wantUA:      "opencode/1.18.30",
+			wantSession: "ses_realid",
+			wantClient:  "cli",
+			wantProject: "global",
 		},
 		{
-			name:    "opencode-zen type honors user_agent override",
-			prov:    Provider{ID: "zen-proxy", Type: "opencode-zen", UserAgent: "opencode/9.9.9"},
-			wantSet: true, wantValue: "opencode/9.9.9",
+			name:        "opencode-zen prefers explicit x-opencode-session over X-Session-Id",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			from:        map[string]string{"x-opencode-session": "ses_explicit", "X-Session-Id": "ses_client"},
+			wantUA:      "opencode/1.18.30",
+			wantSession: "ses_explicit",
+			wantClient:  "cli",
+			wantProject: "global",
 		},
 		{
-			name:    "legacy zen- prefixed id still classified",
-			prov:    Provider{ID: "zen-proxy"},
-			wantSet: true, wantValue: "opencode/1.18.30",
+			name:        "no client request synthesizes session and default UA",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			from:        nil,
+			wantUA:      "opencode/1.18.30",
+			wantSession: "ses_",
+			wantClient:  "cli",
+			wantProject: "global",
+		},
+		{
+			name:        "non-opencode client UA falls back to zen UA",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			from:        map[string]string{"User-Agent": "curl/8.0"},
+			wantUA:      "opencode/1.18.30",
+			wantSession: "ses_",
+			wantClient:  "cli",
+			wantProject: "global",
+		},
+		{
+			name:        "user_agent override wins over default",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen", UserAgent: "opencode/9.9.9"},
+			from:        map[string]string{"User-Agent": "curl/8.0"},
+			wantUA:      "opencode/9.9.9",
+			wantSession: "ses_",
+			wantClient:  "cli",
+			wantProject: "global",
+		},
+		{
+			name:        "legacy zen- prefixed id still classified",
+			prov:        Provider{ID: "zen-proxy"},
+			from:        nil,
+			wantUA:      "opencode/1.18.30",
+			wantSession: "ses_",
+			wantClient:  "cli",
+			wantProject: "global",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/v1", nil)
-			tt.prov.applyUpstreamHeaders(req)
-			got, ok := req.Header["User-Agent"]
-			if !tt.wantSet {
-				if ok {
-					t.Fatalf("User-Agent = %v, want unset", got)
+			up := httptest.NewRequest(http.MethodPost, "/v1", nil)
+			var from *http.Request
+			if tt.from != nil {
+				from = httptest.NewRequest(http.MethodPost, "/v1", nil)
+				for k, v := range tt.from {
+					from.Header.Set(k, v)
 				}
-				return
 			}
-			if !ok {
-				t.Fatalf("User-Agent unset, want %q", tt.wantValue)
+			tt.prov.applyUpstreamHeaders(up, from)
+
+			if got := up.Header.Get("User-Agent"); got != tt.wantUA {
+				t.Errorf("User-Agent = %q, want %q", got, tt.wantUA)
 			}
-			if got[0] != tt.wantValue {
-				t.Fatalf("User-Agent = %q, want %q", got[0], tt.wantValue)
+
+			zen := tt.prov.Type == "opencode-zen" || strings.HasPrefix(tt.prov.ID, "zen-")
+			if !zen {
+				return // generic providers must not touch zen headers
+			}
+
+			if tt.wantSession == "ses_" {
+				// synthesized session ids are random: only check the prefix
+				if got := up.Header.Get("x-opencode-session"); !strings.HasPrefix(got, "ses_") || len(got) < 5 {
+					t.Errorf("x-opencode-session = %q, want random ses_ id", got)
+				}
+			} else if got := up.Header.Get("x-opencode-session"); got != tt.wantSession {
+				t.Errorf("x-opencode-session = %q, want %q", got, tt.wantSession)
+			}
+			if got := up.Header.Get("x-opencode-client"); got != tt.wantClient {
+				t.Errorf("x-opencode-client = %q, want %q", got, tt.wantClient)
+			}
+			if got := up.Header.Get("x-opencode-project"); got != tt.wantProject {
+				t.Errorf("x-opencode-project = %q, want %q", got, tt.wantProject)
+			}
+			if got := up.Header.Get("x-opencode-request"); !strings.HasPrefix(got, "msg_") {
+				t.Errorf("x-opencode-request = %q, want msg_ prefixed", got)
 			}
 		})
 	}
