@@ -52,6 +52,7 @@ installed, see `scripts/check-opencode-plugin.sh`).
 | [SOP Fragments](doc/sop.md) | SOP fragment system (creating, editing, reindex) |
 | [Web UI](doc/web-ui.md) | Browser-based fleet dashboard |
 | [Reports](doc/reports.md) | Fleet report system (CLI + web) |
+| [Config Files](doc/config.md) | Reference for `.starfleet-ai/conf/*.yaml` + `timers/*.json` |
 | [Known Limitations](doc/known-limitations.md) | Current caveats and workarounds |
 
 ## License
