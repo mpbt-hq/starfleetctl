@@ -83,4 +83,3 @@ stays in sync:
 4. **Publish discoveries while they are fresh.** Anything relevant to a shared
    problem goes onto the bus (and, per rule 6 above, the local console) the moment
    it is found — the other ship(s) need it now, not after the session ends.
-

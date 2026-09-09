@@ -19,16 +19,16 @@ const usage = `sop <command> [args…]
   reindex                                  regenerate sop.d/index.md from sop.d/**/*.md
                                            (inlines all fragment bodies, strips frontmatter)
   commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) CLAUDE.md+index.md
-  install-self [--order <n>]                 install/refresh the consolidated starfleet skill and
+  install-self [--order <n>]                 install/refresh the starfleet skills and
                                                clean up legacy agent fragments
   install-starfleet [<subdir>]               install all embedded starfleet fragments from the binary
                                                (default subdir: "starfleet-instructions") — writes to
                                                sop.d/<slug>.md for each, always overwrites, then
                                                reindexes
-  install-starfleet-skills                   install the consolidated starfleet skill from the binary
-                                               (fragments/starfleet-skills/starfleet/) — writes to
-                                               .claude/skills/starfleet/, always overwrites, cleans
-                                               up legacy skill directories
+  install-starfleet-skills                   install the themed starfleet skills from the binary
+                                               (fragments/starfleet-skills/<name>/) — writes to
+                                               .claude/skills/<name>/, always overwrites, cleans
+                                               up legacy + removed skill directories
 `
 
 // Run dispatches a `sop` invocation, given the resolved workspace root.

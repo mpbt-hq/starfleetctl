@@ -513,41 +513,52 @@ func fixStarfleetFragments(b *Bootstrap) error {
 	return a.DoInstallStarfleet(sop.StarfleetSubdir)
 }
 
-// verifyStarfleetSkills checks that the consolidated starfleet skill
-// (fragments/starfleet-skills/starfleet/) is installed to
-// .claude/skills/starfleet/ and byte-identical to what the current
+// verifyStarfleetSkills checks that every embedded themed starfleet skill
+// (fragments/starfleet-skills/<name>/) is installed to
+// .claude/skills/<name>/ and byte-identical to what the current
 // binary would write.
 func verifyStarfleetSkills(b *Bootstrap) (bool, string) {
 	a, err := sop.New(b.Root)
 	if err != nil {
 		return false, err.Error()
 	}
-	skillDir := filepath.Join(starfleetctl.FragmentsRoot, sop.StarfleetSkillsSubdir, "starfleet")
-	skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
+	skillsRoot := filepath.Join(starfleetctl.FragmentsRoot, sop.StarfleetSkillsSubdir)
+	skillDirs, err := fs.ReadDir(starfleetctl.Fragments, skillsRoot)
 	if err != nil {
-		return true, "no embedded starfleet skill"
+		return true, "no embedded starfleet skills"
 	}
 	var missing, stale []string
-	for _, f := range skillEntries {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+	for _, sd := range skillDirs {
+		if !sd.IsDir() || strings.HasPrefix(sd.Name(), ".") {
 			continue
 		}
-		current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
+		skillName := sd.Name()
+		skillDir := filepath.Join(skillsRoot, skillName)
+		skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
 		if err != nil {
-			return false, err.Error()
-		}
-		installedPath := filepath.Join(a.SkillsDir(), "starfleet", f.Name())
-		data, err := os.ReadFile(installedPath)
-		if err != nil {
-			missing = append(missing, "starfleet/"+f.Name())
 			continue
 		}
-		if string(data) != string(current) {
-			stale = append(stale, "starfleet/"+f.Name())
+		for _, f := range skillEntries {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+				continue
+			}
+			current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
+			if err != nil {
+				return false, err.Error()
+			}
+			installedPath := filepath.Join(a.SkillsDir(), skillName, f.Name())
+			data, err := os.ReadFile(installedPath)
+			if err != nil {
+				missing = append(missing, skillName+"/"+f.Name())
+				continue
+			}
+			if string(data) != string(current) {
+				stale = append(stale, skillName+"/"+f.Name())
+			}
 		}
 	}
 	if len(missing) == 0 && len(stale) == 0 {
-		return true, "starfleet skill present, up to date"
+		return true, "starfleet skills present, up to date"
 	}
 	var parts []string
 	if len(missing) > 0 {

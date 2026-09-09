@@ -8,8 +8,8 @@
 // hand-duplicate and separately maintain a copy of them. See the root
 // package doc comment (doc.go) for the embedding mechanism.
 //
-// The consolidated starfleet skill lives at .claude/skills/starfleet/
-// and is installed via DoInstallStarfleetSkills.
+// The themed starfleet skills live under .claude/skills/<name>/
+// and are installed via DoInstallStarfleetSkills.
 package sop
 
 import (
@@ -26,8 +26,8 @@ import (
 // Kept for backward-compatible cleanup (removing stale agents.d files).
 const SelfSlug = "starfleet/starfleetctl"
 
-// DoInstallSelf installs the consolidated starfleet skill to
-// .claude/skills/starfleet/ (via DoInstallStarfleetSkills) and cleans up
+// DoInstallSelf installs the themed starfleet skills to
+// .claude/skills/<name>/ (via DoInstallStarfleetSkills) and cleans up
 // the legacy starfleet/starfleetctl.md fragment if present (both the old
 // agents.d/ and the current sop.d/ locations).
 func (s *SOP) DoInstallSelf(order int) error {
@@ -130,7 +130,8 @@ func (s *SOP) DoInstallStarfleet(subdir string) error {
 }
 
 // StarfleetSkillsSubdir is the subdirectory inside fragments/ that holds
-// the starfleet skill files (SKILL.md + reference.md).
+// the starfleet skill directories (one per themed skill, each with its
+// own SKILL.md plus optional companion .md files).
 const StarfleetSkillsSubdir = "starfleet-skills"
 
 // SkillsDir returns the absolute path to .claude/skills/ in the workspace.
@@ -139,40 +140,73 @@ func (s *SOP) SkillsDir() string {
 }
 
 // oldStarfleetSkillDirs lists legacy skill directory names that should be
-// cleaned up when installing the consolidated starfleet skill.
+// cleaned up when installing the starfleet skills.
 var oldStarfleetSkillDirs = []string{"concurrency", "starfleetctl", "task-capture"}
 
-// DoInstallStarfleetSkills installs the single starfleet skill from the
-// embedded fragments/starfleet-skills/starfleet/ to .claude/skills/starfleet/,
-// always overwriting (tool-owned). Also cleans up legacy skill directories.
+// DoInstallStarfleetSkills installs every themed starfleet skill from the
+// embedded fragments/starfleet-skills/<name>/ directories to
+// .claude/skills/<name>/, always overwriting (tool-owned). Also cleans up
+// legacy skill directories and any starfleet-* skill dirs no longer part of
+// the embedded set.
 func (s *SOP) DoInstallStarfleetSkills() error {
-	skillName := "starfleet"
-	skillDir := filepath.Join(starfleetctl.FragmentsRoot, StarfleetSkillsSubdir, skillName)
-	skillEntries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
+	skillsRoot := filepath.Join(starfleetctl.FragmentsRoot, StarfleetSkillsSubdir)
+	skillDirs, err := fs.ReadDir(starfleetctl.Fragments, skillsRoot)
 	if err != nil {
 		return err
 	}
-	destDir := filepath.Join(s.SkillsDir(), skillName)
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return err
-	}
-	for _, f := range skillEntries {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+	installed := map[string]bool{}
+	for _, sd := range skillDirs {
+		if !sd.IsDir() || strings.HasPrefix(sd.Name(), ".") {
 			continue
 		}
-		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
+		name := sd.Name()
+		skillDir := filepath.Join(skillsRoot, name)
+		entries, err := fs.ReadDir(starfleetctl.Fragments, skillDir)
 		if err != nil {
 			return err
 		}
-		destPath := filepath.Join(destDir, f.Name())
-		if err := os.WriteFile(destPath, data, 0o644); err != nil {
+		destDir := filepath.Join(s.SkillsDir(), name)
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			return err
 		}
+		for _, f := range entries {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
+				continue
+			}
+			data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(skillDir, f.Name()))
+			if err != nil {
+				return err
+			}
+			destPath := filepath.Join(destDir, f.Name())
+			if err := os.WriteFile(destPath, data, 0o644); err != nil {
+				return err
+			}
+		}
+		installed[name] = true
 	}
 
-	// Clean up legacy skill directories (concurrency, starfleetctl, task-capture)
-	for _, old := range oldStarfleetSkillDirs {
-		os.RemoveAll(filepath.Join(s.SkillsDir(), old))
+	// Clean up legacy skill directories plus starfleet-* dirs that are no
+	// longer part of the embedded set (renamed/removed skills).
+	if entries, err := os.ReadDir(s.SkillsDir()); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if installed[name] {
+				continue
+			}
+			if name == "starfleet" || strings.HasPrefix(name, "starfleet-") {
+				os.RemoveAll(filepath.Join(s.SkillsDir(), name))
+				continue
+			}
+			for _, old := range oldStarfleetSkillDirs {
+				if name == old {
+					os.RemoveAll(filepath.Join(s.SkillsDir(), name))
+					break
+				}
+			}
+		}
 	}
 
 	return nil

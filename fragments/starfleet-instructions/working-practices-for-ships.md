@@ -30,10 +30,10 @@ cleared:
   config tweaks, dashboard updates, whatever the session produced. Generalizing something onto the
   main branch for all users is a deliberate, separate decision the praetor makes per item.
 - **Project knowledge lives in the repo, not in per-user agent memory.** Lessons, CI gotchas,
-  failure modes, and workflow quirks go into `.starfleet-ai/var/sop.d/index.md` or topic docs —
-  version-controlled and shared with the whole team. A machine-local agent memory store is private
-  and invisible to teammates, so it must **not** hold project facts. Never create a `memory/`
-  directory inside a source clone.
+  failure modes, and workflow quirks go into the SOP fragments (`.starfleet-ai/var/sop.d/`) or
+  dashboard topic docs — version-controlled and shared with the whole team. A machine-local agent
+  memory store is private and invisible to teammates, so it must **not** hold project facts. Never
+  create a `memory/` directory inside a source clone.
 - **Turn repeated commands into scripts, then authorize them.** If you find yourself running the
   same multi-step command (especially GitHub/`gh` access), factor it into a generic
   `scripts/<name>` (match the existing style) and add allow rules so it runs without a
@@ -51,27 +51,10 @@ cleared:
 - **Dashboard & topics: CLI only, never raw files.** All access to the dashboard and its
   topics goes through `starfleetctl dashboard`/`starfleetctl task` subcommands. **NEVER**
   use `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md` —
-  not even "just to look". Read with `dashboard topic show <slug>`, list with
-  `dashboard topic list --json`, modify with `dashboard topic write <slug> <file>` +
-  `dashboard topic commit <slug>`. Direct file access is a rule violation.
-- **Keep the dashboard and reports current while working a task — capture-first.** When you
-  take on a task: every non-trivial task is **captured into the dashboard first** (even one
-  handed to you over comms, even if you'll finish it immediately) and then driven through the
-  **lifecycle** `task begin <slug>` → `task log`/`task progress` → `task done`, which keeps
-  both the dashboard status and your board status in sync. On completion submit a report
-  (`reports submit --taskref <slug>`) plus a comms notification to the commissioning ship.
-  A `working`/`building` status with no task and no note is flagged **unattached** — attach to
-  a task or pass a `--note`. If you must ask clarifying questions, note them in the task
-  itself (`dashboard topic write/commit`) and submit a report whose subject explicitly
-  states that questions need answers (with the questions listed in the body) — never just
-  block on the console.
+  not even "just to look".
 - **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
    (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,
    no dashboard scanning, no proactive work — wait for a `tell`/`ask`/`broadcast` directive.
-- **Announce and coordinate codebase work over comms.** Before starting work on a shared source
-   repo, check the board and recent comms for another ship already working there; announce your
-   start (repo, branch, goal) over the bus, and only one ship edits the same source at a time. If
-   several ships work on the same/overlapping problem (e.g. parallel analyses), keep changes in
-   separate branches/worktrees and exchange findings via `starfleetctl comms tell` as they are
-   found — interim results and conclusions belong on the bus immediately, not only in the final
-   report.
+
+Task handling specifics (lifecycle, reports, capture-first) live in the **`starfleet-tasks`**
+skill; load it when you take on or work a task.
