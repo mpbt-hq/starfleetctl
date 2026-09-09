@@ -161,8 +161,9 @@ func ProviderConfigs(root, shipID string) map[string]any {
 		// direct upstream query.
 		if infos := cfg.modelInfoFor(prov); len(infos) > 0 {
 			mm := map[string]any{}
+			forced := prov.forcedModelCaps()
 			for _, inf := range infos {
-				mm[inf.ID] = modelEntryFor(inf)
+				mm[inf.ID] = modelEntryFor(inf, forced)
 			}
 			entry["models"] = mm
 		}
@@ -178,8 +179,10 @@ func ProviderConfigs(root, shipID string) map[string]any {
 // entry. opencode pulls per-model metadata (name, context limit, capability
 // flags, modalities) from this map — the same surface it has for direct
 // upstream providers via models.dev — so the injected config carries the
-// proxy-enriched data instead of bare ids.
-func modelEntryFor(inf ModelInfo) map[string]any {
+// proxy-enriched data instead of bare ids. forcedCaps are provider-level
+// capability flags that are force-enabled regardless of what the catalog
+// advertises (upstreams like Ollama serve no capability metadata at all).
+func modelEntryFor(inf ModelInfo, forcedCaps []string) map[string]any {
 	entry := map[string]any{"name": inf.ID}
 	if inf.Label != "" {
 		entry["name"] = inf.Label
@@ -187,7 +190,13 @@ func modelEntryFor(inf ModelInfo) map[string]any {
 	if inf.Context > 0 && inf.Output > 0 {
 		entry["limit"] = map[string]any{"context": inf.Context, "output": inf.Output}
 	}
-	for _, c := range inf.Caps {
+	caps := inf.Caps
+	for _, f := range forcedCaps {
+		if !contains(caps, f) {
+			caps = append(caps, f)
+		}
+	}
+	for _, c := range caps {
 		switch c {
 		case "reasoning":
 			entry["reasoning"] = true
@@ -210,6 +219,15 @@ func modelEntryFor(inf ModelInfo) map[string]any {
 		entry["modalities"] = m
 	}
 	return entry
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // modalitiesFromCaps maps the proxy capability tags to the opencode

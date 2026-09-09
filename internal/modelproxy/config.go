@@ -118,6 +118,11 @@ type Provider struct {
 	// UserAgent overrides the upstream request's User-Agent header
 	// (type-dependent; mainly for "opencode-zen").
 	UserAgent string
+	// Capabilities forces capability flags (toolcall, temperature, ...) onto
+	// every model this provider serves in the generated opencode config, for
+	// upstreams whose catalog does not advertise them. See
+	// Config.ModelProxyProvider.Capabilities.
+	Capabilities []string
 }
 
 // Load reads and resolves the model-proxy configuration for the workspace
@@ -182,6 +187,7 @@ func Load(root string) (*Config, error) {
 		}
 		prov.Type = strings.TrimSpace(p.Type)
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)
+		prov.Capabilities = append([]string(nil), p.Capabilities...) // copy, never alias the yaml slice
 		out.Providers = append(out.Providers, prov)
 		for r := range refs {
 			out.EnvRefs = append(out.EnvRefs, r)
@@ -194,6 +200,34 @@ func Load(root string) (*Config, error) {
 // accepted as a fallback when the provider id starts with "zen-", matching
 // the pre-type name-based routing used before the Type field existed).
 const typeOpenCodeZen = "opencode-zen"
+
+// typeOpenCodeOllama identifies the Ollama provider class. Ollama serves a
+// bare /v1/models catalog without capability metadata, so opencode would
+// treat its models as tool-less by default — the type makes the generated
+// config force-enable the capabilities that virtually all Ollama models
+// support (see forcedModelCaps), especially tool calling.
+const typeOpenCodeOllama = "ollama"
+
+// defaultOllamaCapabilities is the capability set forced onto every model of
+// an "ollama"-typed provider unless the provider overrides `capabilities:`.
+// toolcall + temperature are universal across Ollama's llama-/qwen-/... based
+// models; vision (attachment) and reasoning stay per-model opt-in via an
+// explicit `capabilities:` list, since not every Ollama model supports them.
+var defaultOllamaCapabilities = []string{"toolcall", "temperature"}
+
+// forcedModelCaps returns the capability flags that should be force-enabled
+// on every model entry of this provider in the generated opencode config:
+// the provider's explicit `capabilities:` list, or — when empty — the type's
+// default (Ollama models need tool calling etc. switched on explicitly).
+func (p *Provider) forcedModelCaps() []string {
+	if len(p.Capabilities) > 0 {
+		return p.Capabilities
+	}
+	if p.Type == typeOpenCodeOllama {
+		return defaultOllamaCapabilities
+	}
+	return nil
+}
 
 // defaultOpenCodeZenUserAgent is the request User-Agent OpenCode Zen expects
 // of its official client ("opencode/<version>"). It satisfies the free-tier

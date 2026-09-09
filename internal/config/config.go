@@ -80,6 +80,15 @@ type ModelProxyProvider struct {
 	// header (overrides the type's default). Mainly relevant for
 	// "opencode-zen", whose free tier requires an "opencode/<version>" UA.
 	UserAgent string `yaml:"user_agent"`
+	// Capabilities forces capability flags (toolcall, temperature,
+	// reasoning, attachment, ...) onto EVERY model this provider serves, in
+	// the generated per-ship opencode.json model entries — for upstreams
+	// whose model catalog does not advertise them (e.g. Ollama serves a bare
+	// /v1/models without any capability metadata, so opencode would treat
+	// those models as tool-less). Merges with (and overrides) per-model
+	// capabilities discovered from the catalog. When empty, a default set
+	// for the provider's Type may apply (see the ollama type).
+	Capabilities []string `yaml:"capabilities"`
 }
 
 // FleetConfig holds fleet-wide identity settings.

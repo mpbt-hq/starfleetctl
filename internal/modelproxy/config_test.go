@@ -226,3 +226,68 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestForcedModelCaps(t *testing.T) {
+	tests := []struct {
+		name string
+		prov Provider
+		want []string
+	}{
+		{
+			name: "generic provider has no forced caps",
+			prov: Provider{ID: "nim-proxy"},
+			want: nil,
+		},
+		{
+			name: "ollama type applies default caps",
+			prov: Provider{ID: "ollama", Type: typeOpenCodeOllama},
+			want: []string{"toolcall", "temperature"},
+		},
+		{
+			name: "explicit capabilities override the ollama default",
+			prov: Provider{ID: "ollama", Type: typeOpenCodeOllama, Capabilities: []string{"toolcall"}},
+			want: []string{"toolcall"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.prov.forcedModelCaps()
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("forcedModelCaps() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestModelEntryFor(t *testing.T) {
+	// A bare catalog entry (no caps) — what Ollama serves via /v1/models.
+	bare := modelEntryFor(ModelInfo{ID: "qwen3:0.6b"}, nil)
+	if _, ok := bare["tool_call"]; ok {
+		t.Errorf("bare entry without forced caps unexpectedly has tool_call")
+	}
+
+	// The same bare entry with forced caps must get them switched on.
+	ollama := modelEntryFor(ModelInfo{ID: "qwen3:0.6b"}, defaultOllamaCapabilities)
+	for _, field := range []string{"tool_call", "temperature"} {
+		if v, ok := ollama[field]; !ok || v != true {
+			t.Errorf("ollama entry %s = %v (present %v), want true", field, v, ok)
+		}
+	}
+
+	// Forced caps merge with catalog caps without duplicates (toolcall from
+	// both sides) and never downgrade existing flags.
+	inf := ModelInfo{ID: "m", Caps: []string{"toolcall", "reasoning"}}
+	got := modelEntryFor(inf, []string{"toolcall", "attachment"})
+	for _, field := range []string{"tool_call", "reasoning", "attachment"} {
+		if v, ok := got[field]; !ok || v != true {
+			t.Errorf("merged entry %s = %v (present %v), want true", field, v, ok)
+		}
+	}
+
+	// A model-proxy-yaml capabilities list (without the ollama type) works too.
+	prov := Provider{ID: "x", Capabilities: []string{"toolcall"}}
+	direct := modelEntryFor(ModelInfo{ID: "x"}, prov.forcedModelCaps())
+	if v, ok := direct["tool_call"]; !ok || v != true {
+		t.Errorf("provider-capabilities entry tool_call = %v (present %v), want true", v, ok)
+	}
+}
