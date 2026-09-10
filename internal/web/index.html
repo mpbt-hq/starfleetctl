@@ -188,8 +188,8 @@
            <span data-i18n="ns_free_only">Nur freie Modelle (zen-proxy)</span>
          </label>
        </div>
-      <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start">Starten</button>
-        <button onclick="modelCheck()" data-i18n="model.check">Prüfen</button></div>
+      <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start" data-i18n-title="ship.start.tooltip" title="Start a new ship session">Starten</button>
+        <button onclick="modelCheck()" data-i18n="model.check" data-i18n-title="model.check.tooltip" title="Check model availability and health">Prüfen</button></div>
     </div>
     <div class="card" id="board"></div>
   </section>
@@ -215,7 +215,7 @@
         </select>
         <select id="t_cat"><option value="" data-i18n="t_cat.ph">Task-Kategorie: (toplevel / unkategorisiert)</option></select>
       </div>
-      <div class="actions"><button onclick="taskNew()" data-i18n="task.capture">Erfassen</button></div>
+      <div class="actions"><button onclick="taskNew()" data-i18n="task.capture" data-i18n-title="task.capture.tooltip" title="Capture a new task">Erfassen</button></div>
     </div>
     <div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
       <span class="muted" data-i18n="filter.label">Filter:</span>
@@ -237,9 +237,9 @@
         <option value="title" data-i18n="sort.title">Titel</option>
         <option value="created" data-i18n="sort.created">Erstellt</option>
       </select>
-      <button class="sec" id="tf_dir" onclick="taskToggleDir()" style="width:auto;padding:6px 10px">↑</button>
+      <button class="sec" id="tf_dir" onclick="taskToggleDir()" style="width:auto;padding:6px 10px" data-i18n-title="task.toggle.dir.tooltip" title="Toggle task sort direction">↑</button>
       <button class="sec" onclick="taskReindex()" data-i18n-title="reindex.title" title="DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)" data-i18n="reindex.btn" style="margin-left:auto;width:auto;padding:6px 12px">↻ Reindex</button>
-      <button class="sec" id="btn_orphans" onclick="toggleOrphans()" style="width:auto;padding:6px 12px" data-i18n="orphans.btn">⚠ Waisen (Orphans)</button>
+      <button class="sec" id="btn_orphans" onclick="toggleOrphans()" style="width:auto;padding:6px 12px" data-i18n="orphans.btn" data-i18n-title="orphans.btn.tooltip" title="Toggle orphan tasks view">⚠ Waisen (Orphans)</button>
     </div>
     <div class="card" id="tasklist"></div>
     <div class="card" id="orphanlist" style="display:none"></div>
@@ -253,8 +253,8 @@
     </div>
     <div class="row" style="margin-bottom:8px">
       <span class="muted" data-i18n="view.label">Ansicht:</span>
-      <button class="sec" id="btn_thread" onclick="toggleThread()" style="width:auto;padding:6px 12px" data-i18n="threads.off">💬 Threads: aus</button>
-      <button class="sec" id="btn_purge" onclick="purgeOldMsgs()" style="width:auto;padding:6px 12px;margin-left:8px" data-i18n="bus.purge">🗑 Alte löschen</button>
+      <button class="sec" id="btn_thread" onclick="toggleThread()" style="width:auto;padding:6px 12px" data-i18n="threads.off" data-i18n-title="threads.toggle.tooltip" title="Toggle thread view in bus">💬 Threads: aus</button>
+      <button class="sec" id="btn_purge" onclick="purgeOldMsgs()" style="width:auto;padding:6px 12px;margin-left:8px" data-i18n="bus.purge" data-i18n-title="bus.purge.tooltip" title="Purge old messages from dead ships">🗑 Alte löschen</button>
     </div>
     <div class="card" id="busbody"></div>
   </section>
@@ -266,7 +266,7 @@
         <select id="talk_target" onchange="loadTalk()"><option value="all" data-i18n="talk.all">📡 ganze Flotte (all)</option></select>
         <input id="talk_text" data-i18n-ph="talk.text.ph" placeholder="Text…">
       </div>
-      <div class="actions"><button onclick="sendTell()" data-i18n="talk.send">Senden</button></div>
+      <div class="actions"><button onclick="sendTell()" data-i18n="talk.send" data-i18n-title="talk.send.tooltip" title="Send message to target ship or broadcast to all">Senden</button></div>
     </div>
     <div class="card muted" id="talk_hint" data-i18n="talk.hint">Hinweis: Nachrichten gehen über comms (comms tell / broadcast). Ships holen sie via inbox ab.</div>
     <div class="card" id="talk_body"></div>
@@ -282,7 +282,7 @@
         <b data-i18n="timer.worker">Timer Worker</b>
         <span id="tw_status" class="muted">…</span>
         <span style="margin-left:auto"></span>
-        <button class="sec" id="tw_btn" onclick="timerWorkerToggle()" style="width:auto;padding:6px 14px" data-i18n="timers.worker.start">Start</button>
+        <button class="sec" id="tw_btn" onclick="timerWorkerToggle()" style="width:auto;padding:6px 14px" data-i18n="timers.worker.start" data-i18n-title="timers.worker.toggle.tooltip" title="Start or stop the timer worker">Start</button>
       </div>
     </div>
     <div class="card">
@@ -290,7 +290,7 @@
         <b data-i18n="timer.web">Web Server</b>
         <span class="muted" id="ws_info">…</span>
         <span style="margin-left:auto"></span>
-        <button class="sec" onclick="webRestart()" style="width:auto;padding:6px 14px" data-i18n="timer.restart">Neu starten</button>
+        <button class="sec" onclick="webRestart()" style="width:auto;padding:6px 14px" data-i18n="timer.restart" data-i18n-title="timer.restart.tooltip" title="Restart the web server">Neu starten</button>
       </div>
     </div>
     <div class="card">
@@ -338,7 +338,7 @@
       </div>
       <input id="tf_msg" data-i18n-ph="tf_msg.ph" placeholder="Nachricht…" style="margin-top:8px">
       <div class="actions">
-        <button onclick="timerCreate()" data-i18n="timer.create">Erstellen</button>
+        <button onclick="timerCreate()" data-i18n="timer.create" data-i18n-title="timer.create.tooltip" title="Create a new timer">Erstellen</button>
       </div>
     </div>
     <div class="card" id="timerlist"></div>
@@ -356,18 +356,18 @@
       </div>
       <div class="row" style="margin-top:8px;gap:8px;align-items:center">
         <input type="file" id="rep_file_input" style="flex:1">
-        <button class="sec" onclick="reportUploadFile()" style="width:auto" data-i18n="rep.attach">Anhängen</button>
+        <button class="sec" onclick="reportUploadFile()" style="width:auto" data-i18n="rep.attach" data-i18n-title="rep.attach.tooltip" title="Attach a file to the report">Anhängen</button>
       </div>
       <div id="rep_attachments" style="margin-top:6px;font-size:13px"></div>
       <div class="actions" style="margin-top:8px">
-        <button onclick="reportSubmit()" data-i18n="rep.submit">Bericht einreichen</button>
+        <button onclick="reportSubmit()" data-i18n="rep.submit" data-i18n-title="rep.submit.tooltip" title="Submit the report">Bericht einreichen</button>
       </div>
     </div>
     <div class="card" id="reports_filters">
       <div class="row" style="gap:8px">
         <input id="rep_filter_ship" data-i18n-ph="rep_filter_ship.ph" placeholder="Filter: Schiff" style="flex:1">
         <input id="rep_filter_tag" data-i18n-ph="rep_filter_tag.ph" placeholder="Filter: Tag" style="flex:1">
-        <button class="sec" onclick="loadReports()" data-i18n="rep.filter.btn">Filtern</button>
+        <button class="sec" onclick="loadReports()" data-i18n="rep.filter.btn" data-i18n-title="rep.filter.tooltip" title="Apply filters and reload reports">Filtern</button>
       </div>
     </div>
     <div class="card" id="reports_list"></div>
@@ -398,9 +398,9 @@
           <b id="task_m_title"></b>
           <div id="task_m_meta" class="muted" style="margin-top:6px;font-size:12px"></div>
         </div>
-        <button class="sec" onclick="taskDetailEdit()" style="width:auto;padding:4px 10px" data-i18n="task.edit">Bearbeiten</button>
-        <button class="sec" onclick="taskDeleteFromModal()" style="width:auto;padding:4px 10px;font-size:16px;background:var(--bad);color:#1a0606" data-i18n="task.delete.btn">Löschen</button>
-        <button class="sec" onclick="closeTaskModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
+        <button class="sec" onclick="taskDetailEdit()" style="width:auto;padding:4px 10px" data-i18n="task.edit" data-i18n-title="task.edit.tooltip" title="Edit this task">Bearbeiten</button>
+        <button class="sec" onclick="taskDeleteFromModal()" style="width:auto;padding:4px 10px;font-size:16px;background:var(--bad);color:#1a0606" data-i18n="task.delete.btn" data-i18n-title="task.delete.tooltip" title="Delete this task">Löschen</button>
+        <button class="sec" onclick="closeTaskModal()" style="width:auto;padding:4px 10px;font-size:16px" data-i18n-title="modal.close.tooltip" title="Close modal">✕</button>
       </div>
       <div id="task_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></div>
       <div id="task_m_edit" style="display:none;margin-top:12px">
@@ -428,8 +428,8 @@
           <b id="sop_m_title"></b>
           <div id="sop_m_meta" class="muted" style="margin-top:6px;font-size:12px"></div>
         </div>
-        <button class="sec" onclick="sopDetailEdit()" style="width:auto;padding:4px 10px" data-i18n="task.edit">Bearbeiten</button>
-        <button class="sec" onclick="closeSOPModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
+        <button class="sec" onclick="sopDetailEdit()" style="width:auto;padding:4px 10px" data-i18n="task.edit" data-i18n-title="task.edit.tooltip" title="Edit this SOP">Bearbeiten</button>
+        <button class="sec" onclick="closeSOPModal()" style="width:auto;padding:4px 10px;font-size:16px" data-i18n-title="modal.close.tooltip" title="Close modal">✕</button>
       </div>
       <pre id="sop_m_body" style="margin-top:12px;line-height:1.6;overflow-wrap:break-word;white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace"></pre>
       <div id="sop_m_edit" style="display:none;margin-top:12px">
@@ -462,9 +462,9 @@
         <b id="files_viewer_name"></b>
         <span class="muted" id="files_viewer_size"></span>
         <span style="flex:1"></span>
-        <button class="sec" onclick="fileDownload()" style="width:auto;padding:6px 12px" data-i18n="file.download">Download</button>
-        <button class="sec" onclick="fileEdit()" style="width:auto;padding:6px 12px" data-i18n="file.edit">Bearbeiten</button>
-        <button class="sec" onclick="fileCloseViewer()" style="width:auto;padding:6px 12px">×</button>
+        <button class="sec" onclick="fileDownload()" style="width:auto;padding:6px 12px" data-i18n="file.download" data-i18n-title="file.download.tooltip" title="Download this file">Download</button>
+        <button class="sec" onclick="fileEdit()" style="width:auto;padding:6px 12px" data-i18n="file.edit" data-i18n-title="file.edit.tooltip" title="Edit this file">Bearbeiten</button>
+        <button class="sec" onclick="fileCloseViewer()" style="width:auto;padding:6px 12px" data-i18n-title="modal.close.tooltip" title="Close viewer">×</button>
       </div>
       <pre id="files_viewer_content" style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow-y:auto;font:13px/1.4 ui-monospace,monospace;background:var(--chip);padding:10px;border-radius:8px;border:1px solid var(--line)"></pre>
     </div>
@@ -475,8 +475,8 @@
         <div class="row" style="align-items:center;margin-bottom:8px">
           <b id="file_editor_name"></b>
           <span style="flex:1"></span>
-          <button class="sec" onclick="fileSave()" style="width:auto;padding:6px 12px" data-i18n="file.save">Speichern</button>
-          <button class="sec" onclick="fileCloseEditor()" style="width:auto;padding:6px 12px" data-i18n="file.cancel">Abbrechen</button>
+          <button class="sec" onclick="fileSave()" style="width:auto;padding:6px 12px" data-i18n="file.save" data-i18n-title="file.save.tooltip" title="Save changes to file">Speichern</button>
+          <button class="sec" onclick="fileCloseEditor()" style="width:auto;padding:6px 12px" data-i18n="file.cancel" data-i18n-title="file.cancel.tooltip" title="Cancel editing and close">Abbrechen</button>
         </div>
         <textarea id="file_editor_content" style="width:100%;height:70vh;box-sizing:border-box;font:13px/1.4 ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical"></textarea>
       </div>
@@ -492,7 +492,7 @@
         <input type="number" id="sop_order" value="0" data-i18n-ph="sop_order.ph" placeholder="Reihenfolge (Order)">
         <input id="sop_owner" data-i18n-ph="sop_owner.ph" placeholder="Owner (optional)">
       </div>
-      <div class="actions"><button onclick="sopNew()" data-i18n="sop.create">Erstellen</button></div>
+      <div class="actions"><button onclick="sopNew()" data-i18n="sop.create" data-i18n-title="sop.create.tooltip" title="Create a new SOP fragment">Erstellen</button></div>
     </div>
     <div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
       <span class="muted" data-i18n="filter.label">Filter:</span>
@@ -507,7 +507,7 @@
         <option value="order" selected data-i18n="sopf_sort.order">Order</option>
         <option value="slug" data-i18n="sopf_sort.slug">Slug</option>
       </select>
-      <button class="sec" onclick="sopReload()" data-i18n="sop.reload">🔄 SOPs neu laden</button>
+      <button class="sec" onclick="sopReload()" data-i18n="sop.reload" data-i18n-title="sop.reload.tooltip" title="Broadcast reload command to all ships to refresh SOP index">🔄 SOPs neu laden</button>
     </div>
     <div class="card" id="soplist"></div>
   </section>
@@ -535,7 +535,7 @@
           <option value="200" selected>200</option>
           <option value="1000">1000</option>
         </select>
-        <button class="sec" onclick="loadOCLog()" style="width:auto;padding:4px 10px" data-i18n="sess.refresh">Aktualisieren</button>
+        <button class="sec" onclick="loadOCLog()" style="width:auto;padding:4px 10px" data-i18n="sess.refresh" data-i18n-title="sess.refresh.tooltip" title="Refresh opencode log">Aktualisieren</button>
       </div>
       <pre id="oclog_content" style="margin:8px 0 0;max-height:40vh;overflow-y:auto;font:12px/1.4 ui-monospace,monospace;background:var(--chip);padding:8px;border-radius:6px;border:1px solid var(--line)" data-i18n="sess.loading">Lade…</pre>
     </div>
@@ -551,8 +551,8 @@
             <option value="50" data-i18n="sess.last50">letzte 50</option>
             <option value="200" data-i18n="sess.last200">letzte 200</option>
           </select>
-          <button class="sec" onclick="loadSessTranscript()" style="width:auto;padding:4px 10px;font-size:14px">↻</button>
-          <button class="sec" onclick="closeSessModal()" style="width:auto;padding:4px 10px;font-size:16px">✕</button>
+          <button class="sec" onclick="loadSessTranscript()" style="width:auto;padding:4px 10px;font-size:14px" data-i18n-title="sess.reload.tooltip" title="Refresh transcript">↻</button>
+          <button class="sec" onclick="closeSessModal()" style="width:auto;padding:4px 10px;font-size:16px" data-i18n-title="modal.close.tooltip" title="Close modal">✕</button>
         </div>
       </div>
       <div id="sess_m_meta" class="muted" style="margin-top:4px;font-size:12px"></div>
@@ -570,12 +570,12 @@
       <span class="pill" id="ship_state"></span>
       <span class="pill" id="ship_model" style="font-size:11px"></span>
       <select id="ship_model_switch" style="font-size:11px;width:auto;max-width:160px;margin-left:6px;display:none"></select>
-      <button class="sec" id="ship_model_btn" style="font-size:11px;padding:3px 8px;display:none" onclick="shipSwitchModel()" data-i18n="ship.switch">Switch</button>
+      <button class="sec" id="ship_model_btn" style="font-size:11px;padding:3px 8px;display:none" onclick="shipSwitchModel()" data-i18n="ship.switch" data-i18n-title="ship.switch.tooltip" title="Switch model for this ship">Switch</button>
       <span style="flex:1"></span>
-      <span class="pill" onclick="shipToggleTerminal()" id="ship_term_btn" data-i18n="term.toggle">Terminal</span>
-      <span class="pill" onclick="shipToggleX11Term()" id="ship_x11term_btn" data-i18n="term.x11toggle">X11-Term</span>
-      <span class="pill" style="background:#c33;color:#fff;cursor:pointer" onclick="shipStop()" data-i18n="ship.stop">Stop</span>
-      <button class="x" onclick="history.back()">×</button>
+      <span class="pill" onclick="shipToggleTerminal()" id="ship_term_btn" data-i18n="term.toggle" data-i18n-title="term.toggle.tooltip" title="Toggle terminal visibility">Terminal</span>
+      <span class="pill" onclick="shipToggleX11Term()" id="ship_x11term_btn" data-i18n="term.x11toggle" data-i18n-title="term.x11toggle.tooltip" title="Toggle X11 terminal visibility">X11-Term</span>
+      <span class="pill" style="background:#c33;color:#fff;cursor:pointer" onclick="shipStop()" data-i18n="ship.stop" data-i18n-title="ship.stop.tooltip" title="Stop this ship">Stop</span>
+      <button class="x" onclick="history.back()" data-i18n-title="modal.close.tooltip" title="Close">×</button>
     </header>
     <div class="body">
       <div class="card">
