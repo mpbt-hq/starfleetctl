@@ -758,9 +758,10 @@ func runPurge(root string, args []string) int {
 // to the flagship; any other value commissions that specific ship. noPush
 // suppresses the git push (local-only capture) — used by the web UI so a LAN
 // viewer never blocks on a (possibly offline) remote. category is the dashboard
-// topic category (default "active"). Returns the exit code (0 == ok) and any
+// topic category (default "active"). createdBy is the identity of the task
+// creator (e.g. web server's ShipID). Returns the exit code (0 == ok) and any
 // fatal error.
-func RunCaptureOnly(root, title, desc, assign, category string, noPush bool) (int, error) {
+func RunCaptureOnly(root, title, desc, assign, category, createdBy string, noPush bool) (int, error) {
 	args := []string{"--title", title}
 	if desc != "" {
 		args = append(args, "--desc", desc)
@@ -779,7 +780,19 @@ func RunCaptureOnly(root, title, desc, assign, category string, noPush bool) (in
 	if noPush {
 		args = append(args, "--no-push")
 	}
+	// Pass createdBy via environment variable so runCapture -> buildTopicFile can use it
+	oldEnv := os.Getenv("STARFLEET_SHIP_ID")
+	if createdBy != "" {
+		_ = os.Setenv("STARFLEET_SHIP_ID", createdBy)
+	}
 	code := runCapture(root, args)
+	if createdBy != "" {
+		if oldEnv != "" {
+			_ = os.Setenv("STARFLEET_SHIP_ID", oldEnv)
+		} else {
+			_ = os.Unsetenv("STARFLEET_SHIP_ID")
+		}
+	}
 	if code != 0 {
 		return code, fmt.Errorf("task capture exited with code %d", code)
 	}

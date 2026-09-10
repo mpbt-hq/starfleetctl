@@ -110,7 +110,7 @@ func Run(root string, args []string) int {
 		}
 		desc := buildDesc(f)
 		title := "[logscan] " + f.Title
-		code, err := task.RunCaptureOnly(root, title, desc, "", "active", noPush)
+		code, err := task.RunCaptureOnly(root, title, desc, "", "active", "logscan", noPush)
 		// task capture refuses duplicate slugs and commits the topic locally
 		// even when the dashboard's push/pull --rebase fails (e.g. no git
 		// upstream configured). The reliable success check is whether the

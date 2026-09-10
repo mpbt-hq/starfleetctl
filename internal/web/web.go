@@ -1011,7 +1011,7 @@ func (s *Server) apiTask(w http.ResponseWriter, r *http.Request) {
 		}
 		code, err = task.RunAssignOnly(s.Root, p.Slug, ship, noPush)
 	case p.Title != "":
-		code, err = task.RunCaptureOnly(s.Root, p.Title, p.Desc, assign, p.Category, noPush)
+		code, err = task.RunCaptureOnly(s.Root, p.Title, p.Desc, assign, p.Category, s.bus.ShipID, noPush)
 	default:
 		writeErr(w, 400, "need title (capture) or slug+status / slug+assign / slug(unassign)")
 		return
