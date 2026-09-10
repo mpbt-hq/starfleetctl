@@ -507,6 +507,7 @@
         <option value="order" selected data-i18n="sopf_sort.order">Order</option>
         <option value="slug" data-i18n="sopf_sort.slug">Slug</option>
       </select>
+      <button class="sec" onclick="sopReload()" data-i18n="sop.reload">🔄 SOPs neu laden</button>
     </div>
     <div class="card" id="soplist"></div>
   </section>
@@ -686,7 +687,7 @@ const I18N = {
     'sop.new': 'Neues SOP', 'sop_slug.ph': 'Slug (z.B. project/my-sop)',
     'sop_title.ph': 'Titel', 'sop_order.ph': 'Reihenfolge (Order)',
     'sop_owner.ph': 'Owner (optional)', 'sop.starfleet': 'Starfleet-Instructions (installiert in .starfleet-ai/var/sop.d/starfleet-instructions/)',
-    'sop.create': 'Erstellen', 'sop_body.ph': 'Body (Markdown)...',
+    'sop.create': 'Erstellen', 'sop.reload': '🔄 SOPs neu laden', 'sop.reload.done': 'SOPs neu geladen', 'sop_body.ph': 'Body (Markdown)...',
     'sopf_cat.all': 'Kategorie: alle', 'sopf_sort.order': 'Order', 'sopf_sort.slug': 'Slug',
     'sess.title': 'opencode-Sitzungen', 'sess_filter.ph': 'Filter: Schiff',
     'sess.agent.all': 'alle Modes',
@@ -804,7 +805,7 @@ const I18N = {
     'sop.new': 'New SOP', 'sop_slug.ph': 'Slug (e.g. project/my-sop)',
     'sop_title.ph': 'Title', 'sop_order.ph': 'Order',
     'sop_owner.ph': 'Owner (optional)', 'sop.starfleet': 'Starfleet-Instructions (installed in .starfleet-ai/var/sop.d/starfleet-instructions/)',
-    'sop.create': 'Create', 'sop_body.ph': 'Body (Markdown)...',
+    'sop.create': 'Create', 'sop.reload': '🔄 Reload SOPs', 'sop.reload.done': 'SOPs reloaded', 'sop_body.ph': 'Body (Markdown)...',
     'sopf_cat.all': 'Category: all', 'sopf_sort.order': 'Order', 'sopf_sort.slug': 'Slug',
     'sess.title': 'opencode sessions', 'sess_filter.ph': 'Filter: ship',
     'sess.agent.all': 'all modes',
@@ -1078,6 +1079,17 @@ async function sopDetailSave(){
 
 async function sopEdit(slug){
   sopDetail(slug);
+}
+
+async function sopReload(){
+  try {
+    const r = await api('/api/sop/reload', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({})});
+    toast(t('sop.reload.done'));
+    loadSOPs();
+  } catch(e){
+    toast(t('err.prefix')+esc(e.message), true);
+  }
 }
 
 // --- Files tab ---

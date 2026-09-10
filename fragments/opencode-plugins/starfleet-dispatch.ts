@@ -174,10 +174,10 @@ export const plugin = async ({ client, $ }: any) => {
   // Returns true if the message was handled (should NOT be injected as system prompt).
   // Lives in the plugin closure because it needs client, currentModel,
   // currentSessionID, resolveSessionId and toastBus.
-  function handleMessage(
+  async function handleMessage(
     msg: { id: string; from: string; text: string; type?: string },
     client: any, sessionID: string,
-  ): boolean {
+  ): Promise<boolean> {
     const text = msg.text.trim()
 
     // Helper: resolve session ID, trying cache, closure, then fresh discovery
@@ -371,6 +371,32 @@ export const plugin = async ({ client, $ }: any) => {
             const src = `[command toast from=${msg.from}]`
             tickLog(`${src}: ${variant} "${title}"`)
             bus({ cmd: 'toast', variant, title, message, duration })
+            return true
+          }
+          case 'sop-reload': {
+            // Clear session so the ship restarts and reloads the SOP index on next startup
+            const src = `[command sop-reload from=${msg.from}]`
+            tickLog(`${src}: clearing session for SOP reload`)
+            toastBus('info', 'starfleet-dispatch', 'SOP reload requested — session will restart', 5000)
+            const sid = await resolveSid()
+            if (!sid) { tickLog(`${src}: no session ID`); return true }
+            const clearMethod = client.session.clear || client.session.reset
+            if (clearMethod) {
+              clearMethod({ path: { id: sid } })
+                .then(() => {
+                  tickLog(`${src}: ok`)
+                  toastBus('success', 'starfleet-dispatch', 'Session cleared — SOP index will reload on restart', 5000)
+                  bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+                })
+                .catch((e: any) => {
+                  const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
+                  tickLog(emsg)
+                  toastBus('error', 'starfleet-dispatch', emsg, 8000)
+                })
+            } else {
+              tickLog(`${src}: no clear/reset method available`)
+              toastBus('error', 'starfleet-dispatch', 'No session clear/reset method', 5000)
+            }
             return true
           }
           default: {

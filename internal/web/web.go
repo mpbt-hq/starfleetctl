@@ -129,8 +129,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/files", s.apiFileList)
 	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
 	s.mux.HandleFunc("/api/files/save", s.apiFileSave)
-	s.mux.HandleFunc("/api/sop", s.apiSOPList)      // GET list
-	s.mux.HandleFunc("/api/sop/", s.apiSOPDispatch) // GET/POST /api/sop/<slug>
+	s.mux.HandleFunc("/api/sop", s.apiSOPList)          // GET list
+	s.mux.HandleFunc("/api/sop/", s.apiSOPDispatch)     // GET/POST /api/sop/<slug>
+	s.mux.HandleFunc("/api/sop/reload", s.apiSOPReload) // POST broadcast reload
 	s.mux.HandleFunc("/api/reports", s.apiReports)
 	s.mux.HandleFunc("/api/reports/", s.apiReportDispatch)
 	s.mux.HandleFunc("/api/sessions", s.apiSessions)
@@ -806,6 +807,24 @@ func (s *Server) apiSOPUpdate(w http.ResponseWriter, r *http.Request, slug strin
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "slug": slug})
+}
+
+// apiSOPReload broadcasts a command to all ships to reload their SOP index.
+// This is called after SOP changes so ships pick up the updated index on next session restart.
+func (s *Server) apiSOPReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	// Broadcast a command to all ships to reload SOPs
+	// The plugin handles "sop-reload" command by clearing the session so the ship restarts
+	// and reloads the SOP index on next startup.
+	_, err := s.bus.Command("all", "sop-reload", "")
+	if err != nil {
+		writeErr(w, 500, "broadcast failed: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "message": "SOP reload command broadcasted to all ships"})
 }
 
 // apiIdentity reports the web server's own fleet identity (what the bus sees
