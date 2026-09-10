@@ -188,21 +188,35 @@ func writeTopicFile(path string, m TopicMeta, body string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Title: %s\n", quoteYAML(m.Title))
 	fmt.Fprintf(&b, "Category: %s\n", m.Category)
-	if m.Category == "parked" {
-		fmt.Fprintf(&b, "Noted-By: %s\n", quoteYAML(m.NotedBy))
-		fmt.Fprintf(&b, "Since: %s\n", quoteYAML(m.Since))
-		if m.Resolved != "" {
-			fmt.Fprintf(&b, "Resolved: %s\n", quoteYAML(m.Resolved))
-		}
-	} else {
-		if m.Kind != "" {
-			fmt.Fprintf(&b, "Kind: %s\n", quoteYAML(m.Kind))
-		}
+
+	// Write all non-empty fields regardless of category.
+	// Category determines expected fields, but we preserve whatever is set.
+	if m.Kind != "" {
+		fmt.Fprintf(&b, "Kind: %s\n", quoteYAML(m.Kind))
+	}
+	if m.Status != "" {
 		fmt.Fprintf(&b, "Status: %s\n", quoteYAML(m.Status))
+	}
+	if m.AssignedTo != "" {
 		fmt.Fprintf(&b, "Assigned-To: %s\n", quoteYAML(m.AssignedTo))
+	}
+	if m.CreatedBy != "" {
 		fmt.Fprintf(&b, "Created-By: %s\n", quoteYAML(m.CreatedBy))
+	}
+	if m.Created != "" {
 		fmt.Fprintf(&b, "Created: %s\n", quoteYAML(m.Created))
+	}
+	if m.DocRef != "" {
 		fmt.Fprintf(&b, "Doc-Ref: %s\n", quoteYAML(m.DocRef))
+	}
+	if m.NotedBy != "" {
+		fmt.Fprintf(&b, "Noted-By: %s\n", quoteYAML(m.NotedBy))
+	}
+	if m.Since != "" {
+		fmt.Fprintf(&b, "Since: %s\n", quoteYAML(m.Since))
+	}
+	if m.Resolved != "" {
+		fmt.Fprintf(&b, "Resolved: %s\n", quoteYAML(m.Resolved))
 	}
 	if m.MigratedFrom != "" {
 		fmt.Fprintf(&b, "Migrated-From: %s\n", m.MigratedFrom)
