@@ -2529,10 +2529,12 @@ document.addEventListener('keydown', function(e){
     const repModal = document.getElementById('rep_modal');
     const taskModal = document.getElementById('task_modal');
     const sopModal = document.getElementById('sop_modal');
+    const fileEditorModal = document.getElementById('file_editor_modal');
     const shipModal = document.getElementById('ship_overlay');
     if (repModal && repModal.style.display !== 'none') closeRepModal();
     else if (taskModal && taskModal.style.display !== 'none') closeTaskModal();
     else if (sopModal && sopModal.style.display !== 'none') closeSOPModal();
+    else if (fileEditorModal && fileEditorModal.style.display !== 'none') fileCloseEditor();
     else if (shipModal && shipModal.style.display !== 'none') history.back();
   }
 });
