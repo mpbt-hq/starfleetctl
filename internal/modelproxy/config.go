@@ -187,7 +187,7 @@ func Load(root string) (*Config, error) {
 			prov.RetryDelayMS = 1000
 		}
 		prov.HoldTimeoutMS = p.HoldTimeoutMS
-		if prov.HoldTimeoutMS <= 0 {
+		if prov.HoldTimeoutMS < 0 {
 			prov.HoldTimeoutMS = 15000 // 15s default hold timeout
 		}
 		prov.Type = strings.TrimSpace(p.Type)

@@ -413,13 +413,18 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 	var lastErr error
 	retries := 0
 	writeHeaders := true
+	skipSaturationWait := false // skip waitForSaturationGate after recording saturation for retry
 	for attempt := 1; attempt <= attempts; attempt++ {
-		// Wait for saturation gate (global cooldown per provider)
-		if !p.waitForSaturationGate(r.Context(), prov.ID) {
-			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
-			writeErr(w, 503, fmt.Sprintf("provider %s saturated, request cancelled", prov.ID))
-			return
+		// Wait for saturation gate (global cooldown per provider), unless we just
+		// recorded saturation and are about to retry (we already slept RetryDelayMS)
+		if !skipSaturationWait {
+			if !p.waitForSaturationGate(r.Context(), prov.ID) {
+				p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
+				writeErr(w, 503, fmt.Sprintf("provider %s saturated, request cancelled", prov.ID))
+				return
+			}
 		}
+		skipSaturationWait = false // reset for next iteration
 
 		upstreamReq, _, err := buildReq()
 		if err != nil {
@@ -450,6 +455,7 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			if attempt < attempts && (transientStatus(resp.StatusCode) || isSaturation) {
 				if isSaturation {
 					p.recordSaturation(prov, resp)
+					skipSaturationWait = true // we're about to sleep RetryDelayMS, skip next waitForSaturationGate
 				}
 				p.logf("%s/%s: transient HTTP %d (attempt %d/%d): %.300s — retrying", ship, prov.ID, resp.StatusCode, attempt, attempts, string(errBody))
 				retries++
@@ -532,10 +538,16 @@ func (p *Proxy) waitForSaturationGate(ctx context.Context, provID string) bool {
 	if st == nil {
 		return true
 	}
+	wait := time.Until(st.cooldownUntil)
+	if wait <= 0 {
+		return true
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return false
-	case <-time.After(time.Until(st.cooldownUntil)):
+	case <-timer.C:
 		return true
 	}
 }
@@ -584,7 +596,7 @@ func (p *Proxy) clearSaturation(provID string) {
 }
 
 // pipeSSE copies an SSE stream from the upstream response to the client,
-// / forwarding headers and catching a premature close (EOF without a [DONE]
+// forwarding headers and catching a premature close (EOF without a [DONE]
 // sentinel) with a clean error event so the client sees a structured failure
 // instead of a truncated stream. It returns the accumulated token usage (from
 // trailing usage chunks), whether the stream failed, and whether it aborted
@@ -631,117 +643,177 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 	inKeepalive := false
 	keepaliveStart := time.Time{}
 
-	for sc.Scan() {
-		line := sc.Text()
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "data:") {
-			payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
-			if payload == "[DONE]" {
-				sawDone = true
-			} else if strings.HasPrefix(payload, "{") && strings.Contains(payload, "\"error\"") {
-				// A streamed error event. Before any content chunk a retryable
-				// overload/rate-limit error is aborted for a clean retry;
-				// everything else is passed through and remembered so we don't
-				// append our own error on EOF.
-				if !sawContent && canRetry && retryableErrorText(payload) {
-					return nil, true, true
+	// Channel for scanner results
+	type scanResult struct {
+		line string
+		err  error
+	}
+	scanCh := make(chan scanResult, 1)
+	go func() {
+		for sc.Scan() {
+			scanCh <- scanResult{line: sc.Text(), err: nil}
+		}
+		scanCh <- scanResult{line: "", err: sc.Err()}
+		close(scanCh)
+	}()
+
+	// Keepalive ticker
+	var keepaliveTicker *time.Ticker
+	stopKeepalive := make(chan struct{})
+
+	for {
+		select {
+		case result, ok := <-scanCh:
+			if !ok {
+				// Scanner finished
+				if inKeepalive {
+					p.logf("%s/%s: stream ended during keepalive hold, relaying saturation error", ship, prov.ID)
+					evt := map[string]any{"error": map[string]any{
+						"message": saturationErrorPayload,
+						"code":    "rate_limit_exceeded",
+					}}
+					raw, _ := json.Marshal(evt)
+					_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
+					_, _ = io.WriteString(w, "data: [DONE]\n\n")
+					if flusher != nil {
+						flusher.Flush()
+					}
+					if keepaliveTicker != nil {
+						keepaliveTicker.Stop()
+					}
+					return usage, true, false
 				}
-				// Saturation error after retry budget exhausted: enter keepalive hold
-				if !sawContent && !canRetry && retryableErrorText(payload) {
-					saturationErrorPayload = payload
-					inKeepalive = true
-					keepaliveStart = time.Now()
-					// Don't write the error yet; start keepalive
+				if !sawDone && !sawError {
+					// The upstream ended without the [DONE] sentinel and without a
+					// structured error event — i.e. a truncated/aborted stream (conn
+					// reset, overload kill, ...) or an empty 200. Emit a structured
+					// error event so opencode's error handling can act on it rather than
+					// silently continuing with half a response.
+					p.logf("stream ended without [DONE] (err=%v) — emitting error event", result.err)
+					evt := map[string]any{"error": map[string]any{
+						"message": "model-proxy: upstream stream interrupted before [DONE]",
+						"code":    "stream_interrupted",
+					}}
+					raw, _ := json.Marshal(evt)
+					_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
+					_, _ = io.WriteString(w, "data: [DONE]\n\n")
+					if flusher != nil {
+						flusher.Flush()
+					}
+					if keepaliveTicker != nil {
+						keepaliveTicker.Stop()
+					}
+					return usage, true, false
+				}
+				if keepaliveTicker != nil {
+					keepaliveTicker.Stop()
+				}
+				return usage, false, false
+			}
+
+			line := result.line
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "data:") {
+				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+				if payload == "[DONE]" {
+					sawDone = true
+					// Stop keepalive if running
+					if keepaliveTicker != nil {
+						keepaliveTicker.Stop()
+					}
+					close(stopKeepalive)
+				} else if strings.HasPrefix(payload, "{") && strings.Contains(payload, "\"error\"") {
+					// A streamed error event. Before any content chunk a retryable
+					// overload/rate-limit error is aborted for a clean retry;
+					// everything else is passed through and remembered so we don't
+					// append our own error on EOF.
+					if !sawContent && canRetry && retryableErrorText(payload) {
+						if keepaliveTicker != nil {
+							keepaliveTicker.Stop()
+						}
+						return nil, true, true
+					}
+					// Saturation error after retry budget exhausted: enter keepalive hold
+					if !sawContent && !canRetry && retryableErrorText(payload) {
+						saturationErrorPayload = payload
+						inKeepalive = true
+						keepaliveStart = time.Now()
+						// Start keepalive ticker
+						keepaliveTicker = time.NewTicker(3 * time.Second)
+						go func() {
+							for {
+								select {
+								case <-keepaliveTicker.C:
+									if !inKeepalive {
+										return
+									}
+									elapsed := time.Since(keepaliveStart)
+									if elapsed >= time.Duration(prov.HoldTimeoutMS)*time.Millisecond {
+										// Keepalive timeout reached — emit the buffered saturation error
+										p.logf("%s/%s: keepalive hold timeout (%dms) reached, relaying saturation error", ship, prov.ID, prov.HoldTimeoutMS)
+										evt := map[string]any{"error": map[string]any{
+											"message": saturationErrorPayload,
+											"code":    "rate_limit_exceeded",
+										}}
+										raw, _ := json.Marshal(evt)
+										_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
+										_, _ = io.WriteString(w, "data: [DONE]\n\n")
+										if flusher != nil {
+											flusher.Flush()
+										}
+										inKeepalive = false
+										sawDone = true
+										sawError = true
+										keepaliveTicker.Stop()
+										close(stopKeepalive)
+										return
+									}
+									// Send keepalive comment
+									_, _ = io.WriteString(w, ": keepalive\n\n")
+									if flusher != nil {
+										flusher.Flush()
+									}
+								case <-stopKeepalive:
+									keepaliveTicker.Stop()
+									return
+								}
+							}
+						}()
+						// Don't write the error yet; start keepalive
+						continue
+					}
+					sawError = true
+					_, _ = io.WriteString(w, line+"\n\n")
+					if flusher != nil {
+						flusher.Flush()
+					}
 					continue
+				} else if strings.HasPrefix(payload, "{") {
+					if strings.Contains(payload, "\"choices\"") {
+						sawContent = true
+					}
+					// Upstreams (notably NIM) repeat the usage block on several
+					// trailing chunks with a growing counter — the last one holds
+					// the final values, so last-wins instead of accumulating.
+					if u := extractStreamUsage([]byte(payload)); u != nil {
+						usage = u
+					}
 				}
-				sawError = true
-				_, _ = io.WriteString(w, line+"\n\n")
+			}
+			_, _ = io.WriteString(w, line+"\n")
+			if strings.TrimSpace(line) == "" {
 				if flusher != nil {
 					flusher.Flush()
 				}
-				continue
-			} else if strings.HasPrefix(payload, "{") {
-				if strings.Contains(payload, "\"choices\"") {
-					sawContent = true
-				}
-				// Upstreams (notably NIM) repeat the usage block on several
-				// trailing chunks with a growing counter — the last one holds
-				// the final values, so last-wins instead of accumulating.
-				if u := extractStreamUsage([]byte(payload)); u != nil {
-					usage = u
-				}
 			}
-		}
-		_, _ = io.WriteString(w, line+"\n")
-		if strings.TrimSpace(line) == "" {
-			if flusher != nil {
-				flusher.Flush()
+		case <-stopKeepalive:
+			if keepaliveTicker != nil {
+				keepaliveTicker.Stop()
 			}
-		}
-
-		// Handle keepalive: send ": keepalive\n\n" every 3s until HoldTimeoutMS
-		if inKeepalive && flusher != nil {
-			elapsed := time.Since(keepaliveStart)
-			if elapsed >= time.Duration(prov.HoldTimeoutMS)*time.Millisecond {
-				// Keepalive timeout reached — emit the buffered saturation error
-				p.logf("%s/%s: keepalive hold timeout (%dms) reached, relaying saturation error", ship, prov.ID, prov.HoldTimeoutMS)
-				evt := map[string]any{"error": map[string]any{
-					"message": saturationErrorPayload,
-					"code":    "rate_limit_exceeded",
-				}}
-				raw, _ := json.Marshal(evt)
-				_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
-				_, _ = io.WriteString(w, "data: [DONE]\n\n")
-				flusher.Flush()
-				inKeepalive = false
-				sawDone = true
-				sawError = true
-				break
-			} else if elapsed >= 3*time.Second {
-				// Send keepalive comment every 3s
-				_, _ = io.WriteString(w, ": keepalive\n\n")
-				flusher.Flush()
-				keepaliveStart = time.Now() // reset for next interval
-			}
+			// Continue to drain scanner if needed
+			continue
 		}
 	}
-
-	// If we exited the scan loop while in keepalive, emit the error
-	if inKeepalive {
-		p.logf("%s/%s: stream ended during keepalive hold, relaying saturation error", ship, prov.ID)
-		evt := map[string]any{"error": map[string]any{
-			"message": saturationErrorPayload,
-			"code":    "rate_limit_exceeded",
-		}}
-		raw, _ := json.Marshal(evt)
-		_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return usage, true, false
-	}
-
-	if !sawDone && !sawError {
-		// The upstream ended without the [DONE] sentinel and without a
-		// structured error event — i.e. a truncated/aborted stream (conn
-		// reset, overload kill, ...) or an empty 200. Emit a structured
-		// error event so opencode's error handling can act on it rather than
-		// silently continuing with half a response.
-		p.logf("stream ended without [DONE] (err=%v) — emitting error event", sc.Err())
-		evt := map[string]any{"error": map[string]any{
-			"message": "model-proxy: upstream stream interrupted before [DONE]",
-			"code":    "stream_interrupted",
-		}}
-		raw, _ := json.Marshal(evt)
-		_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return usage, true, false
-	}
-	return usage, false, false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
