@@ -36,6 +36,7 @@ type LaunchVars struct {
 	Parent     string // ship this one was launched under ("" = flagship)
 	Provider   string // model provider (derived from Model when empty)
 	Model      string // model id (opencode --model value)
+	Class      string // ship class/role
 }
 
 // runLaunch implements `session run <release> [flags...] [-- <args...>]`.
@@ -126,6 +127,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 	model := ""
 	parent := ""
 	launchType := "background"
+	class := ""
 	var clientArgs []string
 
 	for len(args) > 0 {
@@ -177,6 +179,12 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 				return nil, fmt.Errorf("session run: --launch-type needs a value")
 			}
 			launchType = args[1]
+		case "--class":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --class needs a value")
+			}
+			class = args[1]
+			args = args[2:]
 			args = args[2:]
 		case "--":
 			args = args[1:]
@@ -272,7 +280,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		// Generate per-ship temp opencode config for local/terminal ships too.
 		// Local ships use "ask" as default (matching old terminal.json behavior),
 		// not "deny" like background ships.
-		opencodeConfigPath, err := generateOpencodeConfig(root, shipID, "terminal", false, model)
+		opencodeConfigPath, err := generateOpencodeConfig(root, shipID, "terminal", false, model, "")
 		if err != nil {
 			return nil, fmt.Errorf("generate opencode config: %w", err)
 		}
@@ -307,6 +315,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		Parent:      parent,
 		Provider:    providerFromModel(model),
 		Model:       model,
+		Class:       class,
 	}, nil
 }
 
@@ -336,6 +345,7 @@ Flags:
                        spawned by another AI lists that ship as parent.
   --launch-type <t>   how the ship was started: "terminal" (direct at a terminal),
                        "background" (detached, the default here), or "auto" (web/timer).
+  --class <class>       ship class/role (e.g. scout, worker, flagship)
   --unrestricted      unrestricted permissions (allow all, bypass ask/deny)
 
 Task assignment:
@@ -354,6 +364,7 @@ Example:
 	model := ""
 	parent := ""
 	launchType := "background"
+	class := ""
 	unrestricted := false
 	var oaArgs []string
 	for len(args) > 0 {
@@ -386,6 +397,13 @@ Example:
 			}
 			launchType = args[1]
 			args = args[2:]
+		case "--class":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --class needs a value")
+				return 2
+			}
+			class = args[1]
+			args = args[2:]
 		case "--unrestricted":
 			unrestricted = true
 			args = args[1:]
@@ -411,6 +429,7 @@ Example:
 		Parent:       parent,
 		LaunchType:   launchType,
 		ExtraArgs:    oaArgs,
+		Class:        class,
 		Unrestricted: unrestricted,
 	})
 	if err != nil {
@@ -429,6 +448,7 @@ Example:
 type LaunchShipOpts struct {
 	Name         string   // explicit ship ID; empty => next free name
 	Model        string   // opencode --model value (provider derived from it)
+	Class        string   // ship class/role
 	Provider     string   // explicit provider override (when the model id has none)
 	Parent       string   // ship launched under; empty => flagship
 	LaunchType   string   // "terminal" | "background" | "auto"; empty => "background"
@@ -501,7 +521,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if err := validateModelAvailable(root, effectiveModel); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ model validation: %v\n", err)
 	}
-	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel)
+	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel, o.Class)
 	if err != nil {
 		return "", fmt.Errorf("generate opencode config: %w", err)
 	}
@@ -527,6 +547,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		Parent:      parent,
 		Provider:    o.Provider,
 		Model:       model,
+		Class:       o.Class,
 	}
 	if vars.Provider == "" {
 		vars.Provider = providerFromModel(model)
@@ -623,7 +644,7 @@ func opencodeConfigPath(root, shipID string) string {
 // generateOpencodeConfig creates a per-ship temp opencode config by merging
 // the user's provider config with launch-type-specific permissions and
 // starfleet-specific settings (plugin, instructions, username).
-func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, model string) (string, error) {
+func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, model, class string) (string, error) {
 	// Load starfleetctl config for provider_mode setting
 	cfg, err := config.Load(root)
 	if err != nil {
@@ -810,6 +831,7 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 	childEnv := append(os.Environ(),
 		"MPBT_WORKSPACE_ROOT="+root,
 		"STARFLEET_SHIP_ID="+vars.ShipID,
+		"STARFLEET_CLASS="+vars.Class,
 	)
 
 	// Open log file for child output (so it doesn't inherit parent's stdout/stderr

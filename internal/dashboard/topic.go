@@ -166,7 +166,7 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 				m.Created = val
 			case "doc_ref":
 				m.DocRef = val
-			case "noted_by":
+			case "noted-by":
 				m.NotedBy = val
 			case "since":
 				m.Since = val
@@ -220,7 +220,7 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 				m.Created = val
 			case "doc_ref", "doc-ref":
 				m.DocRef = val
-			case "noted_by":
+			case "noted-by":
 				m.NotedBy = val
 			case "since":
 				m.Since = val

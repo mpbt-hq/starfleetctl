@@ -47,6 +47,7 @@ type StatusRecord struct {
 	LaunchType string `json:"launch_type,omitempty"`
 	Parent     string `json:"parent,omitempty"`
 	Provider   string `json:"provider,omitempty"`
+	Class      string `json:"class,omitempty"`
 	Updated    string `json:"updated,omitempty"`
 	// Unattached indicates a working/building status without a task reference.
 	// Set when a ship reports working/building but provides neither --task nor --note.
@@ -67,6 +68,7 @@ type StatusPatch struct {
 	LaunchType   string
 	Parent       string
 	Provider     string
+	Class        string
 	Model        string
 	ToastVariant string
 	ToastTitle   string

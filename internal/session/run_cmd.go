@@ -173,7 +173,7 @@ func RunCmd(root string, args []string) int {
 	// OPENCODE_CONFIG_CONTENT. Terminal ships use "ask" for anything outside
 	// the workspace since a human is present at the console.
 	if client == "opencode" {
-		configPath, err := generateOpencodeConfig(root, shipID, "terminal", false, model)
+		configPath, err := generateOpencodeConfig(root, shipID, "terminal", false, model, "")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "run: generate opencode config:", err)
 			return 1

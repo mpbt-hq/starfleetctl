@@ -221,6 +221,7 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 		LaunchType:      prev.LaunchType,
 		Parent:          prev.Parent,
 		Provider:        prev.Provider,
+		Class:           prev.Class,
 		Updated:         prev.Updated,
 		// Auto-set Unattached: working/building without task or note
 		Unattached: (state == "working" || state == "building") && prev.Task == "" && clean(note) == "",
@@ -257,6 +258,9 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	}
 	if patch.Parent != "" {
 		rec.Parent = patch.Parent
+	}
+	if patch.Class != "" {
+		rec.Class = patch.Class
 	}
 	if patch.Provider != "" {
 		rec.Provider = patch.Provider

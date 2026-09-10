@@ -884,10 +884,37 @@ function setLang(l){
 }
 
 function show(p, push){
+  const wasStatus = document.querySelector('.page.on')?.id === 'status';
+  const nowStatus = p === 'status';
+
+  if (wasStatus && !nowStatus) {
+    stopBoardRefresh();
+  }
+
   document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on', s.id===p));
   document.querySelectorAll('#tabs .tab').forEach(t=>t.classList.toggle('on', t.dataset.p===p));
   if (push) history.pushState({tab:p, bus: curBus}, '');
   refresh();
+
+  if (nowStatus && !wasStatus) {
+    startBoardRefresh();
+  }
+}
+
+function startBoardRefresh(){
+  if (boardRefreshInterval) return;
+  boardRefreshInterval = setInterval(() => {
+    const cur = document.querySelector('.page.on')?.id;
+    if (cur === 'status') loadBoard();
+    else stopBoardRefresh();
+  }, 30000);
+}
+
+function stopBoardRefresh(){
+  if (boardRefreshInterval) {
+    clearInterval(boardRefreshInterval);
+    boardRefreshInterval = null;
+  }
 }
 function busTab(b, push){
   curBus = b;
@@ -896,6 +923,7 @@ function busTab(b, push){
   loadBus(b);
 }
 let curBus = 'msgs';
+let boardRefreshInterval = null;
 function toast(msg, err){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.toggle('err', !!err); t.classList.add('show');
@@ -2492,6 +2520,10 @@ applyI18n();
 loadIdentity().then(()=>{ refresh(); loadModels(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
+    // If the status tab is active, start the board refresh interval.
+    if (document.querySelector(".tab.on[data-p=\"status\"]")) {
+      startBoardRefresh();
+    }
 setInterval(()=>{ const c=document.querySelector('.page.on')?.id;
   if (c==='status'||c==='tasks'||c==='log'||c==='bus'||c==='talk'||c==='timers'||c==='reports'||c==='files'||c==='sessions') refresh();
   if (shipCurrent) {

@@ -77,7 +77,7 @@ func TestGenerateOpencodeConfigExternalDirectory(t *testing.T) {
 	// failure, agent can recover) while keeping the workspace + ~/.local/bin
 	// allowed.
 	for _, launchType := range []string{"background", "auto"} {
-		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "")
+		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "", "")
 		if err != nil {
 			t.Fatalf("generateOpencodeConfig(%q): %v", launchType, err)
 		}
@@ -94,7 +94,7 @@ func TestGenerateOpencodeConfigExternalDirectory(t *testing.T) {
 	}
 
 	// terminal ships: keep "ask" so the human at the console can decide.
-	cfgPath, err := generateOpencodeConfig(root, "TestShip", "terminal", false, "")
+	cfgPath, err := generateOpencodeConfig(root, "TestShip", "terminal", false, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(terminal): %v", err)
 	}
@@ -103,7 +103,7 @@ func TestGenerateOpencodeConfigExternalDirectory(t *testing.T) {
 	}
 
 	// unrestricted ships: allow everything.
-	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", true, "")
+	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", true, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(unrestricted): %v", err)
 	}
@@ -127,7 +127,7 @@ func TestGenerateOpencodeConfigWorkspaceTools(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	for _, launchType := range []string{"terminal", "background", "auto"} {
-		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "")
+		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "", "")
 		if err != nil {
 			t.Fatalf("generateOpencodeConfig(%q): %v", launchType, err)
 		}
@@ -149,7 +149,7 @@ func TestGenerateOpencodeConfigWorkspaceTools(t *testing.T) {
 	}
 
 	// unrestricted: workspace tools allowed, external allowed.
-	cfgPath, err := generateOpencodeConfig(root, "TestShip", "background", true, "")
+	cfgPath, err := generateOpencodeConfig(root, "TestShip", "background", true, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(unrestricted): %v", err)
 	}
@@ -171,7 +171,7 @@ func TestGenerateOpencodeConfigQuestionPermission(t *testing.T) {
 
 	// background/auto ships: question denied (no human at the terminal).
 	for _, launchType := range []string{"background", "auto"} {
-		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "")
+		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "", "")
 		if err != nil {
 			t.Fatalf("generateOpencodeConfig(%q): %v", launchType, err)
 		}
@@ -181,7 +181,7 @@ func TestGenerateOpencodeConfigQuestionPermission(t *testing.T) {
 	}
 
 	// terminal ships: no question rule (opencode default "ask" applies).
-	cfgPath, err := generateOpencodeConfig(root, "TestShip", "terminal", false, "")
+	cfgPath, err := generateOpencodeConfig(root, "TestShip", "terminal", false, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(terminal): %v", err)
 	}
@@ -191,7 +191,7 @@ func TestGenerateOpencodeConfigQuestionPermission(t *testing.T) {
 	}
 
 	// unrestricted: no question rule (allow everything).
-	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", true, "")
+	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", true, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(unrestricted): %v", err)
 	}
@@ -207,7 +207,7 @@ func TestGenerateOpencodeConfigQuestionPermission(t *testing.T) {
 func TestGenerateOpencodeConfigUsername(t *testing.T) {
 	root := t.TempDir()
 	for _, launchType := range []string{"terminal", "background", "auto"} {
-		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "")
+		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "", "")
 		if err != nil {
 			t.Fatalf("generateOpencodeConfig(%q): %v", launchType, err)
 		}
@@ -251,7 +251,7 @@ func TestGenerateOpencodeConfigEnabledProviders(t *testing.T) {
 	}
 
 	// Default mode ("all"): no allowlist — user providers are allowed.
-	cfgPath, err := generateOpencodeConfig(root, "TestShip", "background", false, "")
+	cfgPath, err := generateOpencodeConfig(root, "TestShip", "background", false, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(default): %v", err)
 	}
@@ -266,7 +266,7 @@ func TestGenerateOpencodeConfigEnabledProviders(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(confDir, "fleet.yaml"), []byte(fleetYaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", false, "")
+	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", false, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(model-proxy-only): %v", err)
 	}
