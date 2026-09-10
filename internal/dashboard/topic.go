@@ -121,70 +121,11 @@ func quoteYAML(v string) string {
 }
 
 // parseTopicFile splits a topic file into its frontmatter (parsed) and body.
-// Supports two formats:
-// 1. RFC2822-style: simple Key: Value headers ending with a blank line (preferred)
-// 2. YAML frontmatter: --- delimited block (legacy, for backward compat)
+// Supports RFC2822-style: simple Key: Value headers ending with a blank line.
 func parseTopicFile(data []byte) (TopicMeta, string, error) {
 	s := string(data)
 
-	// If file starts with "---", treat as YAML frontmatter (legacy)
-	if strings.HasPrefix(s, "---\n") {
-		rest := s[len("---\n"):]
-		idx := strings.Index(rest, "\n---\n")
-		if idx < 0 {
-			return TopicMeta{}, "", fmt.Errorf("unterminated frontmatter (no closing '---')")
-		}
-		fm := rest[:idx]
-		body := strings.TrimPrefix(rest[idx+len("\n---\n"):], "\n")
-
-		var m TopicMeta
-		for _, line := range strings.Split(fm, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			kv := strings.SplitN(line, ":", 2)
-			if len(kv) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(kv[0])
-			val := unquoteYAML(strings.TrimSpace(kv[1]))
-			switch key {
-			case "title":
-				m.Title = val
-			case "category":
-				m.Category = val
-			case "kind":
-				m.Kind = val
-			case "status":
-				m.Status = val
-			case "assigned-to":
-				m.AssignedTo = val
-			case "created-by":
-				m.CreatedBy = val
-			case "created":
-				m.Created = val
-			case "doc_ref":
-				m.DocRef = val
-			case "noted-by":
-				m.NotedBy = val
-			case "since":
-				m.Since = val
-			case "migrated_from":
-				m.MigratedFrom = val
-			case "tags":
-				m.Tags = val
-			case "resolved":
-				m.Resolved = val
-			}
-		}
-		if m.Category == "" {
-			m.Category = "active"
-		}
-		return m, body, nil
-	}
-
-	// Otherwise, try RFC2822-style: headers until blank line
+	// RFC2822-style: headers until blank line
 	idx := strings.Index(s, "\n\n")
 	if idx >= 0 {
 		headers := s[:idx]
@@ -240,7 +181,7 @@ func parseTopicFile(data []byte) (TopicMeta, string, error) {
 		}
 	}
 
-	return TopicMeta{}, "", fmt.Errorf("missing frontmatter (no YAML '---' and no RFC2822 headers)")
+	return TopicMeta{}, "", fmt.Errorf("missing frontmatter (no RFC2822 headers)")
 }
 
 func writeTopicFile(path string, m TopicMeta, body string) error {
