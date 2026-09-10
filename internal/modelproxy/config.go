@@ -109,8 +109,9 @@ type Provider struct {
 	// - comma-separated list: explicit allowlist of model IDs
 	ModelFilter string
 	// Retry tuning (defaults applied).
-	MaxRetries   int
-	RetryDelayMS int
+	MaxRetries    int
+	RetryDelayMS  int
+	HoldTimeoutMS int // SSE keepalive hold timeout (ms) after retry budget exhausted; 0 = disabled
 	// Type is the provider class, driving upstream-specific request
 	// handling. Empty = generic OpenAI-compatible. See
 	// Provider.applyUpstreamHeaders for the known types.
@@ -184,6 +185,10 @@ func Load(root string) (*Config, error) {
 		prov.RetryDelayMS = p.RetryDelayMS
 		if prov.RetryDelayMS <= 0 {
 			prov.RetryDelayMS = 1000
+		}
+		prov.HoldTimeoutMS = p.HoldTimeoutMS
+		if prov.HoldTimeoutMS <= 0 {
+			prov.HoldTimeoutMS = 15000 // 15s default hold timeout
 		}
 		prov.Type = strings.TrimSpace(p.Type)
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)

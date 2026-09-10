@@ -70,6 +70,10 @@ type ModelProxyProvider struct {
 	MaxRetries int `yaml:"max_retries"`
 	// RetryDelayMS sleeps between retries. Default 1000.
 	RetryDelayMS int `yaml:"retry_delay_ms"`
+	// HoldTimeoutMS is the maximum time (ms) to hold an SSE connection open
+	// with keepalive comments after the retry budget is exhausted and a
+	// saturation error is received. Default 15000 (15s). 0 disables keepalive.
+	HoldTimeoutMS int `yaml:"hold_timeout_ms"`
 	// Type selects the provider class, which drives upstream-specific
 	// request handling (headers, body tweaks, ...). Empty = generic
 	// OpenAI-compatible. Known types:

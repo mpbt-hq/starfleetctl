@@ -6,11 +6,13 @@ package modelproxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +45,19 @@ type Proxy struct {
 	cacheAt   map[string]time.Time
 	tracker   *shipTracker
 	mux       *http.ServeMux
+
+	// Saturation gate per provider: when a provider returns 429/saturation,
+	// subsequent requests wait behind a single cooldown timer that respects
+	// Retry-After headers, instead of each request retrying individually.
+	satMu sync.Mutex
+	sat   map[string]*saturationState
+}
+
+// saturationState tracks the saturation cooldown for a single provider.
+type saturationState struct {
+	providerID    string
+	cooldownUntil time.Time
+	retryAfter    time.Duration
 }
 
 // New builds a Proxy from a resolved config.
@@ -54,6 +69,7 @@ func New(cfg *Config) *Proxy {
 		modelInfo: map[string][]ModelInfo{},
 		cacheAt:   map[string]time.Time{},
 		tracker:   newShipTracker(),
+		sat:       map[string]*saturationState{},
 	}
 	p.mux = http.NewServeMux()
 	p.mux.HandleFunc("/v1/models", p.handleModels)
@@ -398,6 +414,13 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 	retries := 0
 	writeHeaders := true
 	for attempt := 1; attempt <= attempts; attempt++ {
+		// Wait for saturation gate (global cooldown per provider)
+		if !p.waitForSaturationGate(r.Context(), prov.ID) {
+			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
+			writeErr(w, 503, fmt.Sprintf("provider %s saturated, request cancelled", prov.ID))
+			return
+		}
+
 		upstreamReq, _, err := buildReq()
 		if err != nil {
 			writeErr(w, 400, "build upstream request: "+err.Error())
@@ -423,11 +446,18 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			// some backends return with a generic status.
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			if attempt < attempts && (transientStatus(resp.StatusCode) || retryableErrorText(string(errBody))) {
+			isSaturation := resp.StatusCode == http.StatusTooManyRequests || retryableErrorText(string(errBody))
+			if attempt < attempts && (transientStatus(resp.StatusCode) || isSaturation) {
+				if isSaturation {
+					p.recordSaturation(prov, resp)
+				}
 				p.logf("%s/%s: transient HTTP %d (attempt %d/%d): %.300s — retrying", ship, prov.ID, resp.StatusCode, attempt, attempts, string(errBody))
 				retries++
 				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
 				continue
+			}
+			if isSaturation {
+				p.recordSaturation(prov, resp)
 			}
 			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 			w.Header().Set("Content-Type", "application/json")
@@ -440,8 +470,11 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			return
 		}
 
+		// Success — clear saturation state
+		p.clearSaturation(prov.ID)
+
 		if streaming {
-			usage, failed, retryEarly := p.pipeSSE(w, resp, writeHeaders, attempt < attempts)
+			usage, failed, retryEarly := p.pipeSSE(w, resp, writeHeaders, attempt < attempts, prov, ship)
 			if retryEarly {
 				p.logf("%s/%s: retryable streamed error before content (attempt %d/%d) — retrying", ship, prov.ID, attempt, attempts)
 				retries++
@@ -489,8 +522,69 @@ func extractStreamUsage(payload []byte) *Usage {
 	return extractUsage(payload)
 }
 
+// waitForSaturationGate blocks until the provider's saturation cooldown
+// expires. Returns true if the caller should proceed, false if the context
+// was cancelled.
+func (p *Proxy) waitForSaturationGate(ctx context.Context, provID string) bool {
+	p.satMu.Lock()
+	st := p.sat[provID]
+	p.satMu.Unlock()
+	if st == nil {
+		return true
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(time.Until(st.cooldownUntil)):
+		return true
+	}
+}
+
+// recordSaturation updates the provider's saturation state based on the
+// upstream response (Retry-After header, or default backoff).
+func (p *Proxy) recordSaturation(prov *Provider, resp *http.Response) {
+	retryAfter := parseRetryAfter(resp)
+	if retryAfter <= 0 {
+		retryAfter = time.Duration(prov.RetryDelayMS) * time.Millisecond
+	}
+	cooldownUntil := time.Now().Add(retryAfter)
+
+	p.satMu.Lock()
+	p.sat[prov.ID] = &saturationState{
+		providerID:    prov.ID,
+		cooldownUntil: cooldownUntil,
+		retryAfter:    retryAfter,
+	}
+	p.satMu.Unlock()
+	p.logf("provider %s saturated, cooldown until %v (retry-after=%v)", prov.ID, cooldownUntil, retryAfter)
+}
+
+// parseRetryAfter extracts the Retry-After header value in seconds or HTTP-date.
+func parseRetryAfter(resp *http.Response) time.Duration {
+	h := resp.Header.Get("Retry-After")
+	if h == "" {
+		return 0
+	}
+	// Try parsing as seconds (integer)
+	if secs, err := strconv.Atoi(h); err == nil {
+		return time.Duration(secs) * time.Second
+	}
+	// Try parsing as HTTP-date
+	if t, err := http.ParseTime(h); err == nil {
+		return time.Until(t)
+	}
+	return 0
+}
+
+// clearSaturation clears the saturation state for a provider on success.
+func (p *Proxy) clearSaturation(provID string) {
+	p.satMu.Lock()
+	delete(p.sat, provID)
+	p.satMu.Unlock()
+}
+
 // pipeSSE copies an SSE stream from the upstream response to the client,
-// forwarding headers and catching a premature close (EOF without a [DONE]
+// / forwarding headers and catching a premature close (EOF without a [DONE]
 // sentinel) with a clean error event so the client sees a structured failure
 // instead of a truncated stream. It returns the accumulated token usage (from
 // trailing usage chunks), whether the stream failed, and whether it aborted
@@ -509,7 +603,13 @@ func extractStreamUsage(payload []byte) *Usage {
 // which would otherwise treat them as hard failures. Mid-stream errors (after
 // content) and errors once the retry budget is exhausted are passed through as
 // structured error events.
-func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders, canRetry bool) (*Usage, bool, bool) {
+//
+// When the retry budget is exhausted (canRetry=false) and a saturation error
+// arrives in the stream, the proxy enters a keepalive hold: it sends SSE
+// comment lines (": keepalive\n\n") every 3s to keep the connection alive
+// while waiting for the provider to recover, up to HoldTimeoutMS (default 15s).
+// After the timeout, the final error is relayed to the client.
+func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders, canRetry bool, prov *Provider, ship string) (*Usage, bool, bool) {
 	defer resp.Body.Close()
 	if writeHeaders {
 		for k, vv := range resp.Header {
@@ -527,6 +627,9 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 	sawContent := false
 	flusher, _ := w.(http.Flusher)
 	var usage *Usage
+	var saturationErrorPayload string
+	inKeepalive := false
+	keepaliveStart := time.Time{}
 
 	for sc.Scan() {
 		line := sc.Text()
@@ -542,6 +645,14 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 				// append our own error on EOF.
 				if !sawContent && canRetry && retryableErrorText(payload) {
 					return nil, true, true
+				}
+				// Saturation error after retry budget exhausted: enter keepalive hold
+				if !sawContent && !canRetry && retryableErrorText(payload) {
+					saturationErrorPayload = payload
+					inKeepalive = true
+					keepaliveStart = time.Now()
+					// Don't write the error yet; start keepalive
+					continue
 				}
 				sawError = true
 				_, _ = io.WriteString(w, line+"\n\n")
@@ -567,6 +678,48 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 				flusher.Flush()
 			}
 		}
+
+		// Handle keepalive: send ": keepalive\n\n" every 3s until HoldTimeoutMS
+		if inKeepalive && flusher != nil {
+			elapsed := time.Since(keepaliveStart)
+			if elapsed >= time.Duration(prov.HoldTimeoutMS)*time.Millisecond {
+				// Keepalive timeout reached — emit the buffered saturation error
+				p.logf("%s/%s: keepalive hold timeout (%dms) reached, relaying saturation error", ship, prov.ID, prov.HoldTimeoutMS)
+				evt := map[string]any{"error": map[string]any{
+					"message": saturationErrorPayload,
+					"code":    "rate_limit_exceeded",
+				}}
+				raw, _ := json.Marshal(evt)
+				_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				inKeepalive = false
+				sawDone = true
+				sawError = true
+				break
+			} else if elapsed >= 3*time.Second {
+				// Send keepalive comment every 3s
+				_, _ = io.WriteString(w, ": keepalive\n\n")
+				flusher.Flush()
+				keepaliveStart = time.Now() // reset for next interval
+			}
+		}
+	}
+
+	// If we exited the scan loop while in keepalive, emit the error
+	if inKeepalive {
+		p.logf("%s/%s: stream ended during keepalive hold, relaying saturation error", ship, prov.ID)
+		evt := map[string]any{"error": map[string]any{
+			"message": saturationErrorPayload,
+			"code":    "rate_limit_exceeded",
+		}}
+		raw, _ := json.Marshal(evt)
+		_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return usage, true, false
 	}
 
 	if !sawDone && !sawError {
