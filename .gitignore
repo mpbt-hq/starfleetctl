@@ -2,3 +2,6 @@
 /.starfleet-ai/src/starfleetctl/starfleetctl
 /.starfleet-ai/bin/starfleetctl
 bin/
+node_modules/
+package.json
+package-lock.json
