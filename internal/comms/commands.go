@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/fsutil"
 )
 
 // nextID allocates the next monotonic zero-padded message id (m0001, m0002,
@@ -978,15 +980,39 @@ func (b *Bus) DoPurgeOld(olderThan string, all bool) error {
 			continue
 		}
 
+		// Remove from target's unseen directory
 		if mpath, err := b.mfile(m.ID, m.Target); err == nil {
 			os.Remove(mpath)
 		}
-		// Also remove from seen/ if it exists
-		for agent := range live {
-			if seenPath, err := b.mfileSeen(agent, m.ID); err == nil {
-				os.Remove(seenPath)
+		// Remove from target's seen directory
+		if seenPath, err := b.mfileSeen(m.Target, m.ID); err == nil {
+			os.Remove(seenPath)
+		}
+		// Also remove from seen/ of all agents (live and dead) that might have a copy
+		// We need to scan all target directories for seen copies
+		entries, err := os.ReadDir(b.MsgDir)
+		if err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				target := e.Name()
+				if strings.HasPrefix(target, ".") {
+					continue
+				}
+				if seenPath, err := b.mfileSeen(target, m.ID); err == nil {
+					os.Remove(seenPath)
+				}
 			}
 		}
+		// Also check legacy flat structure
+		if safeID, ok := fsutil.Safe(m.ID); ok {
+			legacyPath := filepath.Join(b.MsgDir, safeID+".json")
+			os.Remove(legacyPath)
+			legacyTsv := filepath.Join(b.MsgDir, safeID+".tsv")
+			os.Remove(legacyTsv)
+		}
+
 		msgCnt++
 	}
 
