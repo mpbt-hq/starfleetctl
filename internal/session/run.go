@@ -40,6 +40,9 @@ Commands:
   stop <id|session>
       Kill a terminal, clear its comms heartbeat, and release its
       ship name (used by scripts/agent-run --stop).
+  transcript <id> [options]
+      Dump an opencode session transcript (SQLite) to stdout or a file.
+      See 'session transcript --help'.
 `
 
 func Run(root string, args []string) int {
@@ -63,6 +66,8 @@ func Run(root string, args []string) int {
 		return runShipRun(root, args[1:])
 	case "stop":
 		return runStop(root, args[1:])
+	case "transcript":
+		return runTranscript(root, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "session: unknown command '%s'\n", args[0])
 		return 2

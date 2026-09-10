@@ -34,6 +34,10 @@ const partCap = 8192
 // maxLimit is the hard upper bound for the session list / transcript window.
 const maxLimit = 500
 
+// MaxListLimit returns the hard upper bound for the session list / transcript
+// window — exported so CLI callers can pass the full window to List().
+func MaxListLimit() int { return maxLimit }
+
 var dbPathCache string
 
 // ListOpts filters the session list.
