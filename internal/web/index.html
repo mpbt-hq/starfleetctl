@@ -182,6 +182,12 @@
            <span data-i18n="ns_unrestricted">Uneingeschränkte Berechtigungen (allow all)</span>
          </label>
        </div>
+       <div style="margin-top:8px">
+         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+           <input type="checkbox" id="ns_free_only">
+           <span data-i18n="ns_free_only">Nur freie Modelle (zen-proxy)</span>
+         </label>
+       </div>
       <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start">Starten</button>
         <button onclick="modelCheck()" data-i18n="model.check">Prüfen</button></div>
     </div>
@@ -638,6 +644,7 @@ const I18N = {
     'model.health.failed': 'Fehlgeschlagen — harter Fehler', 'model.health.not-served': 'Nicht serviert — gefiltert/entfernt',
     'model.health.unknown': 'Unbekannt — Provider nicht erreichbar',
     'ns_unrestricted': 'Uneingeschränkte Berechtigungen (allow all)',
+    'ns_free_only': 'Nur freie Modelle (zen-proxy)',
     'ship.start': 'Starten',
     'task.new': 'Neue Aufgabe', 't_title.ph': 'Titel', 't_desc.ph': 'Beschreibung (optional)',
     't_ship.ph': "Ship (leer=offen, 'auto'=freier)",
@@ -755,6 +762,7 @@ const I18N = {
     'model.health.failed': 'Failed — hard error', 'model.health.not-served': 'Not served — filtered/removed',
     'model.health.unknown': 'Unknown — provider unreachable',
     'ns_unrestricted': 'Unrestricted permissions (allow all)',
+    'ns_free_only': 'Free models only (zen-proxy)',
     'ship.start': 'Launch',
     'task.new': 'New task', 't_title.ph': 'Title', 't_desc.ph': 'Description (optional)',
     't_ship.ph': "Ship (empty=open, 'auto'=auto)",
@@ -1812,7 +1820,8 @@ async function taskAssign(slug){
 // ns_model <select> dropdown, grouped by provider.
 async function loadModels(){
   try {
-    const models = await api('/api/models');
+    const freeOnly = document.getElementById('ns_free_only')?.checked || false;
+    const models = await api('/api/models?free_only=' + freeOnly);
     const sel = document.getElementById('ns_model');
     const prev = localStorage.getItem('fleet_model') || '';
     // Group by provider

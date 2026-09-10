@@ -1844,6 +1844,8 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 405, "method not allowed")
 		return
 	}
+	// Check for free_only query parameter (filter zen-proxy to free models only)
+	freeOnly := r.URL.Query().Get("free_only") == "true"
 	modelsPath := s.Root + "/.starfleet-ai/conf/models.yaml"
 	data, err := os.ReadFile(modelsPath)
 	if err != nil {
@@ -1879,6 +1881,22 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if cur.ID != "" {
 		models = append(models, cur)
+	}
+	// Apply free_only filter for zen-proxy models if requested
+	if freeOnly {
+		filtered := models[:0]
+		for _, m := range models {
+			if m.Provider == "zen-proxy" {
+				// Keep only models with "-free" suffix for zen-proxy
+				if strings.HasSuffix(m.ID, "-free") {
+					filtered = append(filtered, m)
+				}
+			} else {
+				// Keep all other provider models unchanged
+				filtered = append(filtered, m)
+			}
+		}
+		models = filtered
 	}
 	// Enrich with health state from persisted check.
 	healthState := modelproxy.LoadHealthState(s.Root)
