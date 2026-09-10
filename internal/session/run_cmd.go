@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/metux/starfleetctl/internal/comms"
+	"github.com/metux/starfleetctl/internal/modelproxy"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -172,8 +173,31 @@ func RunCmd(root string, args []string) int {
 	// ships started via `session ship-run`), instead of an inline
 	// OPENCODE_CONFIG_CONTENT. Terminal ships use "ask" for anything outside
 	// the workspace since a human is present at the console.
+	// Resolve model with provider prefix and validate for opencode client
+	effectiveModel := model
+	if effectiveModel == "" {
+		effectiveModel = "nvidia/nemotron-3-ultra-550b-a55b"
+	}
 	if client == "opencode" {
-		configPath, err := generateOpencodeConfig(root, shipID, "terminal", false, model, "")
+		// Resolve provider prefix
+		proxyProviders := modelproxy.ProviderConfigs(root, shipID)
+		if proxyProviders != nil && effectiveModel != "" {
+			mpCfg, err := modelproxy.Load(root)
+			if err == nil {
+				provider := mpCfg.FindProviderForModel(effectiveModel)
+				if provider != "" {
+					if i := strings.IndexByte(effectiveModel, '/'); i < 0 || effectiveModel[:i] != provider {
+						effectiveModel = provider + "/" + effectiveModel
+					}
+				}
+			}
+		}
+		// Validate model availability (hard stop)
+		if err := validateModelAvailable(root, effectiveModel); err != nil {
+			fmt.Fprintln(os.Stderr, "run: model validation failed:", err)
+			return 1
+		}
+		configPath, err := generateOpencodeConfig(root, shipID, "terminal", false, effectiveModel, "")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "run: generate opencode config:", err)
 			return 1
@@ -184,12 +208,12 @@ func RunCmd(root string, args []string) int {
 
 	// Post initial heartbeat
 	if bus, err := comms.New(root); err == nil {
-		provider := providerFromModel(model)
+		provider := providerFromModel(effectiveModel)
 		_ = bus.DoStatus("idle", client+" session starting (run)", comms.StatusPatch{
 			LaunchType: "terminal",
 			Parent:     shipnames.FlagshipName(root),
 			Provider:   provider,
-			Model:      model,
+			Model:      effectiveModel,
 		})
 	}
 

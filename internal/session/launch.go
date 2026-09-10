@@ -516,10 +516,10 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if effectiveModel == "" {
 		effectiveModel = "nvidia/nemotron-3-ultra-550b-a55b"
 	}
-	// Validate that the requested model is available from the provider
-	// (avoids silent fallback to default model when model is filtered out)
+	// Validate that the requested model is available from the provider.
+	// This is now a HARD STOP — if model is not available, launch fails.
 	if err := validateModelAvailable(root, effectiveModel); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠ model validation: %v\n", err)
+		return "", fmt.Errorf("model validation failed: %w", err)
 	}
 	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel, o.Class)
 	if err != nil {
@@ -661,28 +661,39 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, 
 		}
 	}
 
-	// Build the ship config. username gives each ship its own identity
-	// (opencode falls back to the OS user when it's missing), matching the
-	// role prompt and the comms heartbeat.
-	shipConfig := map[string]any{
-		"$schema":  "https://opencode.ai/config.json",
-		"username": shipID,
-		"model":    model,
-	}
-
-	// Copy provider config from user config (unless model-proxy-only mode)
-	if cfg.Fleet.ProviderMode != "model-proxy-only" && userConfig != nil {
-		if providers, ok := userConfig["provider"].(map[string]any); ok {
-			shipConfig["provider"] = providers
-		}
-	}
-
 	// Inject the local model-proxy providers (nim-proxy, zen-proxy, ...) so
 	// ships prefer the resilient local endpoint in front of the flaky
 	// upstreams. Only applies when model-proxy.yaml exists with providers.
 	// The per-ship apiKey (ShipKey) lets the proxy attribute requests to
 	// this ship.
 	proxyProviders := modelproxy.ProviderConfigs(root, shipID)
+
+	// Resolve the model to include the correct provider prefix if served by
+	// a model-proxy provider. This ensures opencode can resolve the model
+	// without falling back to last-used-model.
+	effectiveModel := model
+	if proxyProviders != nil && model != "" {
+		mpCfg, err := modelproxy.Load(root)
+		if err == nil {
+			provider := mpCfg.FindProviderForModel(model)
+			if provider != "" {
+				// Check if model already has a provider prefix
+				if i := strings.IndexByte(model, '/'); i < 0 || model[:i] != provider {
+					effectiveModel = provider + "/" + model
+				}
+			}
+		}
+	}
+
+	// Build the ship config. username gives each ship its own identity
+	// (opencode falls back to the OS user when it's missing), matching the
+	// role prompt and the comms heartbeat.
+	shipConfig := map[string]any{
+		"$schema":  "https://opencode.ai/config.json",
+		"username": shipID,
+		"model":    effectiveModel,
+	}
+
 	if proxyProviders != nil {
 		provs, _ := shipConfig["provider"].(map[string]any)
 		if provs == nil {
@@ -1035,21 +1046,28 @@ func RunTermctl(root string, args []string) int {
 // validateModelAvailable checks if the requested model is available from the
 // configured model-proxy provider. Returns an error if the model is not found
 // in the provider's model list (which would cause opencode to silently fall
-// back to the default model).
+// back to the default model). This is a hard stop — launch fails if model
+// is not available.
 func validateModelAvailable(root, model string) error {
 	if model == "" {
 		return nil // will use default
-	}
-	provider := providerFromModel(model)
-	if provider == "" {
-		return nil // can't determine provider
 	}
 	// Load model-proxy config
 	mpCfg, err := modelproxy.Load(root)
 	if err != nil {
 		return fmt.Errorf("model-proxy config: %w", err)
 	}
-	// Find the provider
+	// Find which provider serves this model
+	provider := mpCfg.FindProviderForModel(model)
+	if provider == "" {
+		return fmt.Errorf("model %q not served by any configured model-proxy provider — opencode will fall back to default", model)
+	}
+	// Verify the model is actually available from that provider
+	cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers}
+	if mpCfg.ListenAddr == "" {
+		cfg.ListenAddr = "127.0.0.1:8443"
+	}
+	// Find the provider struct
 	var prov *modelproxy.Provider
 	for i := range mpCfg.Providers {
 		if mpCfg.Providers[i].ID == provider {
@@ -1058,12 +1076,7 @@ func validateModelAvailable(root, model string) error {
 		}
 	}
 	if prov == nil {
-		return nil // provider not in model-proxy, skip validation
-	}
-	// Query available models from the proxy (tries local proxy first, falls back to upstream)
-	cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers}
-	if mpCfg.ListenAddr == "" {
-		cfg.ListenAddr = "127.0.0.1:8443"
+		return fmt.Errorf("provider %q not found in model-proxy config", provider)
 	}
 	available := cfg.ModelListFor(*prov)
 	if available == nil {
@@ -1072,11 +1085,7 @@ func validateModelAvailable(root, model string) error {
 	// Check if model is in the list (model may have provider/ prefix)
 	baseModel := model
 	if i := strings.IndexByte(model, '/'); i >= 0 {
-		// Check if the first component matches the provider ID
-		prefix := model[:i]
-		if prefix == provider {
-			baseModel = model[i+1:]
-		}
+		baseModel = model[i+1:]
 	}
 	for _, m := range available {
 		if m == model || m == baseModel {

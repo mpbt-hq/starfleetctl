@@ -319,3 +319,25 @@ func checkModels(root string) error {
 	}
 	return nil
 }
+
+// FindProviderForModel returns the provider ID that serves the given model,
+// or "" if not found. It checks all configured providers.
+func (c *Config) FindProviderForModel(model string) string {
+	for _, prov := range c.Providers {
+		available := c.ModelListFor(prov)
+		if available == nil {
+			continue
+		}
+		// Check with and without provider prefix
+		baseModel := model
+		if i := strings.IndexByte(model, '/'); i >= 0 {
+			baseModel = model[i+1:]
+		}
+		for _, m := range available {
+			if m == model || m == baseModel {
+				return prov.ID
+			}
+		}
+	}
+	return ""
+}
