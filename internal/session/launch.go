@@ -648,6 +648,10 @@ func StopShip(root string, id string) error {
 	// Clean up per-ship temp opencode config
 	_ = os.Remove(opencodeConfigPath(root, id))
 
+	// Clean up stale opencode UDS socket file (for api mode)
+	socketPath := opencode.SocketPath(root, id)
+	os.Remove(socketPath)
+
 	// NOTE: Heartbeat cleanup (DoClear) and ship name release (DoRelease)
 	// are done by the child process's OnExit callback AFTER it reads the
 	// stop-requested marker. This avoids race where parent clears heartbeat
