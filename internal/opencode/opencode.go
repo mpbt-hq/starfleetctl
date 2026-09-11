@@ -270,3 +270,53 @@ func (s *Server) Stop() error {
 	os.Remove(s.config.SocketPath)
 	return nil
 }
+
+// SendMessage sends a message to a session via the opencode server.
+// This is used for message injection (A2A communication) over UDS.
+func (c *Client) SendMessage(ctx context.Context, sessionID string, parts []MessagePart) (string, error) {
+	body := map[string]any{
+		"parts": parts,
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/session/%s/message", sessionID), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("send message: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	// For non-streaming, read the full response
+	result, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+	return string(result), nil
+}
+
+// SendMessageStream sends a message and returns an SSE stream reader.
+// For streaming responses, the caller should handle the SSE stream.
+func (c *Client) SendMessageStream(ctx context.Context, sessionID string, parts []MessagePart) (io.ReadCloser, error) {
+	body := map[string]any{
+		"parts":  parts,
+		"stream": true,
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/session/%s/message", sessionID), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("send message stream: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	return resp.Body, nil
+}
