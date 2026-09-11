@@ -188,6 +188,12 @@
            <span data-i18n="ns_free_only">Nur freie Modelle (zen-proxy)</span>
          </label>
        </div>
+       <div style="margin-top:8px">
+         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+           <input type="checkbox" id="ns_native_api">
+           <span data-i18n="ns_native_api">Native API Modus (opencode serve via UDS)</span>
+         </label>
+       </div>
       <div class="actions"><button onclick="shipLaunch()" data-i18n="ship.start" data-i18n-title="ship.start.tooltip" title="Start a new ship session">Starten</button>
         <button onclick="modelCheck()" data-i18n="model.check" data-i18n-title="model.check.tooltip" title="Check model availability and health">Prüfen</button></div>
     </div>
@@ -646,6 +652,7 @@ const I18N = {
     'model.health.unknown': 'Unbekannt — Provider nicht erreichbar',
     'ns_unrestricted': 'Uneingeschränkte Berechtigungen (allow all)',
     'ns_free_only': 'Nur freie Modelle (zen-proxy)',
+    'ns_native_api': 'Native API Modus (opencode serve via UDS)',
     'ship.start': 'Starten',
     'task.new': 'Neue Aufgabe', 't_title.ph': 'Titel', 't_desc.ph': 'Beschreibung (optional)',
     't_ship.ph': "Ship (leer=offen, 'auto'=freier)",
@@ -765,6 +772,7 @@ const I18N = {
     'model.health.unknown': 'Unknown — provider unreachable',
     'ns_unrestricted': 'Unrestricted permissions (allow all)',
     'ns_free_only': 'Free models only (zen-proxy)',
+    'ns_native_api': 'Native API mode (opencode serve via UDS)',
     'ship.start': 'Launch',
     'task.new': 'New task', 't_title.ph': 'Title', 't_desc.ph': 'Description (optional)',
     't_ship.ph': "Ship (empty=open, 'auto'=auto)",
@@ -1836,6 +1844,7 @@ async function taskAssign(slug){
 async function loadModels(){
   try {
     const freeOnly = document.getElementById('ns_free_only')?.checked || false;
+    const nativeApi = document.getElementById('ns_native_api')?.checked || false;
     const models = await api('/api/models?free_only=' + freeOnly);
     const sel = document.getElementById('ns_model');
     const prev = localStorage.getItem('fleet_model') || '';
@@ -1893,7 +1902,8 @@ const name = document.getElementById('ns_name').value.trim();
    if (!model) { toast(t('ship.nomodel'), true); return; }
    const parent = document.getElementById('ns_parent').value.trim();
    const unrestricted = document.getElementById('ns_unrestricted').checked;
-   const body = { name, model, parent, unrestricted };
+   const nativeApi = document.getElementById('ns_native_api')?.checked || false;
+   const body = { name, model, parent, unrestricted, native_api: nativeApi };
    try {
      const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
        body: JSON.stringify(body)});
@@ -1901,6 +1911,7 @@ toast(t('ship.launched')+(r.ship_id||name||'?'));
       document.getElementById('ns_name').value='';
       document.getElementById('ns_parent').value='';
       document.getElementById('ns_unrestricted').checked=false;
+      document.getElementById('ns_native_api').checked=false;
       refresh();
    } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }

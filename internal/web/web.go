@@ -1312,6 +1312,7 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		Provider     string `json:"provider"`
 		Parent       string `json:"parent"`
 		Unrestricted bool   `json:"unrestricted"`
+		Mode         string `json:"mode"`
 	}
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -1336,6 +1337,7 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		Parent:       p.Parent,
 		LaunchType:   "auto",
 		Unrestricted: p.Unrestricted,
+		Mode:         p.Mode,
 	})
 	if err != nil {
 		writeErr(w, 409, err.Error())
