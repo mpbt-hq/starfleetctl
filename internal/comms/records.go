@@ -8,8 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
+
+// parseIDNum extracts the numeric part from a message ID like "m12345".
+// Returns 0 for non-parseable IDs so they sort to the front (oldest).
+func parseIDNum(id string) uint64 {
+	n, err := strconv.ParseUint(strings.TrimPrefix(id, "m"), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
 
 // StatusRecord is the unified per-ship status file (status/<agent>.json).
 // It carries both the legacy heartbeat fields (Epoch, ISO, Agent, Project,
@@ -217,10 +228,9 @@ func (b *Bus) allMsgRecords() []msgRecord {
 		}
 	}
 
-	// Reverse so newest messages appear first (lexicographic sort is oldest-first).
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
+	// Sort newest-first by numeric message id (lexicographic sort breaks when
+	// the counter rolls past m99999 since "m99999" > "m100000" lexicographically).
+	sort.Slice(out, func(i, j int) bool { return parseIDNum(out[i].ID) > parseIDNum(out[j].ID) })
 	return out
 }
 
@@ -278,7 +288,7 @@ func (b *Bus) conversationFiles() []struct {
 			addDir(filepath.Join(b.MsgDir, target, "seen"))
 		}
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].id > files[j].id })
+	sort.Slice(files, func(i, j int) bool { return parseIDNum(files[i].id) > parseIDNum(files[j].id) })
 	return files
 }
 
