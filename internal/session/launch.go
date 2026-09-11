@@ -18,6 +18,7 @@ import (
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/modelproxy"
+	"github.com/metux/starfleetctl/internal/opencode"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -347,6 +348,7 @@ Flags:
                        "background" (detached, the default here), or "auto" (web/timer).
   --class <class>       ship class/role (e.g. scout, worker, flagship)
   --unrestricted      unrestricted permissions (allow all, bypass ask/deny)
+  --mode <mode>       launch mode: "pty" (default, termctl terminal) or "api" (native opencode serve via UDS)
 
 Task assignment:
   Ships receive tasks via the comms bus, NOT via extra arguments.
@@ -366,6 +368,7 @@ Example:
 	launchType := "background"
 	class := ""
 	unrestricted := false
+	mode := ""
 	var oaArgs []string
 	for len(args) > 0 {
 		switch args[0] {
@@ -407,6 +410,17 @@ Example:
 		case "--unrestricted":
 			unrestricted = true
 			args = args[1:]
+		case "--mode":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --mode needs a value")
+				return 2
+			}
+			mode = args[1]
+			if mode != "pty" && mode != "api" {
+				fmt.Fprintln(os.Stderr, "session ship-run: --mode must be pty or api")
+				return 2
+			}
+			args = args[2:]
 		case "--":
 			oaArgs = args[1:]
 			args = nil
@@ -431,6 +445,7 @@ Example:
 		ExtraArgs:    oaArgs,
 		Class:        class,
 		Unrestricted: unrestricted,
+		Mode:         mode,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "session ship-run:", err)
@@ -454,6 +469,7 @@ type LaunchShipOpts struct {
 	LaunchType   string   // "terminal" | "background" | "auto"; empty => "background"
 	Unrestricted bool     // unrestricted permissions (allow all)
 	ExtraArgs    []string // extra args passed to opencode after --prompt
+	Mode         string   // "pty" | "api"; empty => "pty"
 }
 
 // LaunchShip starts a detached opencode control-agent ship and returns its
@@ -465,6 +481,10 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	model := o.Model
 	parent := o.Parent
 	launchType := o.LaunchType
+	mode := o.Mode
+	if mode == "" {
+		mode = "pty"
+	}
 	if launchType == "" {
 		launchType = "background"
 	}
@@ -525,6 +545,42 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("generate opencode config: %w", err)
 	}
+
+	// Native API mode: spawn opencode serve with UDS instead of termctl
+	if mode == "api" {
+		socketPath := opencode.SocketPath(root, name)
+		// Clean up any stale socket file
+		os.Remove(socketPath)
+
+		inner += "cd " + shellQuote(root) + "; "
+		inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
+		inner += "exec " + shellQuote(resolveClientPath("opencode"))
+		inner += " serve --socket " + shellQuote(socketPath)
+		if effectiveModel != "" {
+			inner += " --model " + shellQuote(effectiveModel)
+		}
+
+		vars := &LaunchVars{
+			ShipID:      name,
+			PipePath:    pipePath,
+			ReleaseFull: "",
+			Client:      "opencode-ship",
+			ShellCmd:    inner,
+			LaunchType:  launchType,
+			Parent:      parent,
+			Provider:    o.Provider,
+			Model:       model,
+			Class:       o.Class,
+		}
+		if vars.Provider == "" {
+			vars.Provider = providerFromModel(model)
+		}
+		if err := spawnSessionAt(root, vars, logPath); err != nil {
+			return "", err
+		}
+		return name, nil
+	}
+
 	inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
 	inner += "exec " + shellQuote(resolveClientPath("opencode"))
 	inner += " --model " + shellQuote(effectiveModel)
