@@ -22,12 +22,16 @@ practices) — hand them a task via the dashboard/comms, not as extra CLI args.
 
 ## Git worktrees
 
+**Rule: Worktrees werden immer über starfleetctl verwaltet, nie direkt git worktree.**
+
 | Subcommand | Purpose |
 |---|---|
 | `worktree add <repo> [name]` | Create a per-task git worktree |
 | `worktree list` | List worktrees |
 | `worktree remove <path>` | Remove a worktree |
 | `worktree prune` | Garbage-collect stale worktrees |
+
+**Rationale:** starfleetctl maintains its own worktree registry (`.starfleet-ai/var/worktrees/`), handles concurrent access via flock, and ensures consistent naming/cleanup. Direct `git worktree` bypasses this and causes conflicts.
 
 ## Web console & setup
 
