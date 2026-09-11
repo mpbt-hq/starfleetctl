@@ -18,6 +18,7 @@ import (
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/modelproxy"
+	"github.com/metux/starfleetctl/internal/opencode"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -37,6 +38,7 @@ type LaunchVars struct {
 	Provider   string // model provider (derived from Model when empty)
 	Model      string // model id (opencode --model value)
 	Class      string // ship class/role
+	Mode      string   // "pty" | "api"; empty => "pty"
 }
 
 // runLaunch implements `session run <release> [flags...] [-- <args...>]`.
@@ -454,6 +456,7 @@ type LaunchShipOpts struct {
 	LaunchType   string   // "terminal" | "background" | "auto"; empty => "background"
 	Unrestricted bool     // unrestricted permissions (allow all)
 	ExtraArgs    []string // extra args passed to opencode after --prompt
+	Mode         string   // "pty" | "api"; empty => "pty"
 }
 
 // LaunchShip starts a detached opencode control-agent ship and returns its
@@ -465,6 +468,10 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	model := o.Model
 	parent := o.Parent
 	launchType := o.LaunchType
+	mode := o.Mode
+	if mode == "" {
+		mode = "pty"
+	}
 	if launchType == "" {
 		launchType = "background"
 	}
@@ -521,11 +528,52 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if err := validateModelAvailable(root, effectiveModel); err != nil {
 		return "", fmt.Errorf("model validation failed: %w", err)
 	}
+
+	// Native API mode: spawn opencode serve with UDS instead of termctl
+	mode = o.Mode
+	if mode == "" {
+		mode = "pty"
+	}
+	if mode == "api" {
+	socketPath := opencode.SocketPath(root, name)
+	// Clean up any stale socket file
+	os.Remove(socketPath)
+
+	inner := "cd " + shellQuote(root) + "; "
+	inner += "export OPENCODE_CONFIG=" + shellQuote(opencode.SocketPath(root, name)) + "; "
+	inner += "exec " + shellQuote(resolveClientPath("opencode"))
+	inner += " serve --socket " + shellQuote(opencode.SocketPath(root, name))
+	if effectiveModel != "" {
+		inner += " --model " + shellQuote(effectiveModel)
+	}
+
+	vars := &LaunchVars{
+			ShipID:      name,
+			PipePath:    pipePath,
+			ReleaseFull: "",
+			Client:      "opencode-ship",
+			ShellCmd:    inner,
+			LaunchType:  launchType,
+			Parent:      parent,
+			Provider:    o.Provider,
+			Model:       model,
+			Class:       o.Class,
+			Mode:        "api",
+		}
+		if vars.Provider == "" {
+			vars.Provider = providerFromModel(model)
+		}
+		if err := spawnSessionAt(root, vars, logPath); err != nil {
+			return "", err
+		}
+		return name, nil
+	}
+
 	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel, o.Class)
 	if err != nil {
 		return "", fmt.Errorf("generate opencode config: %w", err)
 	}
-	inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
+	inner = "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
 	inner += "exec " + shellQuote(resolveClientPath("opencode"))
 	inner += " --model " + shellQuote(effectiveModel)
 	shipPrompt := "You are fleet ship " + name + ", report to flagship " + flagship + "."
@@ -548,6 +596,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		Provider:    o.Provider,
 		Model:       model,
 		Class:       o.Class,
+		Mode:        "pty",
 	}
 	if vars.Provider == "" {
 		vars.Provider = providerFromModel(model)
