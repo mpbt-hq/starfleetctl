@@ -1685,7 +1685,8 @@ function renderTasks(){
     const worker = workers[r.slug];
     const assignOpts = '<option value="__auto__">'+t('task.assign.auto')+'</option>' +
       ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-    const displayTitle = r.title || r.slug;
+    const categoryText = r.category || "(toplevel)";
+    const displayTitle = `[${categoryText}] ${r.title || r.slug}`;
     return `<div class="card">
       <div class="row"><b class="grow"><span class="task-title-link" onclick="taskDetail('${esc(r.slug)}')">${esc(displayTitle)}</span></b>
         <span class="pill ${cls}">${esc(r.status)}</span></div>
