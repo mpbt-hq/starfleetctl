@@ -29,7 +29,7 @@ type ProjectConfig struct {
 
 	// FragmentsDir is the project-local SOP fragments directory name.
 	// Defaults to "sop.d" when unset.
-	FragmentsDir string `yaml:"fragments_dir"`
+	FragmentsDir string `yaml:"sop_dir"`
 }
 
 // WorktreeLayout describes the directory structure for release worktrees
