@@ -662,7 +662,7 @@ const logPollTimer = setInterval(async () => {
       submitted.add(msg.id)
       appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || 'ship'}: ${msg.text.slice(0, 80)}`)
       // handleMessage: type=command → execute, type=ship/user/control → false (inject)
-      if (handleMessage(msg, client, currentSessionID)) continue
+      if (await handleMessage(msg, client, currentSessionID)) continue
       injectable.push(msg)
     }
     // Inject remaining directives mid-turn as synthetic prompt
@@ -738,7 +738,7 @@ const logPollTimer = setInterval(async () => {
         bus({ cmd: 'seen_mark', id: msg.id })
         submitted.add(msg.id)
         // handleMessage: type=command → execute, type=ship/user/control → inject
-        if (currentSessionID && handleMessage(msg, client, currentSessionID)) continue
+        if (currentSessionID && await handleMessage(msg, client, currentSessionID)) continue
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
       }
       if (lines.length > 0) {
