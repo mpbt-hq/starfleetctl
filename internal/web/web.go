@@ -139,6 +139,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/sessions/", s.apiSessionDispatch)
 	s.mux.HandleFunc("/api/oclog", s.apiOCLog)
 	s.mux.HandleFunc("/api/purge", s.apiPurge)
+	s.mux.HandleFunc("/api/meta-models", s.apiMetaModels)
+	s.mux.HandleFunc("/api/meta-models/", s.apiMetaModelDispatch)
+	s.mux.HandleFunc("/api/meta-models/sessions", s.apiMetaModelSessions)
+	s.mux.HandleFunc("/api/meta-models/switch", s.apiMetaModelSwitch)
+	s.mux.HandleFunc("/api/meta-models/force", s.apiMetaModelForce)
 	s.mux.HandleFunc("/", s.serveIndex)
 
 	// logging middleware: wrap the mux
@@ -1418,6 +1423,90 @@ func (s *Server) apiTemplatesList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, resp)
+}
+
+// apiMetaModels handles GET /api/meta-models — list all strategies.
+func (s *Server) apiMetaModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	// Proxy to model-proxy
+	s.proxyMetaModels(w, r)
+}
+
+// apiMetaModelDispatch handles GET /api/meta-models/<strategy> — get strategy details.
+func (s *Server) apiMetaModelDispatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	s.proxyMetaModels(w, r)
+}
+
+// apiMetaModelSessions handles GET /api/meta-models/sessions — list all sessions.
+func (s *Server) apiMetaModelSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	s.proxyMetaModels(w, r)
+}
+
+// apiMetaModelSwitch handles POST /api/meta-models/switch — manually switch a session's model.
+func (s *Server) apiMetaModelSwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	s.proxyMetaModels(w, r)
+}
+
+// apiMetaModelForce handles POST /api/meta-models/force — force all sessions to use a model.
+func (s *Server) apiMetaModelForce(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	s.proxyMetaModels(w, r)
+}
+
+// proxyMetaModels forwards requests to the model-proxy /v1/meta-models endpoints.
+func (s *Server) proxyMetaModels(w http.ResponseWriter, r *http.Request) {
+	// Forward to model-proxy at localhost:8443
+	target := "http://127.0.0.1:8443" + strings.TrimPrefix(r.URL.Path, "/api")
+
+	// Create new request
+	proxyReq, err := http.NewRequest(r.Method, target, r.Body)
+	if err != nil {
+		writeErr(w, 500, "proxy request: "+err.Error())
+		return
+	}
+
+	// Copy headers
+	for k, v := range r.Header {
+		for _, vv := range v {
+			proxyReq.Header.Add(k, vv)
+		}
+	}
+	proxyReq.Header.Set("X-Forwarded-For", r.RemoteAddr)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		writeErr(w, 502, "model-proxy: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy response
+	for k, v := range resp.Header {
+		for _, vv := range v {
+			w.Header().Add(k, vv)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // apiShipDispatch routes /api/ship/<id>/... to the appropriate handler.
