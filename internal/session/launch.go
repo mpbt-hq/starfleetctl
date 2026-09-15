@@ -38,7 +38,7 @@ type LaunchVars struct {
 	Provider   string // model provider (derived from Model when empty)
 	Model      string // model id (opencode --model value)
 	Class      string // ship class/role
-	Mode      string   // "pty" | "api"; empty => "pty"
+	Mode       string // "pty" | "api"; empty => "pty"
 }
 
 // runLaunch implements `session run <release> [flags...] [-- <args...>]`.
@@ -329,7 +329,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 // .starfleet-ai/var/ships/.
 func runShipRun(root string, args []string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		fmt.Print(`session ship-run [--name <id>] [--model <model>]
+		fmt.Print(`session ship-run [--name <id>] [--model <model>] [--template <name>]
 
 Start an opencode control-agent session in ship role, detached in the
 background (like run-opencode.ship, but as a detachable termctl terminal).
@@ -340,14 +340,18 @@ Flags:
   --name <id>         explicit ship ID (default: next free ship name). The caller
                        may pre-allocate the name; if given, it is reserved here.
   --model <model>     opencode model (e.g. nvidia/nemotron-3-ultra-550b-a55b).
-                       REQUIRED. The provider is derived from the model id
-                       (the part before the first '/'); pass --provider to override.
+                       REQUIRED unless --template is used. The provider is derived
+                       from the model id (the part before the first '/');
+                       pass --provider to override.
+  --template <name>   ship class template to use (e.g. scout, cruiser, heavy).
+                       Sets model, launch-type, and class from template.
   --parent <ship>     ship this one is launched under (default: flagship Enterprise).
                        Auto-launches from the web GUI hang under the flagship; a ship
                        spawned by another AI lists that ship as parent.
   --launch-type <t>   how the ship was started: "terminal" (direct at a terminal),
                        "background" (detached, the default here), or "auto" (web/timer).
-  --class <class>       ship class/role (e.g. scout, worker, flagship)
+  --class <class>     ship class/role (e.g. scout, worker, flagship).
+                       Set automatically from template if --template used.
   --unrestricted      unrestricted permissions (allow all, bypass ask/deny)
 
 Task assignment:
@@ -358,6 +362,7 @@ Task assignment:
 
 Example:
   starfleetctl session ship-run --name Voyager --model nvidia/nemotron-3-ultra-550b-a55b
+  starfleetctl session ship-run --template cruiser --name Cruiser-1
 `)
 		return 0
 	}
@@ -367,6 +372,7 @@ Example:
 	parent := ""
 	launchType := "background"
 	class := ""
+	template := ""
 	unrestricted := false
 	var oaArgs []string
 	for len(args) > 0 {
@@ -384,6 +390,13 @@ Example:
 				return 2
 			}
 			model = args[1]
+			args = args[2:]
+		case "--template":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --template needs a value")
+				return 2
+			}
+			template = args[1]
 			args = args[2:]
 		case "--parent":
 			if len(args) < 2 {
@@ -423,6 +436,36 @@ Example:
 		fmt.Fprintln(os.Stderr, "  Tasks are assigned via 'starfleetctl task assign <slug> <ship>' and delivered over comms.")
 		fmt.Fprintln(os.Stderr, "  Extra args would be passed as positional arguments to opencode, which interprets them as workspace paths.")
 		return 2
+	}
+
+	// Load template if specified
+	var templateModel, templateLaunchType, templateClass string
+	if template != "" {
+		tplCfg, err := config.LoadShipTemplates(root)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session ship-run: load templates: %v\n", err)
+			return 1
+		}
+		tpl, err := tplCfg.GetTemplate(template)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session ship-run: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  Available templates: %v\n", tplCfg.ListTemplateNames())
+			return 1
+		}
+		templateModel = tpl.Model
+		templateLaunchType = tpl.SessionType
+		templateClass = tpl.Name
+	}
+
+	// Template values are defaults; explicit flags override them
+	if model == "" {
+		model = templateModel
+	}
+	if launchType == "background" && templateLaunchType != "" {
+		launchType = templateLaunchType
+	}
+	if class == "" && templateClass != "" {
+		class = templateClass
 	}
 
 	shipID, err := LaunchShip(root, LaunchShipOpts{
@@ -535,19 +578,19 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		mode = "pty"
 	}
 	if mode == "api" {
-	socketPath := opencode.SocketPath(root, name)
-	// Clean up any stale socket file
-	os.Remove(socketPath)
+		socketPath := opencode.SocketPath(root, name)
+		// Clean up any stale socket file
+		os.Remove(socketPath)
 
-	inner := "cd " + shellQuote(root) + "; "
-	inner += "export OPENCODE_CONFIG=" + shellQuote(opencode.SocketPath(root, name)) + "; "
-	inner += "exec " + shellQuote(resolveClientPath("opencode"))
-	inner += " serve --socket " + shellQuote(opencode.SocketPath(root, name))
-	if effectiveModel != "" {
-		inner += " --model " + shellQuote(effectiveModel)
-	}
+		inner := "cd " + shellQuote(root) + "; "
+		inner += "export OPENCODE_CONFIG=" + shellQuote(opencode.SocketPath(root, name)) + "; "
+		inner += "exec " + shellQuote(resolveClientPath("opencode"))
+		inner += " serve --socket " + shellQuote(opencode.SocketPath(root, name))
+		if effectiveModel != "" {
+			inner += " --model " + shellQuote(effectiveModel)
+		}
 
-	vars := &LaunchVars{
+		vars := &LaunchVars{
 			ShipID:      name,
 			PipePath:    pipePath,
 			ReleaseFull: "",

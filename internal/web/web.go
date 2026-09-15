@@ -125,6 +125,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/ship", s.apiShipLaunch)
 	s.mux.HandleFunc("/api/ship/", s.apiShipDispatch)
 	s.mux.HandleFunc("/api/ships", s.apiShips)
+	s.mux.HandleFunc("/api/templates", s.apiTemplatesList)
 	s.mux.HandleFunc("/api/store/", s.apiStoreFile)
 	s.mux.HandleFunc("/api/files", s.apiFileList)
 	s.mux.HandleFunc("/api/files/raw", s.apiFileRaw)
@@ -1312,6 +1313,7 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		Provider     string `json:"provider"`
 		Parent       string `json:"parent"`
 		Unrestricted bool   `json:"unrestricted"`
+		Template     string `json:"template"`
 	}
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -1324,24 +1326,98 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		p.Provider = r.FormValue("provider")
 		p.Parent = r.FormValue("parent")
 		p.Unrestricted = r.FormValue("unrestricted") == "true" || r.FormValue("unrestricted") == "on"
+		p.Template = r.FormValue("template")
 	}
-	if p.Model == "" {
-		writeErr(w, 400, "model is required")
+
+	// Load template if specified
+	var templateModel, templateLaunchType, templateClass string
+	if p.Template != "" {
+		tplCfg, err := config.LoadShipTemplates(s.Root)
+		if err != nil {
+			writeErr(w, 500, fmt.Sprintf("load templates: %v", err))
+			return
+		}
+		tpl, err := tplCfg.GetTemplate(p.Template)
+		if err != nil {
+			writeErr(w, 400, fmt.Sprintf("%v (available: %v)", err, tplCfg.ListTemplateNames()))
+			return
+		}
+		templateModel = tpl.Model
+		templateLaunchType = tpl.SessionType
+		templateClass = tpl.Name
+	}
+
+	// Template values are defaults; explicit flags override them
+	model := p.Model
+	if model == "" {
+		model = templateModel
+	}
+	launchType := "auto"
+	if launchType == "auto" && templateLaunchType != "" {
+		launchType = templateLaunchType
+	}
+	class := ""
+	if class == "" && templateClass != "" {
+		class = templateClass
+	}
+
+	if model == "" {
+		writeErr(w, 400, "model is required (or use --template)")
 		return
 	}
 	shipID, err := session.LaunchShip(s.Root, session.LaunchShipOpts{
 		Name:         p.Name,
-		Model:        p.Model,
+		Model:        model,
 		Provider:     p.Provider,
 		Parent:       p.Parent,
-		LaunchType:   "auto",
+		LaunchType:   launchType,
 		Unrestricted: p.Unrestricted,
+		Class:        class,
 	})
 	if err != nil {
 		writeErr(w, 409, err.Error())
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "ship_id": shipID})
+}
+
+// apiTemplatesList returns the list of available ship templates.
+func (s *Server) apiTemplatesList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	tplCfg, err := config.LoadShipTemplates(s.Root)
+	if err != nil {
+		writeErr(w, 500, fmt.Sprintf("load templates: %v", err))
+		return
+	}
+	type TemplateResponse struct {
+		Name          string   `json:"name"`
+		Description   string   `json:"description"`
+		Model         string   `json:"model"`
+		SessionType   string   `json:"session_type"`
+		NamePrefix    string   `json:"name_prefix"`
+		SkillsAlways  []string `json:"skills_always"`
+		SkillOptional string   `json:"skill_optional"`
+		Timeout       string   `json:"timeout"`
+		AutoCleanup   bool     `json:"auto_cleanup"`
+	}
+	var resp []TemplateResponse
+	for _, tpl := range tplCfg.Templates {
+		resp = append(resp, TemplateResponse{
+			Name:          tpl.Name,
+			Description:   tpl.Description,
+			Model:         tpl.Model,
+			SessionType:   tpl.SessionType,
+			NamePrefix:    tpl.NamePrefix,
+			SkillsAlways:  tpl.SkillsAlways,
+			SkillOptional: tpl.SkillOptional,
+			Timeout:       tpl.Timeout,
+			AutoCleanup:   tpl.AutoCleanup,
+		})
+	}
+	writeJSON(w, resp)
 }
 
 // apiShipDispatch routes /api/ship/<id>/... to the appropriate handler.
