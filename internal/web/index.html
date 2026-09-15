@@ -1633,6 +1633,27 @@ async function orphanReassign(slug, selId){
 // "starfleet/plan-mode-dashboard-access" -> "starfleet".
 function taskPrefix(slug){ const i = slug.indexOf('/'); return i<0 ? slug : slug.slice(0,i); }
 
+// taskDisplayCategory returns the category to display for a task slug.
+// - For toplevel slugs (no "/"): returns "" (no category prefix).
+// - For slugs like "parked/xlibre/foo", "done/xlibre/bar", "analysis/starfleet/baz":
+//   the first segment ("parked", "done", "analysis") is a status-like category
+//   that confuses with task status. Return the second segment ("xlibre", "starfleet")
+//   instead. For other categories like "starfleet/task-x", return the first segment.
+function taskDisplayCategory(slug){
+  const i = slug.indexOf('/');
+  if (i < 0) return ""; // toplevel
+  const first = slug.slice(0, i);
+  // Status-like categories that should not be displayed as category
+  const statusLike = new Set(['parked', 'done', 'analysis']);
+  if (statusLike.has(first)){
+    // Return the second segment if it exists
+    const rest = slug.slice(i+1);
+    const j = rest.indexOf('/');
+    return j < 0 ? rest : rest.slice(0, j);
+  }
+  return first;
+}
+
 // Status sort order — stable priority list; unknown statuses sort last.
 const taskStatusRank = {'':0,'open':1,'assigned':2,'in-progress':3,'parked':4,'done':5};
 
@@ -1685,10 +1706,11 @@ function renderTasks(){
     const worker = workers[r.slug];
     const assignOpts = '<option value="__auto__">'+t('task.assign.auto')+'</option>' +
       ships.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-    const categoryText = r.category || "(toplevel)";
-    const displayTitle = `[${categoryText}] ${r.title || r.slug}`;
+    const displayCategory = taskDisplayCategory(r.slug);
+    const displayTitle = r.title || r.slug;
+    const categorySpan = displayCategory ? `<span class="task-cat">[${esc(displayCategory)}]</span> ` : '';
     return `<div class="card">
-      <div class="row"><b class="grow"><span class="task-title-link" onclick="taskDetail('${esc(r.slug)}')">${esc(displayTitle)}</span></b>
+      <div class="row"><b class="grow">${categorySpan}<span class="task-title-link" onclick="taskDetail('${esc(r.slug)}')">${esc(displayTitle)}</span></b>
         <span class="pill ${cls}">${esc(r.status)}</span></div>
       <div class="muted" style="margin-top:4px">${esc(r.slug)} · 👤 ${esc(r.assigned_to||'-')}${worker?` · 🔧 ${esc(worker)}${t('task.worker')}`:''}</div>
       <div class="actions">
@@ -1756,7 +1778,8 @@ async function taskDetail(slug){
     const t = await api('/api/topic/' + encodeURIComponent(slug));
     taskDetailSlug = slug;
     taskDetailCat = t.category || '';
-    document.getElementById('task_m_title').textContent = t.title;
+    const displayTitle = t.title || t.slug;
+    document.getElementById('task_m_title').textContent = displayTitle;
     document.getElementById('task_m_meta').innerHTML =
       'From: ' + esc(t.created_by || '—') + '<br>' +
       'Date: ' + esc(t.created || '—') + '<br>' +
@@ -1765,7 +1788,7 @@ async function taskDetail(slug){
       'Category: ' + esc(t.category || '(toplevel)') + ' · ' +
       'Kind: ' + esc(t.kind || 'task') + '<br>' +
       esc(t.slug);
-    document.getElementById('task_m_t').value = t.title;
+    document.getElementById('task_m_t').value = displayTitle;
     document.getElementById('task_m_text').value = t.body || '';
     // Category select: distinct real categories (slug prefixes) + toplevel.
     const cats = [...new Set(taskState.rows.map(r=>{const i=r.slug.indexOf('/'); return i<0?'':r.slug.slice(0,i)}))].filter(c=>c!=='').sort();
