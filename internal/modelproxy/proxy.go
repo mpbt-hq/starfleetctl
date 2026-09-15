@@ -11,11 +11,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/config"
 )
 
 // ModelInfo is one model entry served by GET /v1/models. The upstream fields
@@ -23,14 +26,65 @@ import (
 // /models response; Label/Context/Caps are enriched from the opencode model
 // catalog (the upstreams themselves only expose the bare OpenAI fields).
 type ModelInfo struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object,omitempty"`
-	Created int64    `json:"created,omitempty"`
-	OwnedBy string   `json:"owned_by,omitempty"`
-	Label   string   `json:"label,omitempty"`
-	Context int      `json:"context,omitempty"`
-	Output  int      `json:"output,omitempty"`
-	Caps    []string `json:"caps,omitempty"`
+	ID            string   `json:"id"`
+	Object        string   `json:"object,omitempty"`
+	Created       int64    `json:"created,omitempty"`
+	OwnedBy       string   `json:"owned_by,omitempty"`
+	Label         string   `json:"label,omitempty"`
+	Context       int      `json:"context,omitempty"`
+	Output        int      `json:"output,omitempty"`
+	Caps          []string `json:"caps,omitempty"`
+	ContextWindow int      `json:"context_window,omitempty"` // effective context window for strategy
+}
+
+// StrategyState tracks the runtime state of a strategy.
+type StrategyState struct {
+	Name            string
+	Type            config.ModelProxyStrategyType
+	EffectiveLimit  int
+	Models          []config.ModelProxyStrategyModel
+	CurrentIndex    int                             // for round-robin
+	StickyModel     string                          // for weighted sticky: chosen model
+	StickyChosenAt  time.Time                       // when sticky model was chosen
+	CircuitBreakers map[string]*CircuitBreakerState // per-model circuit breaker
+	ModelMetrics    map[string]*ModelMetrics        // per-model metrics
+	mu              sync.Mutex
+}
+
+// CircuitBreakerStateEnum represents the circuit breaker state.
+type CircuitBreakerStateEnum int
+
+const (
+	CircuitBreakerClosed CircuitBreakerStateEnum = iota
+	CircuitBreakerOpen
+	CircuitBreakerHalfOpen
+)
+
+// CircuitBreakerState represents the circuit breaker for a model.
+type CircuitBreakerState struct {
+	State           CircuitBreakerStateEnum
+	FailureCount    int
+	SuccessCount    int
+	LastFailure     time.Time
+	LastStateChange time.Time
+	mu              sync.Mutex
+}
+
+// ModelMetrics tracks metrics for a model.
+type ModelMetrics struct {
+	RequestCount        int64
+	ErrorCount          int64
+	TotalLatency        time.Duration
+	TotalTokens         int64
+	ConsecutiveFailures int
+	LastRequest         time.Time
+	mu                  sync.Mutex
+}
+
+// SessionAffinity maps session ID to chosen model for sticky routing.
+type SessionAffinity struct {
+	mu      sync.Mutex
+	mapping map[string]string // sessionID -> modelID
 }
 
 // Proxy is the local OpenAI-compatible model API server that fronts the
@@ -51,6 +105,11 @@ type Proxy struct {
 	// Retry-After headers, instead of each request retrying individually.
 	satMu sync.Mutex
 	sat   map[string]*saturationState
+
+	// Strategy routing
+	strategyMu      sync.RWMutex
+	strategies      map[string]*StrategyState
+	sessionAffinity *SessionAffinity
 }
 
 // saturationState tracks the saturation cooldown for a single provider.
@@ -63,19 +122,28 @@ type saturationState struct {
 // New builds a Proxy from a resolved config.
 func New(cfg *Config) *Proxy {
 	p := &Proxy{
-		cfg:       cfg,
-		logger:    log.Default(),
-		modelSets: map[string]map[string]bool{},
-		modelInfo: map[string][]ModelInfo{},
-		cacheAt:   map[string]time.Time{},
-		tracker:   newShipTracker(),
-		sat:       map[string]*saturationState{},
+		cfg:             cfg,
+		logger:          log.Default(),
+		modelSets:       map[string]map[string]bool{},
+		modelInfo:       map[string][]ModelInfo{},
+		cacheAt:         map[string]time.Time{},
+		tracker:         newShipTracker(),
+		sat:             map[string]*saturationState{},
+		strategies:      map[string]*StrategyState{},
+		sessionAffinity: &SessionAffinity{mapping: make(map[string]string)},
 	}
 	p.mux = http.NewServeMux()
 	p.mux.HandleFunc("/v1/models", p.handleModels)
 	p.mux.HandleFunc("/v1/chat/completions", p.handleChat)
 	p.mux.HandleFunc("/v1/ships", p.handleShips)
 	p.mux.HandleFunc("/healthz", p.handleHealth)
+	p.mux.HandleFunc("/v1/meta-models", p.handleMetaModels)
+	p.mux.HandleFunc("/v1/meta-models/", p.handleMetaModelDispatch)
+	p.mux.HandleFunc("/v1/meta-models/sessions", p.handleMetaModelSessions)
+	p.mux.HandleFunc("/v1/meta-models/switch", p.handleMetaModelSwitch)
+	p.mux.HandleFunc("/v1/meta-models/force", p.handleMetaModelForce)
+	// Initialize strategy state
+	p.initStrategies()
 	return p
 }
 
@@ -95,9 +163,333 @@ func (p *Proxy) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// providerModelSet returns the set of model IDs a provider serves, using a
-// short-lived cache and falling back to the upstream /models query. Empty on
-// any error (the caller treats unknown models accordingly).
+// initStrategies initializes the strategy state from config.
+func (p *Proxy) initStrategies() {
+	p.strategyMu.Lock()
+	defer p.strategyMu.Unlock()
+	for _, strat := range p.cfg.Strategies {
+		ss := &StrategyState{
+			Name:            strat.ID,
+			Type:            config.ModelProxyStrategyType(strat.Strategy),
+			EffectiveLimit:  strat.EffectiveLimit,
+			Models:          strat.Models,
+			CircuitBreakers: make(map[string]*CircuitBreakerState),
+			ModelMetrics:    make(map[string]*ModelMetrics),
+		}
+		for _, m := range strat.Models {
+			ss.CircuitBreakers[m.ID] = &CircuitBreakerState{
+				State:           CircuitBreakerClosed,
+				LastStateChange: time.Now(),
+			}
+			ss.ModelMetrics[m.ID] = &ModelMetrics{}
+		}
+		p.strategies[strat.ID] = ss
+		p.logf("initialized strategy %s (type=%s, effective_limit=%d, models=%d)", strat.ID, strat.Strategy, strat.EffectiveLimit, len(strat.Models))
+	}
+}
+
+// getStrategy returns the StrategyState for a given strategy ID.
+func (p *Proxy) getStrategy(id string) *StrategyState {
+	p.strategyMu.RLock()
+	defer p.strategyMu.RUnlock()
+	return p.strategies[id]
+}
+
+// getStrategyForModel finds the strategy that serves a given model.
+func (p *Proxy) getStrategyForModel(model string) *StrategyState {
+	p.strategyMu.RLock()
+	defer p.strategyMu.RUnlock()
+	for _, ss := range p.strategies {
+		for _, m := range ss.Models {
+			if m.ID == model {
+				return ss
+			}
+		}
+	}
+	return nil
+}
+
+// routeStrategyModel picks the model to use for a request within a strategy.
+func (p *Proxy) routeStrategyModel(ss *StrategyState, sessionID, requestedModel string) (string, *Provider, error) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if len(ss.Models) == 0 {
+		return "", nil, fmt.Errorf("strategy %s has no models", ss.Name)
+	}
+
+	// Check if we have a sticky model for this session
+	if ss.Type == config.ModelProxyStrategyTypeWeighted && ss.StickyModel != "" && sessionID != "" {
+		if p.sessionAffinity != nil {
+			p.sessionAffinity.mu.Lock()
+			chosen, ok := p.sessionAffinity.mapping[sessionID]
+			p.sessionAffinity.mu.Unlock()
+			if ok && chosen != "" {
+				// Verify the model is still available and circuit breaker is closed
+				if cb := ss.CircuitBreakers[chosen]; cb != nil {
+					cb.mu.Lock()
+					state := cb.State
+					cb.mu.Unlock()
+					if state == CircuitBreakerClosed {
+						prov := ss.GetProviderForModel(chosen, p.cfg.Providers)
+						if prov != nil {
+							return chosen, prov, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var chosenModel string
+	var chosenProv *Provider
+
+	switch ss.Type {
+	case config.ModelProxyStrategyTypeSingle:
+		chosenModel = ss.Models[0].ID
+		chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
+	case config.ModelProxyStrategyTypeFallback:
+		// Sort by priority (lower = first)
+		for _, m := range ss.Models {
+			if cb := ss.CircuitBreakers[m.ID]; cb != nil {
+				cb.mu.Lock()
+				state := cb.State
+				cb.mu.Unlock()
+				if state == CircuitBreakerOpen {
+					continue // skip open circuit breakers
+				}
+			}
+			chosenModel = m.ID
+			chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
+			if chosenProv != nil {
+				break
+			}
+		}
+	case config.ModelProxyStrategyTypeRoundRobin:
+		// Find next available model
+		for i := 0; i < len(ss.Models); i++ {
+			idx := (ss.CurrentIndex + i) % len(ss.Models)
+			m := ss.Models[idx]
+			if cb := ss.CircuitBreakers[m.ID]; cb != nil {
+				cb.mu.Lock()
+				state := cb.State
+				cb.mu.Unlock()
+				if state == CircuitBreakerOpen {
+					continue
+				}
+			}
+			chosenModel = m.ID
+			chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
+			if chosenProv != nil {
+				ss.CurrentIndex = (idx + 1) % len(ss.Models)
+				break
+			}
+		}
+	case config.ModelProxyStrategyTypeWeighted:
+		// Sticky selection: choose a model weighted by weight, then stick to it
+		if ss.StickyModel != "" && sessionID != "" {
+			if p.sessionAffinity != nil {
+				p.sessionAffinity.mu.Lock()
+				chosen, ok := p.sessionAffinity.mapping[sessionID]
+				p.sessionAffinity.mu.Unlock()
+				if ok && chosen != "" {
+					if cb := ss.CircuitBreakers[chosen]; cb != nil {
+						cb.mu.Lock()
+						state := cb.State
+						cb.mu.Unlock()
+						if state == CircuitBreakerClosed {
+							chosenModel = chosen
+							chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
+						}
+					}
+				}
+			}
+		}
+
+		// If no sticky model or circuit breaker open, pick a new one
+		if chosenModel == "" || chosenProv == nil {
+			// Build weighted list of available models
+			type weightedModel struct {
+				model  string
+				weight int
+			}
+			var available []weightedModel
+			totalWeight := 0
+			for _, m := range ss.Models {
+				if cb := ss.CircuitBreakers[m.ID]; cb != nil {
+					cb.mu.Lock()
+					state := cb.State
+					cb.mu.Unlock()
+					if state == CircuitBreakerOpen {
+						continue
+					}
+				}
+				prov := ss.GetProviderForModel(m.ID, p.cfg.Providers)
+				if prov != nil {
+					w := m.Weight
+					if w <= 0 {
+						w = 1
+					}
+					available = append(available, weightedModel{m.ID, w})
+					totalWeight += w
+				}
+			}
+			if len(available) == 0 {
+				return "", nil, fmt.Errorf("no available models in strategy %s (all circuit breakers open)", ss.Name)
+			}
+			// Weighted random selection
+			r := rand.Intn(totalWeight)
+			accum := 0
+			for _, am := range available {
+				accum += am.weight
+				if r < accum {
+					chosenModel = am.model
+					chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
+					break
+				}
+			}
+			// Set sticky model
+			ss.StickyModel = chosenModel
+			ss.StickyChosenAt = time.Now()
+			if sessionID != "" && p.sessionAffinity != nil {
+				p.sessionAffinity.mu.Lock()
+				p.sessionAffinity.mapping[sessionID] = chosenModel
+				p.sessionAffinity.mu.Unlock()
+			}
+		}
+	}
+
+	if chosenModel == "" || chosenProv == nil {
+		return "", nil, fmt.Errorf("no available models in strategy %s", ss.Name)
+	}
+
+	return chosenModel, chosenProv, nil
+}
+
+// GetProviderForModel returns the Provider for a model in this strategy.
+func (ss *StrategyState) GetProviderForModel(modelID string, providers []Provider) *Provider {
+	for _, m := range ss.Models {
+		if m.ID == modelID {
+			for i := range providers {
+				if providers[i].ID == m.Provider {
+					return &providers[i]
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// recordStrategyMetrics records metrics for a model in a strategy.
+func (p *Proxy) recordStrategyMetrics(ss *StrategyState, modelID string, latency time.Duration, tokens int, err error) {
+	ss.mu.Lock()
+	metrics := ss.ModelMetrics[modelID]
+	ss.mu.Unlock()
+
+	if metrics == nil {
+		return
+	}
+
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	metrics.RequestCount++
+	metrics.TotalLatency += latency
+	metrics.TotalTokens += int64(tokens)
+	metrics.LastRequest = time.Now()
+	if err != nil {
+		metrics.ErrorCount++
+		metrics.ConsecutiveFailures++
+	} else {
+		metrics.ConsecutiveFailures = 0
+	}
+}
+
+// checkCircuitBreaker checks and updates circuit breaker state based on heuristics.
+func (p *Proxy) checkCircuitBreaker(ss *StrategyState, modelID string) {
+	ss.mu.Lock()
+	cb := ss.CircuitBreakers[modelID]
+	metrics := ss.ModelMetrics[modelID]
+	ss.mu.Unlock()
+
+	if cb == nil || metrics == nil {
+		return
+	}
+
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+
+	// Check consecutive failures threshold
+	if metrics.ConsecutiveFailures >= 3 {
+		if cb.State == CircuitBreakerClosed {
+			p.logf("circuit breaker OPEN for model %s in strategy %s (consecutive failures: %d)", modelID, ss.Name, metrics.ConsecutiveFailures)
+			cb.State = CircuitBreakerOpen
+			cb.LastStateChange = time.Now()
+		}
+		return
+	}
+
+	// Check error rate threshold (20% in 5 minutes)
+	if metrics.RequestCount > 10 {
+		errorRate := float64(metrics.ErrorCount) / float64(metrics.RequestCount)
+		if errorRate > 0.20 {
+			if cb.State == CircuitBreakerClosed {
+				p.logf("circuit breaker OPEN for model %s in strategy %s (error rate: %.2f%%)", modelID, ss.Name, errorRate*100)
+				cb.State = CircuitBreakerOpen
+				cb.LastStateChange = time.Now()
+			}
+			return
+		}
+	}
+
+	// Check latency threshold (p95 > 30s)
+	if metrics.RequestCount > 5 {
+		avgLatency := metrics.TotalLatency / time.Duration(metrics.RequestCount)
+		if avgLatency > 30*time.Second {
+			if cb.State == CircuitBreakerClosed {
+				p.logf("circuit breaker OPEN for model %s in strategy %s (avg latency: %v)", modelID, ss.Name, avgLatency)
+				cb.State = CircuitBreakerOpen
+				cb.LastStateChange = time.Now()
+			}
+			return
+		}
+	}
+
+	// Check token throughput threshold (< 10 tokens/s)
+	if metrics.RequestCount > 5 && metrics.TotalTokens > 0 {
+		throughput := float64(metrics.TotalTokens) / metrics.TotalLatency.Seconds()
+		if throughput < 10 {
+			if cb.State == CircuitBreakerClosed {
+				p.logf("circuit breaker OPEN for model %s in strategy %s (throughput: %.2f tokens/s)", modelID, ss.Name, throughput)
+				cb.State = CircuitBreakerOpen
+				cb.LastStateChange = time.Now()
+			}
+			return
+		}
+	}
+
+	// Half-open recovery: if half-open and we have successes, close
+	if cb.State == CircuitBreakerHalfOpen {
+		if metrics.ConsecutiveFailures == 0 && metrics.RequestCount > 0 {
+			p.logf("circuit breaker CLOSED for model %s in strategy %s (recovery)", modelID, ss.Name)
+			cb.State = CircuitBreakerClosed
+			cb.LastStateChange = time.Now()
+			metrics.ConsecutiveFailures = 0
+		}
+	}
+
+	// Auto-recover: if open for more than cooldown, go to half-open
+	if cb.State == CircuitBreakerOpen {
+		// Default cooldown: 5 minutes
+		cooldown := 5 * time.Minute
+		if time.Since(cb.LastStateChange) > cooldown {
+			p.logf("circuit breaker HALF-OPEN for model %s in strategy %s (cooldown expired)", modelID, ss.Name)
+			cb.State = CircuitBreakerHalfOpen
+			cb.LastStateChange = time.Now()
+		}
+	}
+}
 func (p *Proxy) providerModelSet(prov Provider) map[string]bool {
 	p.cacheMu.RLock()
 	set, ok := p.modelSets[prov.ID]
@@ -233,6 +625,8 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	providerID := r.URL.Query().Get("provider")
 	data := []ModelInfo{}
+
+	// Add provider models
 	for _, prov := range p.cfg.Providers {
 		if providerID != "" && prov.ID != providerID {
 			continue
@@ -244,7 +638,279 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 			data = append(data, m)
 		}
 	}
+
+	// Add strategy meta-models with effective context window
+	for _, strat := range p.cfg.Strategies {
+		for _, m := range strat.Models {
+			data = append(data, ModelInfo{
+				ID:            m.ID,
+				Object:        "model",
+				OwnedBy:       "strategy:" + strat.ID,
+				Label:         m.ID + " (via " + strat.ID + ")",
+				ContextWindow: strat.EffectiveLimit,
+			})
+		}
+	}
+
 	writeJSON(w, map[string]any{"object": "list", "data": data})
+}
+
+// handleMetaModels handles GET /v1/meta-models — list all strategies.
+func (p *Proxy) handleMetaModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	type StrategyResponse struct {
+		ID             string                              `json:"id"`
+		Description    string                              `json:"description"`
+		DefaultModel   string                              `json:"default_model"`
+		Models         []config.ModelProxyStrategyModel    `json:"models"`
+		Type           string                              `json:"strategy"`
+		EffectiveLimit int                                 `json:"effective_limit"`
+		Triggers       config.ModelProxyStrategyTriggers   `json:"triggers"`
+		Heuristics     config.ModelProxyStrategyHeuristics `json:"heuristics"`
+	}
+	var resp []StrategyResponse
+	for _, s := range p.cfg.Strategies {
+		resp = append(resp, StrategyResponse{
+			ID:             s.ID,
+			Description:    s.Description,
+			DefaultModel:   s.DefaultModel,
+			Models:         s.Models,
+			Type:           s.Strategy,
+			EffectiveLimit: s.EffectiveLimit,
+			Triggers:       s.Triggers,
+			Heuristics:     s.Heuristics,
+		})
+	}
+	writeJSON(w, resp)
+}
+
+// handleMetaModelDispatch handles GET /v1/meta-models/<strategy> — get strategy details.
+func (p *Proxy) handleMetaModelDispatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	strategyID := strings.TrimPrefix(r.URL.Path, "/v1/meta-models/")
+	if strategyID == "" {
+		writeErr(w, 400, "strategy ID required")
+		return
+	}
+	strat := p.getStrategy(strategyID)
+	if strat == nil {
+		writeErr(w, 404, "strategy not found")
+		return
+	}
+	type StrategyDetailResponse struct {
+		ID             string                              `json:"id"`
+		Description    string                              `json:"description"`
+		DefaultModel   string                              `json:"default_model"`
+		Models         []config.ModelProxyStrategyModel    `json:"models"`
+		Type           string                              `json:"strategy"`
+		EffectiveLimit int                                 `json:"effective_limit"`
+		Triggers       config.ModelProxyStrategyTriggers   `json:"triggers"`
+		Heuristics     config.ModelProxyStrategyHeuristics `json:"heuristics"`
+		// Runtime state
+		CurrentIndex    int                    `json:"current_index"`
+		StickyModel     string                 `json:"sticky_model"`
+		CircuitBreakers map[string]string      `json:"circuit_breakers"`
+		Metrics         map[string]interface{} `json:"metrics"`
+	}
+	cbStates := make(map[string]string)
+	for modelID, cb := range strat.CircuitBreakers {
+		cb.mu.Lock()
+		cbStates[modelID] = fmt.Sprintf("%d", cb.State)
+		cb.mu.Unlock()
+	}
+	metrics := make(map[string]interface{})
+	for modelID, m := range strat.ModelMetrics {
+		m.mu.Lock()
+		metrics[modelID] = map[string]interface{}{
+			"request_count":        m.RequestCount,
+			"error_count":          m.ErrorCount,
+			"avg_latency_ms":       float64(m.TotalLatency.Milliseconds()) / float64(max(1, m.RequestCount)),
+			"total_tokens":         m.TotalTokens,
+			"consecutive_failures": m.ConsecutiveFailures,
+			"last_request":         m.LastRequest.Format(time.RFC3339),
+		}
+		m.mu.Unlock()
+	}
+	// Find the config for this strategy
+	var stratConfig *config.ModelProxyStrategy
+	for _, s := range p.cfg.Strategies {
+		if s.ID == strategyID {
+			stratConfig = &s
+			break
+		}
+	}
+	if stratConfig == nil {
+		writeErr(w, 404, "strategy not found in config")
+		return
+	}
+
+	resp := StrategyDetailResponse{
+		ID:              strat.Name,
+		Description:     stratConfig.Description,
+		DefaultModel:    stratConfig.DefaultModel,
+		Models:          strat.Models,
+		Type:            stratConfig.Strategy,
+		EffectiveLimit:  strat.EffectiveLimit,
+		Triggers:        stratConfig.Triggers,
+		Heuristics:      stratConfig.Heuristics,
+		CurrentIndex:    strat.CurrentIndex,
+		StickyModel:     strat.StickyModel,
+		CircuitBreakers: cbStates,
+		Metrics:         metrics,
+	}
+	writeJSON(w, resp)
+}
+
+// handleMetaModelSessions handles GET /v1/meta-models/sessions — list all sessions.
+func (p *Proxy) handleMetaModelSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	if p.sessionAffinity == nil {
+		writeJSON(w, map[string]any{"sessions": []string{}})
+		return
+	}
+	p.sessionAffinity.mu.Lock()
+	sessions := make(map[string]string)
+	for k, v := range p.sessionAffinity.mapping {
+		sessions[k] = v
+	}
+	p.sessionAffinity.mu.Unlock()
+	writeJSON(w, map[string]any{"sessions": sessions})
+}
+
+// handleMetaModelSwitch handles POST /v1/meta-models/switch — manually switch a session's model.
+func (p *Proxy) handleMetaModelSwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		Strategy  string `json:"strategy"`
+		Model     string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if req.SessionID == "" || req.Strategy == "" || req.Model == "" {
+		writeErr(w, 400, "session_id, strategy, and model are required")
+		return
+	}
+	strat := p.getStrategy(req.Strategy)
+	if strat == nil {
+		writeErr(w, 404, "strategy not found")
+		return
+	}
+	// Verify model is in strategy
+	found := false
+	for _, m := range strat.Models {
+		if m.ID == req.Model {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, 400, "model not in strategy")
+		return
+	}
+	// Check circuit breaker
+	strat.mu.Lock()
+	cb := strat.CircuitBreakers[req.Model]
+	strat.mu.Unlock()
+	if cb != nil {
+		cb.mu.Lock()
+		if cb.State == CircuitBreakerOpen {
+			cb.mu.Unlock()
+			writeErr(w, 409, "model circuit breaker is open")
+			return
+		}
+		cb.mu.Unlock()
+	}
+	// Set affinity
+	if p.sessionAffinity != nil {
+		p.sessionAffinity.mu.Lock()
+		p.sessionAffinity.mapping[req.SessionID] = req.Model
+		p.sessionAffinity.mu.Unlock()
+	}
+	// Update strategy sticky model
+	strat.mu.Lock()
+	strat.StickyModel = req.Model
+	strat.StickyChosenAt = time.Now()
+	strat.mu.Unlock()
+	writeJSON(w, map[string]any{"ok": true, "session_id": req.SessionID, "model": req.Model})
+}
+
+// handleMetaModelForce handles POST /v1/meta-models/force — force all sessions to use a model.
+func (p *Proxy) handleMetaModelForce(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	var req struct {
+		Strategy string `json:"strategy"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	if req.Strategy == "" || req.Model == "" {
+		writeErr(w, 400, "strategy and model are required")
+		return
+	}
+	strat := p.getStrategy(req.Strategy)
+	if strat == nil {
+		writeErr(w, 404, "strategy not found")
+		return
+	}
+	// Verify model is in strategy
+	found := false
+	for _, m := range strat.Models {
+		if m.ID == req.Model {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, 400, "model not in strategy")
+		return
+	}
+	// Check circuit breaker
+	strat.mu.Lock()
+	cb := strat.CircuitBreakers[req.Model]
+	strat.mu.Unlock()
+	if cb != nil {
+		cb.mu.Lock()
+		if cb.State == CircuitBreakerOpen {
+			cb.mu.Unlock()
+			writeErr(w, 409, "model circuit breaker is open")
+			return
+		}
+		cb.mu.Unlock()
+	}
+	// Update all session affinities
+	if p.sessionAffinity != nil {
+		p.sessionAffinity.mu.Lock()
+		for sessionID := range p.sessionAffinity.mapping {
+			p.sessionAffinity.mapping[sessionID] = req.Model
+		}
+		p.sessionAffinity.mu.Unlock()
+	}
+	// Update strategy sticky model
+	strat.mu.Lock()
+	strat.StickyModel = req.Model
+	strat.StickyChosenAt = time.Now()
+	strat.mu.Unlock()
+	writeJSON(w, map[string]any{"ok": true, "strategy": req.Strategy, "model": req.Model})
 }
 
 // transientStatus reports whether an HTTP status from the upstream is a
@@ -363,18 +1029,59 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid json: "+err.Error())
 		return
 	}
-	prov, upstreamModel := p.routeModel(req.Model)
-	if prov == nil {
-		writeErr(w, 400, fmt.Sprintf("model %q not served by any configured model-proxy provider", req.Model))
-		return
+
+	// Get session ID for strategy affinity
+	sessionID := r.Header.Get("X-Session-Id")
+	if sessionID == "" {
+		sessionID = r.Header.Get("x-opencode-session")
 	}
+
+	// Check if the model is a strategy
+	strat := p.getStrategyForModel(req.Model)
+	var prov *Provider
+	var upstreamModel string
+	var effectiveLimit int
+
+	if strat != nil {
+		// Route through strategy
+		chosenModel, chosenProv, err := p.routeStrategyModel(strat, sessionID, req.Model)
+		if err != nil {
+			writeErr(w, 503, err.Error())
+			return
+		}
+		prov = chosenProv
+		upstreamModel = chosenModel
+		effectiveLimit = strat.EffectiveLimit
+	} else {
+		// Direct provider routing
+		prov, upstreamModel = p.routeModel(req.Model)
+		if prov == nil {
+			writeErr(w, 400, fmt.Sprintf("model %q not served by any configured model-proxy provider", req.Model))
+			return
+		}
+		// Get effective limit from strategy if available, else from catalog
+		for _, s := range p.cfg.Strategies {
+			for _, m := range s.Models {
+				if m.ID == req.Model {
+					effectiveLimit = s.EffectiveLimit
+					break
+				}
+			}
+		}
+	}
+
+	// Set X-Context-Limit header for opencode
+	if effectiveLimit > 0 {
+		w.Header().Set("X-Context-Limit", fmt.Sprintf("%d", effectiveLimit))
+	}
+
 	ship := shipFromRequest(r.Header.Get("Authorization"))
-	p.forwardChat(w, r, prov, upstreamModel, body, isStreamingRequest(body), ship, req.Model)
+	p.forwardChat(w, r, prov, upstreamModel, body, isStreamingRequest(body), ship, req.Model, effectiveLimit)
 }
 
 // forwardChat performs the (possibly retried) upstream chat request and
 // records the outcome in the per-ship tracker.
-func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string) {
+func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string, effectiveLimit int) {
 	client := &http.Client{Timeout: 0} // streaming needs no client-side deadline; server read deadline governs
 	attempts := prov.MaxRetries + 1
 
@@ -414,6 +1121,7 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 	retries := 0
 	writeHeaders := true
 	skipSaturationWait := false // skip waitForSaturationGate after recording saturation for retry
+	startTime := time.Now()
 	for attempt := 1; attempt <= attempts; attempt++ {
 		// Wait for saturation gate (global cooldown per provider), unless we just
 		// recorded saturation and are about to retry (we already slept RetryDelayMS)
@@ -441,6 +1149,10 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				continue
 			}
 			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
+			if strat := p.getStrategyForModel(requestedModel); strat != nil {
+				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, err)
+				p.checkCircuitBreaker(strat, requestedModel)
+			}
 			writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, err))
 			return
 		}
@@ -466,6 +1178,10 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				p.recordSaturation(prov, resp)
 			}
 			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
+			if strat := p.getStrategyForModel(requestedModel); strat != nil {
+				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, fmt.Errorf("HTTP %d", resp.StatusCode))
+				p.checkCircuitBreaker(strat, requestedModel)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(resp.StatusCode)
 			if len(errBody) > 0 {
@@ -489,11 +1205,25 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				continue
 			}
 			p.tracker.record(ship, prov.ID, requestedModel, usage, retries, failed)
+			if strat := p.getStrategyForModel(requestedModel); strat != nil {
+				tokens := 0
+				if usage != nil {
+					tokens = int(usage.PromptTokens + usage.CompletionTokens)
+				}
+				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), tokens, nil)
+				if failed {
+					p.checkCircuitBreaker(strat, requestedModel)
+				}
+			}
 		} else {
 			bodyBytes, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
+				if strat := p.getStrategyForModel(requestedModel); strat != nil {
+					p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, err)
+					p.checkCircuitBreaker(strat, requestedModel)
+				}
 				writeErr(w, 502, fmt.Sprintf("upstream %s: read response: %v", prov.ID, err))
 				return
 			}
@@ -502,10 +1232,21 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			w.WriteHeader(resp.StatusCode)
 			_, _ = w.Write(bodyBytes)
 			p.tracker.record(ship, prov.ID, requestedModel, usage, retries, false)
+			if strat := p.getStrategyForModel(requestedModel); strat != nil {
+				tokens := 0
+				if usage != nil {
+					tokens = int(usage.PromptTokens + usage.CompletionTokens)
+				}
+				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), tokens, nil)
+			}
 		}
 		return
 	}
 	p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
+	if strat := p.getStrategyForModel(requestedModel); strat != nil {
+		p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, lastErr)
+		p.checkCircuitBreaker(strat, requestedModel)
+	}
 	writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, lastErr))
 }
 

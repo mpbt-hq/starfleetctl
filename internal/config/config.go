@@ -44,6 +44,79 @@ type ModelProxyConfig struct {
 	LogFile    string `yaml:"log_file"`
 	// Providers is the ordered list of upstream backends to proxy.
 	Providers []ModelProxyProvider `yaml:"providers"`
+	// Strategies defines meta-model routing strategies.
+	Strategies []ModelProxyStrategy `yaml:"strategies"`
+	// Routing maps strategy names to strategy IDs.
+	Routing ModelProxyRouting `yaml:"routing"`
+}
+
+// ModelProxyStrategy defines a meta-model routing strategy.
+type ModelProxyStrategy struct {
+	ID             string                       `yaml:"id"`
+	Description    string                       `yaml:"description"`
+	DefaultModel   string                       `yaml:"default_model"`
+	Models         []ModelProxyStrategyModel    `yaml:"models"`
+	Strategy       string                       `yaml:"strategy"`
+	EffectiveLimit int                          `yaml:"-"` // computed: min(context_window)
+	Triggers       ModelProxyStrategyTriggers   `yaml:"triggers"`
+	Heuristics     ModelProxyStrategyHeuristics `yaml:"heuristics"`
+}
+
+// ModelProxyStrategyType defines the routing strategy type.
+type ModelProxyStrategyType string
+
+const (
+	ModelProxyStrategyTypeSingle     ModelProxyStrategyType = "single"
+	ModelProxyStrategyTypeFallback   ModelProxyStrategyType = "fallback"
+	ModelProxyStrategyTypeRoundRobin ModelProxyStrategyType = "round-robin"
+	ModelProxyStrategyTypeWeighted   ModelProxyStrategyType = "weighted"
+)
+
+// ModelProxyStrategyModel is a model entry within a strategy.
+type ModelProxyStrategyModel struct {
+	ID             string `yaml:"id"`
+	Provider       string `yaml:"provider"`
+	ContextWindow  int    `yaml:"context_window"`
+	Priority       int    `yaml:"priority"`
+	Weight         int    `yaml:"weight"`
+	CooldownPeriod string `yaml:"cooldown_period"`
+}
+
+// ModelProxyStrategyTriggers defines trigger rules for model switching.
+type ModelProxyStrategyTriggers struct {
+	RateLimited struct {
+		Action   string `yaml:"action"`
+		Cooldown string `yaml:"cooldown"`
+		After    int    `yaml:"after"`
+	} `yaml:"rate-limited"`
+	QuotaExhausted struct {
+		Action      string `yaml:"action"`
+		Cooldown    string `yaml:"cooldown"`
+		AutoRecover bool   `yaml:"auto_recover"`
+	} `yaml:"quota-exhausted"`
+	Timeout struct {
+		Action         string `yaml:"action"`
+		Cooldown       string `yaml:"cooldown"`
+		MaxConsecutive int    `yaml:"max_consecutive"`
+	} `yaml:"timeout"`
+	Error struct {
+		Action   string `yaml:"action"`
+		Cooldown string `yaml:"cooldown"`
+	} `yaml:"error"`
+}
+
+// ModelProxyStrategyHeuristics defines heuristic thresholds for circuit breaker.
+type ModelProxyStrategyHeuristics struct {
+	LatencyP95Threshold          string `yaml:"latency_p95_threshold"`
+	ErrorRateThreshold           string `yaml:"error_rate_threshold"`
+	ErrorRateWindow              string `yaml:"error_rate_window"`
+	TokenThroughputThreshold     string `yaml:"token_throughput_threshold"`
+	ConsecutiveFailuresThreshold int    `yaml:"consecutive_failures_threshold"`
+}
+
+// ModelProxyRouting defines the mapping from strategy names to strategy IDs.
+type ModelProxyRouting struct {
+	Mapping map[string]string `yaml:"routing"`
 }
 
 // ModelProxyProvider describes one upstream model API backend behind the
@@ -244,4 +317,70 @@ func WebAddr(root string) (string, error) {
 		return "", err
 	}
 	return cfg.Web.ListenAddr, nil
+}
+
+// DefaultStrategyTriggers returns default trigger configuration.
+func DefaultStrategyTriggers() ModelProxyStrategyTriggers {
+	var t ModelProxyStrategyTriggers
+	t.RateLimited.Action = "skip"
+	t.RateLimited.Cooldown = "60s"
+	t.RateLimited.After = 3
+	t.QuotaExhausted.Action = "skip"
+	t.QuotaExhausted.Cooldown = "3600s"
+	t.QuotaExhausted.AutoRecover = true
+	t.Timeout.Action = "skip"
+	t.Timeout.Cooldown = "30s"
+	t.Timeout.MaxConsecutive = 3
+	t.Error.Action = "skip"
+	t.Error.Cooldown = "10s"
+	return t
+}
+
+// DefaultStrategyHeuristics returns default heuristics configuration.
+func DefaultStrategyHeuristics() ModelProxyStrategyHeuristics {
+	var h ModelProxyStrategyHeuristics
+	h.LatencyP95Threshold = "30s"
+	h.ErrorRateThreshold = "20%"
+	h.ErrorRateWindow = "5m"
+	h.TokenThroughputThreshold = "10"
+	h.ConsecutiveFailuresThreshold = 3
+	return h
+}
+
+// ComputeEffectiveLimit computes the min context window across all models in the strategy.
+func (s *ModelProxyStrategy) ComputeEffectiveLimit() int {
+	if len(s.Models) == 0 {
+		return 0
+	}
+	min := s.Models[0].ContextWindow
+	for _, m := range s.Models[1:] {
+		if m.ContextWindow > 0 && m.ContextWindow < min {
+			min = m.ContextWindow
+		}
+	}
+	return min
+}
+
+// GetModelByID returns a ModelProxyStrategyModel by its ID.
+func (s *ModelProxyStrategy) GetModelByID(id string) *ModelProxyStrategyModel {
+	for i := range s.Models {
+		if s.Models[i].ID == id {
+			return &s.Models[i]
+		}
+	}
+	return nil
+}
+
+// GetProviderForModel returns the Provider for a given model ID in this strategy.
+func (s *ModelProxyStrategy) GetProviderForModel(modelID string, providers []ModelProxyProvider) *ModelProxyProvider {
+	sm := s.GetModelByID(modelID)
+	if sm == nil {
+		return nil
+	}
+	for i := range providers {
+		if providers[i].ID == sm.Provider {
+			return &providers[i]
+		}
+	}
+	return nil
 }

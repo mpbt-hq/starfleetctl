@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
-//
-// Package modelproxy implements a local OpenAI-compatible proxy in front of
-// the real model API backends (NVIDIA NIM, OpenCode Zen, ...). Ships talk to
-// this single local endpoint instead of the flaky upstreams: the proxy retries
-// transient errors (429/5xx/conn-reset, and gRPC-style saturation errors such
-// as ResourceExhausted) and catches streaming failures so a model-API hiccup
-// never leaks raw into the agent session.
+
 package modelproxy
 
 import (
@@ -57,6 +51,8 @@ type Config struct {
 	PIDFile    string
 	LogFile    string
 	Providers  []Provider
+	Strategies []config.ModelProxyStrategy
+	Routing    config.ModelProxyRouting
 	// EnvRefs lists the env var names referenced via {env:VAR}/${VAR}/$VAR in
 	// the raw config (as they appeared before expansion). Used by the daemon
 	// to pick up missing keys from the user's opencode config. Not serialized.
@@ -124,6 +120,11 @@ type Provider struct {
 	// upstreams whose catalog does not advertise them. See
 	// Config.ModelProxyProvider.Capabilities.
 	Capabilities []string
+
+	// Health check configuration.
+	HealthInterval string
+	HealthTimeout  string
+	HealthEndpoint string
 }
 
 // Load reads and resolves the model-proxy configuration for the workspace
@@ -198,6 +199,41 @@ func Load(root string) (*Config, error) {
 			out.EnvRefs = append(out.EnvRefs, r)
 		}
 	}
+
+	// Parse strategies
+	for _, s := range mp.Strategies {
+		strat := config.ModelProxyStrategy{
+			ID:           strings.TrimSpace(s.ID),
+			Description:  s.Description,
+			DefaultModel: strings.TrimSpace(s.DefaultModel),
+			Models:       s.Models,
+			Strategy:     s.Strategy,
+			Triggers:     s.Triggers,
+			Heuristics:   s.Heuristics,
+		}
+		if strat.ID == "" {
+			return nil, fmt.Errorf("model-proxy: strategy without id in config")
+		}
+		// Apply defaults
+		if strat.Triggers == (config.ModelProxyStrategyTriggers{}) {
+			strat.Triggers = config.DefaultStrategyTriggers()
+		}
+		if strat.Heuristics == (config.ModelProxyStrategyHeuristics{}) {
+			strat.Heuristics = config.DefaultStrategyHeuristics()
+		}
+		// Compute effective limit
+		strat.EffectiveLimit = strat.ComputeEffectiveLimit()
+		out.Strategies = append(out.Strategies, strat)
+	}
+
+	// Parse routing
+	if mp.Routing.Mapping != nil {
+		out.Routing.Mapping = make(map[string]string)
+		for k, v := range mp.Routing.Mapping {
+			out.Routing.Mapping[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+
 	return out, nil
 }
 
