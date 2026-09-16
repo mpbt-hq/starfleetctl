@@ -69,9 +69,23 @@ func (c *Config) virtualModelInfos(prov Provider) []ModelInfo {
 // back to a direct upstream query. Mirrors modelListFor but keeps metadata.
 // For virtual meta-model providers the catalog is synthesized from the
 // strategies — no upstream query is possible or needed.
+// For direct providers (Direct=true), skip the proxy query entirely.
 func (c *Config) modelInfoFor(prov Provider) []ModelInfo {
 	if prov.isVirtual() {
 		return c.virtualModelInfos(prov)
+	}
+	// Direct providers bypass the proxy — query upstream directly.
+	if prov.Direct {
+		raw, ferr := fetchModelInfo(prov)
+		if ferr != nil {
+			return nil
+		}
+		infos := make([]ModelInfo, len(raw))
+		for i, m := range raw {
+			m.OwnedBy = prov.ID
+			infos[i] = m
+		}
+		return infos
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(c.proxyBaseURL() + "/models?provider=" + prov.ID)
@@ -101,12 +115,22 @@ func (c *Config) modelInfoFor(prov Provider) []ModelInfo {
 // ModelListFor returns the model IDs served by one provider, best-effort:
 // first via the running local proxy (its /v1/models query), falling back to a
 // direct upstream query so config generation still works before the daemon
-// has been started.
+// has been started. For direct providers (Direct=true), skip the proxy query
+// entirely since they bypass the local proxy.
 func (c *Config) ModelListFor(prov Provider) []string {
 	if prov.isVirtual() {
 		ids := make([]string, 0, len(c.Strategies))
 		for _, s := range c.Strategies {
 			ids = append(ids, s.ID)
+		}
+		sort.Strings(ids)
+		return ids
+	}
+	// Direct providers bypass the proxy — query upstream directly.
+	if prov.Direct {
+		ids, ferr := fetchModels(prov)
+		if ferr != nil {
+			return nil
 		}
 		sort.Strings(ids)
 		return ids
@@ -303,7 +327,22 @@ func ProxyModelInfos(root string) []ModelInfo {
 			out = append(out, cfg.virtualModelInfos(prov)...)
 			continue
 		}
-		infos, ok := proxyModelInfosViaLocal(cfg, prov)
+		var infos []ModelInfo
+		// Direct providers bypass the proxy — query upstream directly.
+		if prov.Direct {
+			raw, ferr := fetchModelInfo(prov)
+			if ferr != nil {
+				continue
+			}
+			infos = raw
+			for _, m := range infos {
+				m.OwnedBy = prov.ID
+				out = append(out, m)
+			}
+			continue
+		}
+		var ok bool
+		infos, ok = proxyModelInfosViaLocal(cfg, prov)
 		if !ok {
 			// No local proxy running — query the upstream directly (no
 			// catalog enrichment without the proxy, but ids still valid).

@@ -180,6 +180,11 @@ type FleetConfig struct {
 	// the user's providers out, because opencode merges the global config
 	// in regardless of what the per-ship file omits.
 	ProviderMode string `yaml:"provider_mode"`
+	// DirectProviders lists providers that bypass the local model proxy
+	// entirely, connecting straight to the upstream API. Used exceptionally
+	// (proxy down, ZEN quota exhausted). These are merged with proxied
+	// providers for ship opencode config generation and web frontend model list.
+	DirectProviders []ModelProxyProvider `yaml:"direct_providers"`
 }
 
 // WebConfig holds web server configuration.

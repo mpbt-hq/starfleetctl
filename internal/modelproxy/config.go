@@ -202,6 +202,49 @@ func Load(root string) (*Config, error) {
 		}
 	}
 
+	// Merge direct providers from fleet.yaml (bypass the local proxy)
+	for _, p := range cfg.Fleet.DirectProviders {
+		refs := map[string]bool{}
+		extractEnvRefs(p.APIKey, refs)
+		extractEnvRefs(p.BaseURL, refs)
+		prov := Provider{
+			ID:          strings.TrimSpace(p.ID),
+			Name:        p.Name,
+			BaseURL:     strings.TrimRight(expandEnv(p.BaseURL), "/"),
+			APIKey:      expandEnv(p.APIKey),
+			Direct:      true, // Always true for fleet.yaml direct_providers
+			ModelFilter: strings.TrimSpace(p.ModelFilter),
+		}
+		if prov.ID == "" {
+			return nil, fmt.Errorf("model-proxy: direct provider without id in fleet.yaml")
+		}
+		if prov.Name == "" {
+			prov.Name = prov.ID
+		}
+		prov.Type = strings.TrimSpace(p.Type)
+		if prov.BaseURL == "" && !prov.isVirtual() {
+			return nil, fmt.Errorf("model-proxy: direct provider %q has no base_url", prov.ID)
+		}
+		prov.MaxRetries = p.MaxRetries
+		if prov.MaxRetries <= 0 {
+			prov.MaxRetries = 3
+		}
+		prov.RetryDelayMS = p.RetryDelayMS
+		if prov.RetryDelayMS <= 0 {
+			prov.RetryDelayMS = 1000
+		}
+		prov.HoldTimeoutMS = p.HoldTimeoutMS
+		if prov.HoldTimeoutMS < 0 {
+			prov.HoldTimeoutMS = 15000
+		}
+		prov.UserAgent = strings.TrimSpace(p.UserAgent)
+		prov.Capabilities = append([]string(nil), p.Capabilities...)
+		out.Providers = append(out.Providers, prov)
+		for r := range refs {
+			out.EnvRefs = append(out.EnvRefs, r)
+		}
+	}
+
 	// Parse strategies
 	for _, s := range mp.Strategies {
 		strat := config.ModelProxyStrategy{

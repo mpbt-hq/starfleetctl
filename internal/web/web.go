@@ -2022,7 +2022,9 @@ func mergeYAMLNodes(origNode, newNode *yaml.Node) *yaml.Node {
 	}
 }
 
-// apiModels returns the list of available models from models.yaml.
+// apiModels returns the unified model catalog from the model proxy.
+// The proxy's /v1/models endpoint serves the consolidated list of all
+// upstream models (proxied + direct) enriched with label/context/caps.
 func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "method not allowed")
@@ -2030,58 +2032,56 @@ func (s *Server) apiModels(w http.ResponseWriter, r *http.Request) {
 	}
 	// Check for free_only query parameter (filter zen-proxy to free models only)
 	freeOnly := r.URL.Query().Get("free_only") == "true"
-	modelsPath := s.Root + "/.starfleet-ai/conf/models.yaml"
-	data, err := os.ReadFile(modelsPath)
-	if err != nil {
-		writeErr(w, 404, "models.yaml not found — run gen-models-yaml")
+	providerID := r.URL.Query().Get("provider")
+
+	// Get unified model list from modelproxy (includes both proxied and direct providers)
+	infos := modelproxy.ProxyModelInfos(s.Root)
+	if infos == nil {
+		writeErr(w, 503, "no model proxy configuration or failed to load models")
 		return
 	}
-	// Parse YAML manually (minimal: extract id, provider, label, context)
-	var models []modelEntry
-	lines := strings.Split(string(data), "\n")
-	var cur modelEntry
-	inModels := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "models:" {
-			inModels = true
-			continue
-		}
-		if !inModels {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "- id:") {
-			if cur.ID != "" {
-				models = append(models, cur)
+
+	// Filter by provider if requested
+	if providerID != "" {
+		filtered := infos[:0]
+		for _, m := range infos {
+			if m.OwnedBy == providerID {
+				filtered = append(filtered, m)
 			}
-			cur = modelEntry{ID: strings.Trim(strings.TrimPrefix(trimmed, "- id:"), " \"")}
-		} else if strings.HasPrefix(trimmed, "provider:") {
-			cur.Provider = strings.Trim(strings.TrimPrefix(trimmed, "provider:"), " \"")
-		} else if strings.HasPrefix(trimmed, "label:") {
-			cur.Label = strings.Trim(strings.TrimPrefix(trimmed, "label:"), " \"")
-		} else if strings.HasPrefix(trimmed, "context:") {
-			fmt.Sscanf(strings.TrimPrefix(trimmed, "context:"), "%d", &cur.Context)
 		}
+		infos = filtered
 	}
-	if cur.ID != "" {
-		models = append(models, cur)
-	}
+
 	// Apply free_only filter for zen-proxy models if requested
 	if freeOnly {
-		filtered := models[:0]
-		for _, m := range models {
-			if m.Provider == "zen-proxy" {
-				// Keep only models with "-free" suffix for zen-proxy
+		filtered := infos[:0]
+		for _, m := range infos {
+			if m.OwnedBy == "zen-proxy" {
 				if strings.HasSuffix(m.ID, "-free") {
 					filtered = append(filtered, m)
 				}
 			} else {
-				// Keep all other provider models unchanged
 				filtered = append(filtered, m)
 			}
 		}
-		models = filtered
+		infos = filtered
 	}
+
+	// Convert proxy ModelInfo format to frontend modelEntry format
+	var models []modelEntry
+	for _, info := range infos {
+		entry := modelEntry{
+			ID:       info.ID,
+			Provider: info.OwnedBy,
+			Label:    info.Label,
+			Context:  info.Context,
+		}
+		if entry.Context == 0 {
+			entry.Context = info.ContextWindow
+		}
+		models = append(models, entry)
+	}
+
 	// Enrich with health state from persisted check.
 	healthState := modelproxy.LoadHealthState(s.Root)
 	for i := range models {
@@ -2161,7 +2161,7 @@ func filterAvailableModels(root string, models []modelEntry) []modelEntry {
 			cache[provider] = providerCache{}
 			return nil
 		}
-		cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers}
+		cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers, Strategies: mpCfg.Strategies}
 		ids := cfg.ModelListFor(*prov)
 		if ids == nil {
 			cache[provider] = providerCache{}
