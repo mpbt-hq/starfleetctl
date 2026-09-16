@@ -11,7 +11,6 @@ import (
 const usage = `dashboard <command> [args…]
 
   pull                          sync local DASHBOARD.md with origin
-  show                          print current DASHBOARD.md (implies pull)
   write <file|->                replace DASHBOARD.md's content (no commit)
   commit -m "<msg>" [--no-push] stage + commit (+ pull --rebase + push)
   reindex                       regenerate the thin index from dashboard/topics/*.md
@@ -20,7 +19,7 @@ const usage = `dashboard <command> [args…]
                                               every topic's slug/title/status (with filters)
   topic show <slug>                          print one topic file (implies pull)
   topic write <slug> <file|->                replace one topic file (no commit)
-  topic new <slug> --title "<t>" [--status "<s>"] [--parked]
+  topic new <slug> --title "<t>" [--status ""] [--parked]
                                               scaffold a new topic file
   topic commit <slug> -m "<msg>" [--no-push] commit+push JUST that one file
 `
@@ -58,8 +57,6 @@ func Run(root string, args []string) int {
 		return 0
 	case "pull":
 		cmdErr = d.DoPull()
-	case "show":
-		cmdErr = d.DoShow()
 	case "write":
 		if len(args) != 2 {
 			fmt.Fprint(os.Stderr, usage)

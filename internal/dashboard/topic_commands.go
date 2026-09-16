@@ -77,11 +77,8 @@ func (d *Dashboard) DoTopicList(opts TopicListOpts) error {
 }
 
 // DoTopicShow prints one topic file's full content (frontmatter + body),
-// pulling first like DoShow.
+// reading directly from the local file (no sync/pull).
 func (d *Dashboard) DoTopicShow(slug string) error {
-	if err := d.sync(runQuiet); err != nil {
-		return err
-	}
 	data, err := os.ReadFile(d.topicPath(slug))
 	if err != nil {
 		return err

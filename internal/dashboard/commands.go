@@ -15,21 +15,6 @@ func (d *Dashboard) DoPull() error {
 	return d.sync(run)
 }
 
-// DoShow prints the current DASHBOARD.md, implicitly pulling first. Sync
-// output goes to stderr so stdout carries only the file content — mirrors
-// `scripts/dashboard show`.
-func (d *Dashboard) DoShow() error {
-	if err := d.sync(runQuiet); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(d.File)
-	if err != nil {
-		return err
-	}
-	_, err = os.Stdout.Write(data)
-	return err
-}
-
 // DoWrite replaces DASHBOARD.md's content from src ("-" for stdin) — for
 // scripted/non-interactive updates. Does NOT commit — mirrors
 // `scripts/dashboard write`.

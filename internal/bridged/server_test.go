@@ -246,15 +246,16 @@ func TestDashboardRoundTrip(t *testing.T) {
 	sockPath, root, stop := startTestServer(t)
 	defer stop()
 
+	// Test that "show" command no longer exists (was removed)
 	resp, err := Call(sockPath, Request{Cmd: "dashboard", Args: []string{"show"}}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.ExitCode != 0 {
-		t.Fatalf("show: exit %d, stderr=%q", resp.ExitCode, resp.Stderr)
+	if resp.ExitCode == 0 {
+		t.Fatalf("show command should not exist, but exited with 0")
 	}
-	if !strings.Contains(resp.Stdout, "initial") {
-		t.Errorf("show output missing initial content: %q", resp.Stdout)
+	if !strings.Contains(resp.Stderr, "unknown command: show") {
+		t.Errorf("expected 'unknown command: show' error, got: %q", resp.Stderr)
 	}
 
 	newFile := filepath.Join(t.TempDir(), "new.md")

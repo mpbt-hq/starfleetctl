@@ -1474,7 +1474,7 @@ func (s *Server) apiMetaModelForce(w http.ResponseWriter, r *http.Request) {
 // proxyMetaModels forwards requests to the model-proxy /v1/meta-models endpoints.
 func (s *Server) proxyMetaModels(w http.ResponseWriter, r *http.Request) {
 	// Forward to model-proxy at localhost:8443
-	target := "http://127.0.0.1:8443" + strings.TrimPrefix(r.URL.Path, "/api")
+	target := "http://127.0.0.1:8443/v1" + strings.TrimPrefix(r.URL.Path, "/api")
 
 	// Create new request
 	proxyReq, err := http.NewRequest(r.Method, target, r.Body)
