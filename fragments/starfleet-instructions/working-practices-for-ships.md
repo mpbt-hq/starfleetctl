@@ -55,6 +55,13 @@ cleared:
 - **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
    (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,
    no dashboard scanning, no proactive work — wait for a `tell`/`ask`/`broadcast` directive.
+- **Keep board status current during long tasks.** Long-running operations (rebases, builds,
+   test suites, large edits) must periodically refresh the board heartbeat so the fleet sees
+   accurate state. Call `starfleetctl comms status working "<what>"` or `starfleetctl comms touch`
+   at regular intervals — e.g., every 10–20 rebase steps, every ~5 minutes during builds, or
+   after each major step. A stale `idle`/`working` status misleads the fleet and the flagship.
+   Use a timer (`starfleetctl timer set --every 5m --type ship --text "comms touch"`) as a
+   self-reminder if needed. The board must reflect reality at all times.
 
 Task handling specifics (lifecycle, reports, capture-first) live in the **`starfleet-tasks`**
 skill; load it when you take on or work a task.
