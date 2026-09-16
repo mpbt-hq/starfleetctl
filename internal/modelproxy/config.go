@@ -52,7 +52,6 @@ type Config struct {
 	LogFile    string
 	Providers  []Provider
 	Strategies []config.ModelProxyStrategy
-	Routing    config.ModelProxyRouting
 	// EnvRefs lists the env var names referenced via {env:VAR}/${VAR}/$VAR in
 	// the raw config (as they appeared before expansion). Used by the daemon
 	// to pick up missing keys from the user's opencode config. Not serialized.
@@ -176,7 +175,10 @@ func Load(root string) (*Config, error) {
 		if prov.Name == "" {
 			prov.Name = prov.ID
 		}
-		if prov.BaseURL == "" {
+		// A virtual provider (type "meta-model") has no real upstream — its
+		// catalog is synthesized from the configured strategies, so it needs
+		// neither a base_url nor an upstream query.
+		if prov.BaseURL == "" && !prov.isVirtual() {
 			return nil, fmt.Errorf("model-proxy: provider %q has no base_url", prov.ID)
 		}
 		prov.MaxRetries = p.MaxRetries
@@ -226,14 +228,6 @@ func Load(root string) (*Config, error) {
 		out.Strategies = append(out.Strategies, strat)
 	}
 
-	// Parse routing
-	if mp.Routing.Mapping != nil {
-		out.Routing.Mapping = make(map[string]string)
-		for k, v := range mp.Routing.Mapping {
-			out.Routing.Mapping[strings.TrimSpace(k)] = strings.TrimSpace(v)
-		}
-	}
-
 	return out, nil
 }
 
@@ -241,6 +235,19 @@ func Load(root string) (*Config, error) {
 // accepted as a fallback when the provider id starts with "zen-", matching
 // the pre-type name-based routing used before the Type field existed).
 const typeOpenCodeZen = "opencode-zen"
+
+// typeMetaModel identifies the virtual "meta-model" provider class. Unlike a
+// real upstream backend, a meta-model provider has no base_url: its catalog is
+// synthesized from the configured strategies (one virtual model endpoint per
+// strategy, named by the strategy ID). Chat requests for such a virtual model
+// are routed through the strategy's picking logic onto the real upstream
+// models in its models: list. Direct requests for real model IDs are never
+// intercepted by a strategy — they always go straight to their upstream.
+const typeMetaModel = "meta-model"
+
+// isVirtual reports whether this provider is a virtual meta-model provider
+// (no upstream; catalog synthesized from strategies).
+func (p *Provider) isVirtual() bool { return p.Type == typeMetaModel }
 
 // typeOpenCodeOllama identifies the Ollama provider class. Ollama serves a
 // bare /v1/models catalog without capability metadata, so opencode would

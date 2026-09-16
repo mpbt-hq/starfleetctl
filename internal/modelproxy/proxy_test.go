@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/metux/starfleetctl/internal/config"
 )
 
 // testProxy builds a Proxy pointing at a single upstream test server that
@@ -535,3 +537,109 @@ func TestShipsTrackingFailure(t *testing.T) {
 }
 
 var _ = bufio.NewReader // keep import if refactored
+
+// testProxyWithStrategies builds a Proxy with a real upstream provider plus a
+// virtual meta-model provider and a fallback strategy (m1 primary, m2
+// secondary). The upstream handler records which model ids it is asked to
+// serve and echoes a synthetic chat response.
+func testProxyWithStrategies(t *testing.T) (*Proxy, *httptest.Server, *[]string) {
+	t.Helper()
+	var gotModels []string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}, {"id": "m2"}}})
+			return
+		}
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModels = append(gotModels, body.Model)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp", "choices": []any{}})
+	})
+	srv := httptest.NewServer(upstream)
+	t.Cleanup(srv.Close)
+	cfg := &Config{
+		ListenAddr: "127.0.0.1:1",
+		Providers: []Provider{
+			{
+				ID:           "upstream",
+				Name:         "Upstream",
+				BaseURL:      srv.URL,
+				APIKey:       "k",
+				MaxRetries:   2,
+				RetryDelayMS: 1,
+			},
+			{
+				ID:   "meta-model",
+				Name: "Meta Models",
+				Type: typeMetaModel,
+			},
+		},
+		Strategies: []config.ModelProxyStrategy{{
+			ID:             "heavy",
+			Description:    "Heavy duty",
+			EffectiveLimit: 64000,
+			Strategy:       "fallback",
+			Models: []config.ModelProxyStrategyModel{
+				{ID: "m1", Provider: "upstream", Priority: 1},
+				{ID: "m2", Provider: "upstream", Priority: 2},
+			},
+		}},
+	}
+	return New(cfg), srv, &gotModels
+}
+
+// TestMetaModelVirtualEndpoint verifies the core architecture: a strategy is
+// addressed by its own ID as a virtual model endpoint on the meta-model
+// provider (optionally "<meta-model>/<strategy-id>"), and the strategy routes
+// to the primary real model. Direct access to a real model that sits inside a
+// strategy (m2) must NOT be hijacked into the strategy — it goes straight to
+// the upstream as m2, not to how the strategy would pick (m1).
+func TestMetaModelVirtualEndpoint(t *testing.T) {
+	p, _, got := testProxyWithStrategies(t)
+
+	// 1. Virtual model listing under the meta-model provider.
+	req := httptest.NewRequest(http.MethodGet, "/v1/models?provider=meta-model", nil)
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	var out struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode meta-model listing: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].ID != "heavy" || out.Data[0].OwnedBy != "meta-model" {
+		t.Fatalf("meta-model listing = %+v, want single strategy 'heavy' owned by meta-model", out.Data)
+	}
+
+	// 2. Bare strategy ID routes through the strategy to the primary model.
+	resp := postChat(t, p, "heavy", false)
+	if resp.StatusCode != 200 {
+		t.Fatalf("strategy-id status = %d, want 200", resp.StatusCode)
+	}
+	// 3. Prefixed form "<meta-model>/<strategy-id>" too.
+	resp = postChat(t, p, "meta-model/heavy", false)
+	if resp.StatusCode != 200 {
+		t.Fatalf("prefixed status = %d, want 200", resp.StatusCode)
+	}
+	// 4. Direct real-model access (inside the strategy) is NOT hijacked.
+	resp = postChat(t, p, "m2", false)
+	if resp.StatusCode != 200 {
+		t.Fatalf("direct status = %d, want 200", resp.StatusCode)
+	}
+
+	// got collects upstream model ids in order. Strategy requests resolve to
+	// the primary real model (m1); the direct m2 request must stay m2 (NOT be
+	// routed through the strategy, which would pick m1).
+	if len(*got) != 3 {
+		t.Fatalf("upstream model requests = %v, want 3 entries", *got)
+	}
+	if (*got)[0] != "m1" || (*got)[1] != "m1" || (*got)[2] != "m2" {
+		t.Fatalf("upstream model requests = %v, want [m1 m1 m2]", *got)
+	}
+}

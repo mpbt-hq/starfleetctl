@@ -44,10 +44,10 @@ type ModelProxyConfig struct {
 	LogFile    string `yaml:"log_file"`
 	// Providers is the ordered list of upstream backends to proxy.
 	Providers []ModelProxyProvider `yaml:"providers"`
-	// Strategies defines meta-model routing strategies.
+	// Strategies defines meta-model routing strategies. Each strategy is
+	// exposed to clients as a virtual model endpoint on the meta-model
+	// provider, named by the strategy ID (no separate routing table needed).
 	Strategies []ModelProxyStrategy `yaml:"strategies"`
-	// Routing maps strategy names to strategy IDs.
-	Routing ModelProxyRouting `yaml:"routing"`
 }
 
 // ModelProxyStrategy defines a meta-model routing strategy.
@@ -112,11 +112,6 @@ type ModelProxyStrategyHeuristics struct {
 	ErrorRateWindow              string `yaml:"error_rate_window"`
 	TokenThroughputThreshold     string `yaml:"token_throughput_threshold"`
 	ConsecutiveFailuresThreshold int    `yaml:"consecutive_failures_threshold"`
-}
-
-// ModelProxyRouting defines the mapping from strategy names to strategy IDs.
-type ModelProxyRouting struct {
-	Mapping map[string]string `yaml:"routing"`
 }
 
 // ModelProxyProvider describes one upstream model API backend behind the

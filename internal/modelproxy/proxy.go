@@ -195,18 +195,26 @@ func (p *Proxy) getStrategy(id string) *StrategyState {
 	return p.strategies[id]
 }
 
-// getStrategyForModel finds the strategy that serves a given model.
+// getStrategyForModel finds the strategy that serves a given model. Per the
+// meta-model architecture, a strategy is addressed by its own ID as a virtual
+// model endpoint (e.g. "heavy-model" or "meta-model/heavy-model") — the real
+// upstream models inside a strategy are never matched here, so requesting a
+// real model (e.g. "big-pickle") always routes directly to its upstream and
+// is never hijacked into a strategy.
 func (p *Proxy) getStrategyForModel(model string) *StrategyState {
-	p.strategyMu.RLock()
-	defer p.strategyMu.RUnlock()
-	for _, ss := range p.strategies {
-		for _, m := range ss.Models {
-			if m.ID == model {
-				return ss
+	// Accept an optional "<virtual-provider>/<strategy-id>" form so clients can
+	// address strategies through the meta-model provider explicitly.
+	if idx := strings.IndexByte(model, '/'); idx > 0 {
+		for _, prov := range p.cfg.Providers {
+			if prov.isVirtual() && prov.ID == model[:idx] {
+				model = model[idx+1:]
+				break
 			}
 		}
 	}
-	return nil
+	p.strategyMu.RLock()
+	defer p.strategyMu.RUnlock()
+	return p.strategies[model]
 }
 
 // routeStrategyModel picks the model to use for a request within a strategy.
@@ -618,6 +626,10 @@ func fetchModelInfo(prov Provider) ([]ModelInfo, error) {
 // endpoints (never from models.yaml). With ?provider=<id> only that provider's
 // models are returned (used by opencode-config generation to enumerate one
 // backend's catalog).
+//
+// A virtual meta-model provider contributes one model endpoint per strategy,
+// named by the strategy ID (never the real upstream models inside a strategy —
+// those stay listed under their own real provider).
 func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "method not allowed")
@@ -631,24 +643,25 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 		if providerID != "" && prov.ID != providerID {
 			continue
 		}
+		if prov.isVirtual() {
+			// Virtual meta-model provider: synthesize one model endpoint per
+			// strategy, named by the strategy ID.
+			for _, strat := range p.cfg.Strategies {
+				data = append(data, ModelInfo{
+					ID:            strat.ID,
+					Object:        "model",
+					OwnedBy:       prov.ID,
+					Label:         strat.ID,
+					ContextWindow: strat.EffectiveLimit,
+				})
+			}
+			continue
+		}
 		// Apply the provider's model filter to the models this proxy serves.
 		filtered := applyModelFilter(prov, p.providerModelInfo(prov))
 		for _, m := range filtered {
 			m.OwnedBy = prov.ID
 			data = append(data, m)
-		}
-	}
-
-	// Add strategy meta-models with effective context window
-	for _, strat := range p.cfg.Strategies {
-		for _, m := range strat.Models {
-			data = append(data, ModelInfo{
-				ID:            m.ID,
-				Object:        "model",
-				OwnedBy:       "strategy:" + strat.ID,
-				Label:         m.ID + " (via " + strat.ID + ")",
-				ContextWindow: strat.EffectiveLimit,
-			})
 		}
 	}
 
@@ -978,9 +991,14 @@ func isStreamingRequest(body []byte) bool {
 
 // routeModel picks the provider serving the requested model ID. Exact model
 // catalog match wins; a "<provider>/<model>" prefixed id is also honored.
+// Virtual meta-model providers are never routed directly — they synthesize
+// their catalog from strategies and have no real upstream.
 func (p *Proxy) routeModel(model string) (*Provider, string) {
 	for i := range p.cfg.Providers {
 		prov := &p.cfg.Providers[i]
+		if prov.isVirtual() {
+			continue
+		}
 		if p.providerModelSet(*prov)[model] {
 			return prov, model
 		}
@@ -990,7 +1008,7 @@ func (p *Proxy) routeModel(model string) (*Provider, string) {
 		prefix := model[:idx]
 		for i := range p.cfg.Providers {
 			prov := &p.cfg.Providers[i]
-			if prov.ID == prefix {
+			if prov.ID == prefix && !prov.isVirtual() {
 				return prov, model[idx+1:]
 			}
 		}
@@ -1053,20 +1071,12 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 		upstreamModel = chosenModel
 		effectiveLimit = strat.EffectiveLimit
 	} else {
-		// Direct provider routing
+		// Direct provider routing — real models are never intercepted by a
+		// strategy; their context limit comes from the upstream catalog.
 		prov, upstreamModel = p.routeModel(req.Model)
 		if prov == nil {
 			writeErr(w, 400, fmt.Sprintf("model %q not served by any configured model-proxy provider", req.Model))
 			return
-		}
-		// Get effective limit from strategy if available, else from catalog
-		for _, s := range p.cfg.Strategies {
-			for _, m := range s.Models {
-				if m.ID == req.Model {
-					effectiveLimit = s.EffectiveLimit
-					break
-				}
-			}
 		}
 	}
 
@@ -1150,8 +1160,8 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			}
 			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 			if strat := p.getStrategyForModel(requestedModel); strat != nil {
-				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, err)
-				p.checkCircuitBreaker(strat, requestedModel)
+				p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, err)
+				p.checkCircuitBreaker(strat, model)
 			}
 			writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, err))
 			return
@@ -1179,8 +1189,8 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			}
 			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 			if strat := p.getStrategyForModel(requestedModel); strat != nil {
-				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, fmt.Errorf("HTTP %d", resp.StatusCode))
-				p.checkCircuitBreaker(strat, requestedModel)
+				p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, fmt.Errorf("HTTP %d", resp.StatusCode))
+				p.checkCircuitBreaker(strat, model)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(resp.StatusCode)
@@ -1210,9 +1220,9 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				if usage != nil {
 					tokens = int(usage.PromptTokens + usage.CompletionTokens)
 				}
-				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), tokens, nil)
+				p.recordStrategyMetrics(strat, model, time.Since(startTime), tokens, nil)
 				if failed {
-					p.checkCircuitBreaker(strat, requestedModel)
+					p.checkCircuitBreaker(strat, model)
 				}
 			}
 		} else {
@@ -1221,8 +1231,8 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			if err != nil {
 				p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 				if strat := p.getStrategyForModel(requestedModel); strat != nil {
-					p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, err)
-					p.checkCircuitBreaker(strat, requestedModel)
+					p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, err)
+					p.checkCircuitBreaker(strat, model)
 				}
 				writeErr(w, 502, fmt.Sprintf("upstream %s: read response: %v", prov.ID, err))
 				return
@@ -1237,15 +1247,15 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				if usage != nil {
 					tokens = int(usage.PromptTokens + usage.CompletionTokens)
 				}
-				p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), tokens, nil)
+				p.recordStrategyMetrics(strat, model, time.Since(startTime), tokens, nil)
 			}
 		}
 		return
 	}
 	p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 	if strat := p.getStrategyForModel(requestedModel); strat != nil {
-		p.recordStrategyMetrics(strat, requestedModel, time.Since(startTime), 0, lastErr)
-		p.checkCircuitBreaker(strat, requestedModel)
+		p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, lastErr)
+		p.checkCircuitBreaker(strat, model)
 	}
 	writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, lastErr))
 }

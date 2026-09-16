@@ -40,10 +40,39 @@ func (c *Config) proxyBaseURL() string {
 	return "http://" + c.ListenAddr + "/v1"
 }
 
+// virtualModelInfos synthesizes the catalog of a virtual meta-model provider:
+// one model entry per configured strategy, named by the strategy ID. Virtual
+// providers have no real upstream, so their catalog can never be fetched —
+// it is derived purely from the strategy configuration.
+func (c *Config) virtualModelInfos(prov Provider) []ModelInfo {
+	infos := make([]ModelInfo, 0, len(c.Strategies))
+	for _, s := range c.Strategies {
+		label := s.ID
+		if s.Description != "" {
+			label = s.Description
+		}
+		infos = append(infos, ModelInfo{
+			ID:            s.ID,
+			Object:        "model",
+			OwnedBy:       prov.ID,
+			Label:         label,
+			Context:       s.EffectiveLimit,
+			ContextWindow: s.EffectiveLimit,
+			Caps:          []string{"toolcall", "temperature"},
+		})
+	}
+	return infos
+}
+
 // modelInfoFor returns the full model metadata (with label/context/caps) one
 // provider serves, best-effort: first via the running local proxy, falling
 // back to a direct upstream query. Mirrors modelListFor but keeps metadata.
+// For virtual meta-model providers the catalog is synthesized from the
+// strategies — no upstream query is possible or needed.
 func (c *Config) modelInfoFor(prov Provider) []ModelInfo {
+	if prov.isVirtual() {
+		return c.virtualModelInfos(prov)
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(c.proxyBaseURL() + "/models?provider=" + prov.ID)
 	if err == nil {
@@ -74,6 +103,14 @@ func (c *Config) modelInfoFor(prov Provider) []ModelInfo {
 // direct upstream query so config generation still works before the daemon
 // has been started.
 func (c *Config) ModelListFor(prov Provider) []string {
+	if prov.isVirtual() {
+		ids := make([]string, 0, len(c.Strategies))
+		for _, s := range c.Strategies {
+			ids = append(ids, s.ID)
+		}
+		sort.Strings(ids)
+		return ids
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	// Prefer the local proxy: it has fresher data and shares the code path
 	// ships actually use. Query is per-provider, so no cross-talk.
@@ -260,6 +297,12 @@ func ProxyModelInfos(root string) []ModelInfo {
 	}
 	var out []ModelInfo
 	for _, prov := range cfg.Providers {
+		if prov.isVirtual() {
+			// Virtual meta-model provider: no upstream; its catalog is
+			// synthesized from the strategies.
+			out = append(out, cfg.virtualModelInfos(prov)...)
+			continue
+		}
 		infos, ok := proxyModelInfosViaLocal(cfg, prov)
 		if !ok {
 			// No local proxy running — query the upstream directly (no

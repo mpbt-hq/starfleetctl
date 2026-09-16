@@ -222,6 +222,12 @@ func RunCheck(root string, probe bool) (*CheckReport, error) {
 
 	for _, prov := range cfg.Providers {
 		entries := catalog[prov.ID]
+		// Virtual meta-model providers have no real upstream — skip their
+		// served-listing fetch entirely (their catalog is strategy-synthesized
+		// and not verifiable against any /v1/models).
+		if prov.isVirtual() {
+			continue
+		}
 		// Served set (already filtered) fetched once per provider.
 		served, servedErr := fetchModelsRetry(prov)
 		servedSet := modelSet(served)
