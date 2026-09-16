@@ -175,6 +175,7 @@ func Load(root string) (*Config, error) {
 		if prov.Name == "" {
 			prov.Name = prov.ID
 		}
+		prov.Type = strings.TrimSpace(p.Type)
 		// A virtual provider (type "meta-model") has no real upstream — its
 		// catalog is synthesized from the configured strategies, so it needs
 		// neither a base_url nor an upstream query.
@@ -193,7 +194,6 @@ func Load(root string) (*Config, error) {
 		if prov.HoldTimeoutMS < 0 {
 			prov.HoldTimeoutMS = 15000 // 15s default hold timeout
 		}
-		prov.Type = strings.TrimSpace(p.Type)
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)
 		prov.Capabilities = append([]string(nil), p.Capabilities...) // copy, never alias the yaml slice
 		out.Providers = append(out.Providers, prov)
