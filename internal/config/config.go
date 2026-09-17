@@ -48,6 +48,28 @@ type ModelProxyConfig struct {
 	// exposed to clients as a virtual model endpoint on the meta-model
 	// provider, named by the strategy ID (no separate routing table needed).
 	Strategies []ModelProxyStrategy `yaml:"strategies"`
+	// Health configures the automated background health check (served-listing
+	// + chat probe + agent capability probe). Fields are duration strings
+	// (e.g. "30m", "15s"). Interval "" disables the background loop.
+	Health ModelProxyHealthConfig `yaml:"health"`
+}
+
+// ModelProxyHealthConfig holds the automated model health check configuration.
+type ModelProxyHealthConfig struct {
+	// Interval is how often the background check runs (e.g. "30m").
+	// Empty disables the background loop entirely.
+	Interval string `yaml:"interval"`
+	// Timeout is the per-request probe timeout (e.g. "20s"). Default 30s.
+	Timeout string `yaml:"timeout"`
+	// Parallel is the number of concurrent chat probes during one check run.
+	// Default 4. 0 or 1 disables parallel probing.
+	Parallel int `yaml:"parallel"`
+	// CapabilityProbe enables the agent-capability check (tool-call prompt)
+	// in addition to the minimal chat probe. Default true.
+	CapabilityProbe *bool `yaml:"capability_probe"`
+	// Endpoint is the proxy endpoint that serves the persisted health state
+	// ("" = default /v1/model-health). Kept for documentation/symmetry.
+	Endpoint string `yaml:"endpoint"`
 }
 
 // ModelProxyStrategy defines a meta-model routing strategy.

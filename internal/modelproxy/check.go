@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,6 +54,19 @@ type ModelHealth struct {
 	Status   CheckStatus `json:"status"`            // overall verdict
 	Detail   string      `json:"detail,omitempty"`  // short human-readable reason
 	Retries  int         `json:"retries,omitempty"` // probe retries performed
+	// Reachable reports whether a chat probe roundtrip succeeded (only set
+	// with probe=true).
+	Reachable bool `json:"reachable,omitempty"`
+	// ToolCalls reports whether the agent-capability probe observed a tool
+	// call. nil = not probed; true/false = verdict.
+	ToolCalls *bool `json:"tool_calls,omitempty"`
+	// CapabilityNote carries the capability-probe detail when it failed
+	// (e.g. "no tool_calls in reply").
+	CapabilityNote string `json:"capability_note,omitempty"`
+	// ProbeLatencyMS is the chat-probe roundtrip latency.
+	ProbeLatencyMS int64 `json:"probe_latency_ms,omitempty"`
+	// CheckedAt is when this verdict was produced.
+	CheckedAt time.Time `json:"checked_at,omitempty"`
 }
 
 // CheckReport is the full result of one check run.
@@ -142,13 +156,19 @@ func (st *HealthState) Get(id string) (ModelHealth, bool) {
 // RunCheck runs the health check over all models provided by the configured proxied and direct providers.
 // With probe=true, one minimal chat request per served model validates that it actually accepts requests;
 // transient failures are retried and only persist as "degraded", hard errors
-// mark the model as "failed".
+// mark the model as "failed". Probe parallelism is controlled by
+// cfg.Health.Parallel (default 4).
 func RunCheck(root string, probe bool) (*CheckReport, error) {
 	cfg, err := Load(root)
 	if err != nil {
 		return nil, err
 	}
+	return runCheckWithConfig(cfg, root, probe)
+}
 
+// runCheckWithConfig runs the check with an already-loaded config and the
+// capability probe governed by cfg.Health.CapabilityProbe.
+func runCheckWithConfig(cfg *Config, root string, probe bool) (*CheckReport, error) {
 	// Get unified model list from modelproxy (includes both proxied and direct providers)
 	modelInfos := ProxyModelInfos(root)
 	if modelInfos == nil {
@@ -173,20 +193,22 @@ func RunCheck(root string, probe bool) (*CheckReport, error) {
 		return ids, err
 	}
 
+	// Phase 1 (sequential): served listing + partition into probe candidates.
+	type probeJob struct {
+		modelID, provider, bareID string
+		prov                      Provider
+	}
+	var jobs []probeJob
+
 	for _, info := range modelInfos {
 		modelID := info.ID
 		if modelID == "" {
 			continue
 		}
-
-		// Provider is the owned_by field from the model info.
 		provider := info.OwnedBy
 		if provider == "" {
-			// Should not happen, but skip if empty.
 			continue
 		}
-
-		// Find the provider that serves this model by matching the Provider field in info
 		var prov Provider
 		found := false
 		for _, p := range cfg.Providers {
@@ -197,71 +219,111 @@ func RunCheck(root string, probe bool) (*CheckReport, error) {
 			}
 		}
 		if !found {
-			// Provider not found in config — skip
 			continue
 		}
-
-		// Virtual meta-model providers have no real upstream — skip their
-		// served-listing fetch entirely (their catalog is strategy-synthesized
-		// and not verifiable against any /v1/models).
 		if prov.isVirtual() {
 			continue
 		}
-
-		// Served set fetched once per provider (cached above).
 		served, servedErr := servedFor(prov)
 		servedSet := modelSet(served)
-
 		bareID := strings.TrimPrefix(modelID, provider+"/")
 		if servedErr != nil {
-			// Provider unreachable — no verdicts possible beyond "listed".
 			report.Models = append(report.Models, ModelHealth{
-				ID:       modelID,
-				Provider: provider,
-				Served:   false,
-				Status:   StatusUnknown,
-				Detail:   "served listing unavailable: " + servedErr.Error(),
+				ID: modelID, Provider: provider, Served: false,
+				Status: StatusUnknown, Detail: "served listing unavailable: " + servedErr.Error(),
 			})
 			report.Unknown++
 			continue
 		}
-
 		if !servedSet[bareID] {
 			report.Models = append(report.Models, ModelHealth{
-				ID:       modelID,
-				Provider: provider,
-				Served:   false,
-				Status:   StatusNotServed,
-				Detail:   "not in provider /v1/models listing (filtered or removed upstream)",
+				ID: modelID, Provider: provider, Served: false,
+				Status: StatusNotServed, Detail: "not in provider /v1/models listing (filtered or removed upstream)",
 			})
 			report.NotServed++
 			continue
 		}
+		if !probe {
+			report.Models = append(report.Models, ModelHealth{
+				ID: modelID, Provider: provider, Served: true,
+				Status: StatusOK, CheckedAt: report.At,
+			})
+			report.OK++
+			continue
+		}
+		jobs = append(jobs, probeJob{modelID: modelID, provider: provider, bareID: bareID, prov: prov})
+	}
 
-		mh := ModelHealth{ID: modelID, Provider: provider, Served: true, Status: StatusOK}
-		if probe {
-			detail, retries, ok := probeModel(prov, bareID)
-			mh.Retries = retries
-			if !ok {
-				if strings.HasPrefix(detail, "transient:") {
-					mh.Status = StatusDegraded
-					report.Degraded++
-				} else {
-					mh.Status = StatusFailed
-					report.Failed++
-				}
-				mh.Detail = detail
-				report.Models = append(report.Models, mh)
-				continue
+	// Phase 2 (parallel): chat probe + optional capability probe.
+	if len(jobs) > 0 {
+		parallel := cfg.Health.Parallel
+		if parallel < 1 {
+			parallel = 1
+		}
+		results := make([]ModelHealth, len(jobs))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, parallel)
+		for i, job := range jobs {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(idx int, job probeJob) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				results[idx] = runProbe(job, cfg, report.At)
+			}(i, job)
+		}
+		wg.Wait()
+		for _, mh := range results {
+			report.Models = append(report.Models, mh)
+			switch mh.Status {
+			case StatusOK:
+				report.OK++
+			case StatusDegraded:
+				report.Degraded++
+			case StatusFailed:
+				report.Failed++
+			default:
+				report.Unknown++
 			}
 		}
-
-		report.OK++
-		report.Models = append(report.Models, mh)
 	}
 
 	report.Total = report.OK + report.NotServed + report.Failed + report.Degraded + report.Unknown
 	return report, nil
+}
+
+// probeJob is one probe candidate.
+type probeJob struct {
+	modelID, provider, bareID string
+	prov                      Provider
+}
+
+// runProbe performs the chat probe (and, when enabled by config, the
+// agent-capability probe) for one model and returns the full health verdict.
+func runProbe(job probeJob, cfg *Config, at time.Time) ModelHealth {
+	mh := ModelHealth{ID: job.modelID, Provider: job.provider, Served: true, Status: StatusOK, CheckedAt: at, Reachable: false}
+	start := time.Now()
+	detail, retries, ok := probeModel(job.prov, job.bareID)
+	mh.Retries = retries
+	mh.ProbeLatencyMS = time.Since(start).Milliseconds()
+	if !ok {
+		if strings.HasPrefix(detail, "transient:") {
+			mh.Status = StatusDegraded
+		} else {
+			mh.Status = StatusFailed
+		}
+		mh.Detail = detail
+		return mh
+	}
+	mh.Reachable = true
+	if cfg.Health.CapabilityProbe {
+		toolCalls, note := probeAgentCapability(job.prov, job.bareID, probeTimeout(cfg))
+		mh.ToolCalls = &toolCalls
+		if note != "" && note != "tool_calls ok" {
+			mh.CapabilityNote = note
+		}
+	}
+	return mh
 }
 
 // fetchModelsRetry wraps fetchModels with the provider's transient-retry

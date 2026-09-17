@@ -52,6 +52,8 @@ type Config struct {
 	LogFile    string
 	Providers  []Provider
 	Strategies []config.ModelProxyStrategy
+	// Health is the resolved automated health check configuration.
+	Health HealthConfig
 	// EnvRefs lists the env var names referenced via {env:VAR}/${VAR}/$VAR in
 	// the raw config (as they appeared before expansion). Used by the daemon
 	// to pick up missing keys from the user's opencode config. Not serialized.
@@ -126,6 +128,32 @@ type Provider struct {
 	HealthEndpoint string
 }
 
+// HealthConfig is the resolved automated health check configuration with
+// defaults applied.
+type HealthConfig struct {
+	// Interval is how often the background check runs. Zero disables it.
+	Interval time.Duration
+	// Timeout is the per-probe HTTP timeout. Default 30s.
+	Timeout time.Duration
+	// Parallel is the number of concurrent probes. Default 4.
+	Parallel int
+	// CapabilityProbe enables the agent-capability probe. Default true.
+	CapabilityProbe bool
+	// Endpoint is the proxy route serving the persisted state.
+	Endpoint string
+}
+
+// DefaultHealthConfig returns the defaults for the automated health check.
+func DefaultHealthConfig() HealthConfig {
+	return HealthConfig{
+		Interval:        30 * time.Minute,
+		Timeout:         30 * time.Second,
+		Parallel:        4,
+		CapabilityProbe: true,
+		Endpoint:        "/v1/model-health",
+	}
+}
+
 // Load reads and resolves the model-proxy configuration for the workspace
 // root. A missing config file is not an error: it returns the default
 // listen address with no providers (the proxy then serves nothing).
@@ -155,6 +183,38 @@ func Load(root string) (*Config, error) {
 	}
 	if !filepath.IsAbs(out.LogFile) {
 		out.LogFile = filepath.Join(root, out.LogFile)
+	}
+
+	// Resolve the automated health check configuration (defaults + overrides).
+	out.Health = DefaultHealthConfig()
+	hc := mp.Health
+	if hc.Interval != "" {
+		if d, err := time.ParseDuration(hc.Interval); err == nil {
+			out.Health.Interval = d
+		}
+	}
+	if hc.Timeout != "" {
+		if d, err := time.ParseDuration(hc.Timeout); err == nil {
+			out.Health.Timeout = d
+		}
+	}
+	if hc.Parallel > 1 {
+		out.Health.Parallel = hc.Parallel
+	}
+	if hc.Endpoint != "" {
+		out.Health.Endpoint = hc.Endpoint
+	}
+	// Bool: yaml cannot distinguish "false" from unset via the plain bool
+	// field, but for an opt-in feature defaulting to true, explicitly setting
+	// false means: disable the capability probe. yaml bool field zero-value is
+	// false, which would wrongly disable it — so use a *bool to detect unset.
+	// The raw YAML node is decoded via the same struct, so we read the
+	// pointer field. (ModelProxyHealthConfig uses *bool.)
+	{
+		cb := mp.Health.CapabilityProbe
+		if cb != nil && !*cb {
+			out.Health.CapabilityProbe = false
+		}
 	}
 
 	for _, p := range mp.Providers {
@@ -298,6 +358,7 @@ func (p *Provider) isVirtual() bool { return p.Type == typeMetaModel }
 // config force-enable the capabilities that virtually all Ollama models
 // support (see forcedModelCaps), especially tool calling.
 const typeOpenCodeOllama = "ollama"
+const typeOpenCodeGroq = "groq"
 
 // defaultOllamaCapabilities is the capability set forced onto every model of
 // an "ollama"-typed provider unless the provider overrides `capabilities:`.
@@ -305,6 +366,7 @@ const typeOpenCodeOllama = "ollama"
 // models; vision (attachment) and reasoning stay per-model opt-in via an
 // explicit `capabilities:` list, since not every Ollama model supports them.
 var defaultOllamaCapabilities = []string{"toolcall", "temperature"}
+var defaultGroqCapabilities = []string{"toolcall", "temperature"}
 
 // forcedModelCaps returns the capability flags that should be force-enabled
 // on every model entry of this provider in the generated opencode config:
@@ -316,6 +378,9 @@ func (p *Provider) forcedModelCaps() []string {
 	}
 	if p.Type == typeOpenCodeOllama {
 		return defaultOllamaCapabilities
+	}
+	if p.Type == typeOpenCodeGroq {
+		return defaultGroqCapabilities
 	}
 	return nil
 }
