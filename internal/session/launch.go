@@ -1155,7 +1155,7 @@ func validateModelAvailable(root, model string) error {
 		return fmt.Errorf("model %q not served by any configured model-proxy provider — opencode will fall back to default", model)
 	}
 	// Verify the model is actually available from that provider
-	cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers}
+	cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers, Strategies: mpCfg.Strategies}
 	if mpCfg.ListenAddr == "" {
 		cfg.ListenAddr = "127.0.0.1:8443"
 	}
@@ -1182,6 +1182,17 @@ func validateModelAvailable(root, model string) error {
 	for _, m := range available {
 		if m == model || m == baseModel {
 			return nil // model is available
+		}
+	}
+	// If model not found in available list, check if it's a meta-model strategy
+	// (virtual provider strategy IDs are valid model names even if not in the
+	// provider's upstream catalog)
+	// Check both by Type and by ID since the virtual provider has id="meta-model"
+	if prov.Type == "meta-model" || prov.ID == "meta-model" {
+		for _, s := range cfg.Strategies {
+			if s.ID == model || s.ID == baseModel {
+				return nil // meta-model strategy is valid
+			}
 		}
 	}
 	return fmt.Errorf("model %q not found in provider %q (available: %d models) — opencode will fall back to default", model, provider, len(available))
