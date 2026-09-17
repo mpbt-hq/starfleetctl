@@ -4,11 +4,14 @@
 package modelproxy
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -47,468 +50,206 @@ func TestHealthStateRoundtrip(t *testing.T) {
 	}
 }
 
-func TestRunCheck_NotServed(t *testing.T) {
-	// Upstream serves only model A; catalog lists A + B.
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/models" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data":[{"id":"model-a","object":"model"}]}`))
-			return
-		}
-		if r.URL.Path == "/chat/completions" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer upstream.Close()
-
-	root := t.TempDir()
+// seedCheckConfig writes a model-proxy.yaml with one direct provider pointing
+// at the given upstream, so RunCheck's catalog source (ProxyModelInfos) and
+// served-set fetch both hit the same /v1/models endpoint.
+func seedCheckConfig(t *testing.T, root, upstreamURL string, maxRetries int) {
+	t.Helper()
 	confDir := filepath.Join(root, ".starfleet-ai", "conf")
 	if err := os.MkdirAll(confDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	proxyYaml := `model_proxy:
-  listen_addr: "127.0.0.1:12345"
-  providers:
-    - id: "nim-proxy"
-      name: "NVIDIA NIM"
-      base_url: "` + upstream.URL + `"
-      api_key: "test-key"
-      model_filter: "all"
-`
+	proxyYaml := "model_proxy:\n" +
+		"  listen_addr: \"127.0.0.1:12345\"\n" +
+		"  providers:\n" +
+		"    - id: \"nim-proxy\"\n" +
+		"      name: \"NVIDIA NIM\"\n" +
+		"      base_url: \"" + upstreamURL + "\"\n" +
+		"      api_key: \"test-key\"\n" +
+		"      model_filter: \"all\"\n" +
+		"      direct: true\n" +
+		"      max_retries: " + strconv.Itoa(maxRetries) + "\n" +
+		"      retry_delay_ms: 1\n"
 	if err := os.WriteFile(filepath.Join(confDir, "model-proxy.yaml"), []byte(proxyYaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Write models.yaml with model-a (served) and model-b (not served)
-	modelsYaml := `
-models:
-  - id: "nim-proxy/model-a"
-    provider: "nim-proxy"
-    label: "Model A"
-    context: 8192
-    caps: ["toolcall"]
-  - id: "nim-proxy/model-b"
-    provider: "nim-proxy"
-    label: "Model B"
-    context: 8192
-    caps: ["toolcall"]
-`
-	if err := os.WriteFile(filepath.Join(confDir, "models.yaml"), []byte(modelsYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	report, err := RunCheck(root, false)
-	if err != nil {
-		t.Fatalf("RunCheck: %v", err)
-	}
-	if report.Total != 2 {
-		t.Fatalf("Total=2, got %d", report.Total)
-	}
-	if report.OK != 1 {
-		t.Errorf("OK=1, got %d", report.OK)
-	}
-	if report.NotServed != 1 {
-		t.Errorf("NotServed=1, got %d", report.NotServed)
-	}
-	// model-a should be OK
-	var foundA, foundB bool
-	for _, mh := range report.Models {
-		if mh.ID == "nim-proxy/model-a" {
-			foundA = true
-			if mh.Status != StatusOK {
-				t.Errorf("model-a status: %s, want %s", mh.Status, StatusOK)
-			}
-			if !mh.Served {
-				t.Error("model-a should be served")
-			}
-		}
-		if mh.ID == "nim-proxy/model-b" {
-			foundB = true
-			if mh.Status != StatusNotServed {
-				t.Errorf("model-b status: %s, want %s", mh.Status, StatusNotServed)
-			}
-			if mh.Served {
-				t.Error("model-b should not be served")
-			}
-		}
-	}
-	if !foundA || !foundB {
-		t.Error("both models not found in report")
-	}
 }
 
-func TestRunCheck_Probe_Success(t *testing.T) {
-	// Upstream serves model-a AND accepts chat.
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/models" {
+// upstreamServingModels returns an httptest server that serves /v1/models and
+// (optionally) /chat/completions.
+func upstreamServingModels(t *testing.T, chat func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data":[{"id":"model-a","object":"model"}]}`))
-			return
-		}
-		if r.URL.Path == "/chat/completions" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer upstream.Close()
-
-	root := t.TempDir()
-	confDir := filepath.Join(root, ".starfleet-ai", "conf")
-	if err := os.MkdirAll(confDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	proxyYaml := `model_proxy:
-  listen_addr: "127.0.0.1:12345"
-  providers:
-    - id: "nim-proxy"
-      name: "NVIDIA NIM"
-      base_url: "` + upstream.URL + `"
-      api_key: "test-key"
-      model_filter: "all"
-      max_retries: 0
-      retry_delay_ms: 0
-`
-	if err := os.WriteFile(filepath.Join(confDir, "model-proxy.yaml"), []byte(proxyYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	modelsYaml := `
-models:
-  - id: "nim-proxy/model-a"
-    provider: "nim-proxy"
-    label: "Model A"
-    context: 8192
-    caps: ["toolcall"]
-`
-	if err := os.WriteFile(filepath.Join(confDir, "models.yaml"), []byte(modelsYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	report, err := RunCheck(root, true)
-	if err != nil {
-		t.Fatalf("RunCheck: %v", err)
-	}
-	if report.OK != 1 {
-		t.Errorf("OK=1, got %d", report.OK)
-	}
-	for _, mh := range report.Models {
-		if mh.ID == "nim-proxy/model-a" {
-			if mh.Status != StatusOK {
-				t.Errorf("model-a status: %s, want %s", mh.Status, StatusOK)
-			}
-			if mh.Retries != 0 {
-				t.Errorf("retries should be 0, got %d", mh.Retries)
-			}
-		}
-	}
-}
-
-func TestRunCheck_Probe_HardFail_404(t *testing.T) {
-	// Upstream serves model-a but chat returns 404 (no-account / not-found).
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/models" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data":[{"id":"model-a","object":"model"}]}`))
-			return
-		}
-		if r.URL.Path == "/chat/completions" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"error":{"message":"Not found for account","type":"not_found"}}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer upstream.Close()
-
-	root := t.TempDir()
-	confDir := filepath.Join(root, ".starfleet-ai", "conf")
-	if err := os.MkdirAll(confDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	proxyYaml := `model_proxy:
-  listen_addr: "127.0.0.1:12345"
-  providers:
-    - id: "nim-proxy"
-      name: "NVIDIA NIM"
-      base_url: "` + upstream.URL + `"
-      api_key: "test-key"
-      model_filter: "all"
-      max_retries: 0
-      retry_delay_ms: 0
-`
-	if err := os.WriteFile(filepath.Join(confDir, "model-proxy.yaml"), []byte(proxyYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	modelsYaml := `
-models:
-  - id: "nim-proxy/model-a"
-    provider: "nim-proxy"
-    label: "Model A"
-    context: 8192
-    caps: ["toolcall"]
-`
-	if err := os.WriteFile(filepath.Join(confDir, "models.yaml"), []byte(modelsYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	report, err := RunCheck(root, true)
-	if err != nil {
-		t.Fatalf("RunCheck: %v", err)
-	}
-	if report.Failed != 1 {
-		t.Errorf("Failed=1, got %d", report.Failed)
-	}
-	for _, mh := range report.Models {
-		if mh.ID == "nim-proxy/model-a" {
-			if mh.Status != StatusFailed {
-				t.Errorf("model-a status: %s, want %s", mh.Status, StatusFailed)
-			}
-			if !strings.Contains(mh.Detail, "HTTP 404") {
-				t.Errorf("detail should contain HTTP 404: %s", mh.Detail)
-			}
-		}
-	}
-}
-
-func TestRunCheck_Probe_TransientRetries_ThenOK(t *testing.T) {
-	// Upstream returns 429 twice then 200 on third attempt.
-	attempts := 0
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/models" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data":[{"id":"model-a","object":"model"}]}`))
-			return
-		}
-		if r.URL.Path == "/chat/completions" {
-			attempts++
-			if attempts <= 2 {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(`{"error":{"message":"ResourceExhausted: rate limit","type":"rate_limit"}}`))
+			w.Write([]byte(`{"data":[{"id":"model-a","object":"model"},{"id":"model-b","object":"model"}]}`))
+		case "/chat/completions":
+			if chat != nil {
+				chat(w, r)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
-			return
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	}))
+	return srv
+}
+
+func TestRunCheck_ServedOK(t *testing.T) {
+	upstream := upstreamServingModels(t, nil)
 	defer upstream.Close()
 
 	root := t.TempDir()
-	confDir := filepath.Join(root, ".starfleet-ai", "conf")
-	if err := os.MkdirAll(confDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	proxyYaml := `model_proxy:
-  listen_addr: "127.0.0.1:12345"
-  providers:
-    - id: "nim-proxy"
-      name: "NVIDIA NIM"
-      base_url: "` + upstream.URL + `"
-      api_key: "test-key"
-      model_filter: "all"
-      max_retries: 2
-      retry_delay_ms: 1
-`
-	if err := os.WriteFile(filepath.Join(confDir, "model-proxy.yaml"), []byte(proxyYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	modelsYaml := `
-models:
-  - id: "nim-proxy/model-a"
-    provider: "nim-proxy"
-    label: "Model A"
-    context: 8192
-    caps: ["toolcall"]
-`
-	if err := os.WriteFile(filepath.Join(confDir, "models.yaml"), []byte(modelsYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	report, err := RunCheck(root, true)
-	if err != nil {
-		t.Fatalf("RunCheck: %v", err)
-	}
-	// Probe eventually succeeds after retries -> should be OK, not degraded.
-	if report.OK != 1 {
-		t.Errorf("OK=1, got %d", report.OK)
-	}
-	for _, mh := range report.Models {
-		if mh.ID == "nim-proxy/model-a" {
-			if mh.Status != StatusOK {
-				t.Errorf("model-a status: %s, want %s", mh.Status, StatusOK)
-			}
-			if mh.Retries != 2 {
-				t.Errorf("retries should be 2, got %d", mh.Retries)
-			}
-		}
-	}
-}
-
-func TestRunCheck_Probe_TransientExhausted_Degraded(t *testing.T) {
-	// Upstream returns 429 on ALL attempts (max_retries=2 -> 3 total attempts).
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/models" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"data":[{"id":"model-a","object":"model"}]}`))
-			return
-		}
-		if r.URL.Path == "/chat/completions" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":{"message":"ResourceExhausted: rate limit","type":"rate_limit"}}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer upstream.Close()
-
-	root := t.TempDir()
-	confDir := filepath.Join(root, ".starfleet-ai", "conf")
-	if err := os.MkdirAll(confDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	proxyYaml := `model_proxy:
-  listen_addr: "127.0.0.1:12345"
-  providers:
-    - id: "nim-proxy"
-      name: "NVIDIA NIM"
-      base_url: "` + upstream.URL + `"
-      api_key: "test-key"
-      model_filter: "all"
-      max_retries: 2
-      retry_delay_ms: 1
-`
-	if err := os.WriteFile(filepath.Join(confDir, "model-proxy.yaml"), []byte(proxyYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	modelsYaml := `
-models:
-  - id: "nim-proxy/model-a"
-    provider: "nim-proxy"
-    label: "Model A"
-    context: 8192
-    caps: ["toolcall"]
-`
-	if err := os.WriteFile(filepath.Join(confDir, "models.yaml"), []byte(modelsYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	report, err := RunCheck(root, true)
-	if err != nil {
-		t.Fatalf("RunCheck: %v", err)
-	}
-	if report.Degraded != 1 {
-		t.Errorf("Degraded=1, got %d", report.Degraded)
-	}
-	for _, mh := range report.Models {
-		if mh.ID == "nim-proxy/model-a" {
-			if mh.Status != StatusDegraded {
-				t.Errorf("model-a status: %s, want %s", mh.Status, StatusDegraded)
-			}
-			if mh.Retries != 2 {
-				t.Errorf("retries should be 2, got %d", mh.Retries)
-			}
-			if !strings.HasPrefix(mh.Detail, "transient:") {
-				t.Errorf("detail should be transient-prefixed: %s", mh.Detail)
-			}
-		}
-	}
-}
-
-func TestRunCheck_Unknown_WhenProviderDown(t *testing.T) {
-	// Provider unreachable (base_url points to nowhere).
-	root := t.TempDir()
-	confDir := filepath.Join(root, ".starfleet-ai", "conf")
-	if err := os.MkdirAll(confDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	proxyYaml := `model_proxy:
-  listen_addr: "127.0.0.1:12345"
-  providers:
-    - id: "nim-proxy"
-      name: "NVIDIA NIM"
-      base_url: "http://127.0.0.1:1"
-      api_key: "test-key"
-      model_filter: "all"
-      max_retries: 0
-      retry_delay_ms: 0
-`
-	if err := os.WriteFile(filepath.Join(confDir, "model-proxy.yaml"), []byte(proxyYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	modelsYaml := `
-models:
-  - id: "nim-proxy/model-a"
-    provider: "nim-proxy"
-    label: "Model A"
-    context: 8192
-    caps: ["toolcall"]
-`
-	if err := os.WriteFile(filepath.Join(confDir, "models.yaml"), []byte(modelsYaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	seedCheckConfig(t, root, upstream.URL, 0)
 
 	report, err := RunCheck(root, false)
 	if err != nil {
 		t.Fatalf("RunCheck: %v", err)
 	}
-	if report.Unknown != 1 {
-		t.Errorf("Unknown=1, got %d", report.Unknown)
+	if report.OK != 2 {
+		t.Errorf("OK=2, got %d", report.OK)
 	}
 	for _, mh := range report.Models {
-		if mh.Status != StatusUnknown {
-			t.Errorf("model-a status: %s, want %s", mh.Status, StatusUnknown)
+		if mh.ID != "model-a" && mh.ID != "model-b" {
+			t.Errorf("unexpected model id: %s", mh.ID)
+		}
+		if mh.Status != StatusOK {
+			t.Errorf("model %s status: %s, want %s", mh.ID, mh.Status, StatusOK)
+		}
+		if !mh.Served {
+			t.Errorf("model %s should be served", mh.ID)
 		}
 	}
 }
 
-func TestLoadCatalogEntries_IgnoresDisabled(t *testing.T) {
+func TestRunCheck_Probe_Success(t *testing.T) {
+	upstream := upstreamServingModels(t, nil)
+	defer upstream.Close()
+
 	root := t.TempDir()
-	confDir := filepath.Join(root, ".starfleet-ai", "conf")
-	if err := os.MkdirAll(confDir, 0o755); err != nil {
-		t.Fatal(err)
+	seedCheckConfig(t, root, upstream.URL, 0)
+
+	report, err := RunCheck(root, true)
+	if err != nil {
+		t.Fatalf("RunCheck: %v", err)
 	}
-	modelsYaml := `
-models:
-  - id: "nim-proxy/model-a"
-    provider: "nim-proxy"
-    label: "Model A"
-    context: 8192
-    caps: ["toolcall"]
-  - id: "nim-proxy/model-b"
-    provider: "nim-proxy"
-    label: "Model B"
-    context: 8192
-    caps: ["toolcall"]
-    disabled: true
-  - id: "zen-proxy/model-c"
-    provider: "zen-proxy"
-    label: "Model C"
-    context: 8192
-    caps: ["toolcall"]
-`
-	if err := os.WriteFile(filepath.Join(confDir, "models.yaml"), []byte(modelsYaml), 0o644); err != nil {
-		t.Fatal(err)
+	if report.OK != 2 {
+		t.Errorf("OK=2, got %d", report.OK)
 	}
-	entries := loadCatalogEntries(root)["nim-proxy"]
-	if len(entries) != 1 {
-		t.Errorf("expected 1 nim-proxy entry, got %d", len(entries))
+	for _, mh := range report.Models {
+		if mh.Status != StatusOK {
+			t.Errorf("model %s status: %s, want %s", mh.ID, mh.Status, StatusOK)
+		}
+		if mh.Retries != 0 {
+			t.Errorf("model %s retries should be 0, got %d", mh.ID, mh.Retries)
+		}
 	}
-	if entries[0].ID != "nim-proxy/model-a" {
-		t.Errorf("expected model-a, got %s", entries[0].ID)
+}
+
+func TestRunCheck_Probe_HardFail_404(t *testing.T) {
+	upstream := upstreamServingModels(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":{"message":"Not found for account","type":"not_found"}}`))
+	})
+	defer upstream.Close()
+
+	root := t.TempDir()
+	seedCheckConfig(t, root, upstream.URL, 0)
+
+	report, err := RunCheck(root, true)
+	if err != nil {
+		t.Fatalf("RunCheck: %v", err)
+	}
+	if report.Failed != 2 {
+		t.Errorf("Failed=2, got %d", report.Failed)
+	}
+	for _, mh := range report.Models {
+		if mh.Status != StatusFailed {
+			t.Errorf("model %s status: %s, want %s", mh.ID, mh.Status, StatusFailed)
+		}
+		if !strings.Contains(mh.Detail, "HTTP 404") {
+			t.Errorf("detail should contain HTTP 404: %s", mh.Detail)
+		}
+	}
+}
+
+func TestRunCheck_Probe_TransientRetries_ThenOK(t *testing.T) {
+	attempts := map[string]int{}
+	var attemptsMu sync.Mutex
+	upstream := upstreamServingModels(t, func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		attemptsMu.Lock()
+		attempts[req.Model]++
+		n := attempts[req.Model]
+		attemptsMu.Unlock()
+		if n <= 2 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"ResourceExhausted: rate limit","type":"rate_limit"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
+	})
+	defer upstream.Close()
+
+	root := t.TempDir()
+	seedCheckConfig(t, root, upstream.URL, 2)
+
+	report, err := RunCheck(root, true)
+	if err != nil {
+		t.Fatalf("RunCheck: %v", err)
+	}
+	if report.OK != 2 {
+		t.Errorf("OK=2, got %d", report.OK)
+	}
+	for _, mh := range report.Models {
+		if mh.Status != StatusOK {
+			t.Errorf("model %s status: %s, want %s", mh.ID, mh.Status, StatusOK)
+		}
+		if mh.Retries != 2 {
+			t.Errorf("model %s retries should be 2, got %d", mh.ID, mh.Retries)
+		}
+	}
+}
+
+func TestRunCheck_Probe_TransientExhausted_Degraded(t *testing.T) {
+	upstream := upstreamServingModels(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"ResourceExhausted: rate limit","type":"rate_limit"}}`))
+	})
+	defer upstream.Close()
+
+	root := t.TempDir()
+	seedCheckConfig(t, root, upstream.URL, 2)
+
+	report, err := RunCheck(root, true)
+	if err != nil {
+		t.Fatalf("RunCheck: %v", err)
+	}
+	if report.Degraded != 2 {
+		t.Errorf("Degraded=2, got %d", report.Degraded)
+	}
+	for _, mh := range report.Models {
+		if mh.Status != StatusDegraded {
+			t.Errorf("model %s status: %s, want %s", mh.ID, mh.Status, StatusDegraded)
+		}
+		if mh.Retries != 2 {
+			t.Errorf("model %s retries should be 2, got %d", mh.ID, mh.Retries)
+		}
+		if !strings.HasPrefix(mh.Detail, "transient:") {
+			t.Errorf("detail should be transient-prefixed: %s", mh.Detail)
+		}
 	}
 }

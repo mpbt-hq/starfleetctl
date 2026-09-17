@@ -350,7 +350,6 @@ starfleetctl worktree remove <branch>
 | `self-install` | Clone/build/install updates |
 | `sop` | Manage SOP instruction fragments ([docs](doc/sop.md)) |
 | `json` | JSON validate/pretty/get |
-| `models` | Sync models.yaml from opencode catalog |
 | `web` | Fleet web UI (start/stop/autostart/restart) |
 
 ---
@@ -402,11 +401,9 @@ Click a ship card to open the **ship detail panel** (slide-in from the right):
 The "Neues Schiff" form at the top of the Flotte tab lets you launch a background ship directly from the browser:
 
 - **Name** (optional): ship name; auto-assigned if left blank
-- **Model** (dropdown): select from available models, grouped by provider. The dropdown is populated from `/api/models` (backed by `models.yaml`). The last-used model is remembered via `localStorage`.
+- **Model** (dropdown): select from available models, grouped by provider. The dropdown is populated from `/api/models` (queried live from the model-proxy providers). The last-used model is remembered via `localStorage`.
 - **Provider** (dropdown): auto-set when a model is selected; can be overridden manually. Options: openai, anthropic, google, nvidia, mistral, meta.
 - **Parent** (optional): parent ship for hierarchical ordering
-
-Model registry is generated from `opencode models --verbose` via the `gen-models-yaml` script (see [Model Registry](#model-registry) below).
 
 ### Tasks
 
@@ -517,7 +514,7 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 | `/api/tell` | POST | Send a message (JSON body: `{target, text}` or form: `target` + `text`) |
 | `/api/cmd` | POST | Post a command verb to a ship (JSON body: `{target, verb, args}`). Used for `model`, etc. |
 | `/api/identity` | GET | Viewing ship's identity (`{ship_id, handle, project}`) |
-| `/api/models` | GET | Available models for ship launch (from `models.yaml`) |
+| `/api/models` | GET | Available models for ship launch (live-queried from model-proxy providers) |
 | `/api/ship` | POST | Launch a new ship (JSON body: `{name, model, provider, parent}`) |
 | `/api/timers` | GET | List all timers. Optional `?all=1` for all ships |
 | `/api/timer` | POST | Create a timer (JSON body: `{schedule_type, target_type, text/cmd, ...}`) |
@@ -538,24 +535,12 @@ The frontend polls every 15 seconds for the Flotte, Tasks, Log, Bus, Funk, Timer
 
 ### Model Registry
 
-The ship launch dropdown is populated from `.starfleet-ai/conf/models.yaml`, which is auto-generated from `opencode models --verbose`:
-
-```sh
-# Regenerate the model list (filters for text models with tool-call support)
-.starfleet-ai/bin/gen-models-yaml
-```
-
-The script outputs YAML with entries like:
-
-```yaml
-models:
-  - id: "opencode/big-pickle"
-    provider: "opencode"
-    label: "Big Pickle"
-    context: 200000
-```
-
-Only models with `toolcall: true` and `context > 0` are included (required for agent use). The web UI fetches this list via `GET /api/models` and groups models by provider in the dropdown.
+The ship launch dropdown is populated from `GET /api/models`, which queries
+the model catalog **live** from the configured model-proxy backends (upstream
+`/v1/models` endpoints, enriched with label/context/caps). Virtual meta-model
+providers contribute one entry per strategy. There is no static registry file
+anymore — the `starfleetctl models` subcommand and `gen-models-yaml` were
+removed. The web UI groups the models by provider in the dropdown.
 
 ### Web Server Management
 
@@ -807,7 +792,7 @@ workspace/
 │   │   ├── log/                 # centralised logs (web.log, timer-worker.log)
 │   │   └── ships/               # session pipes + logs
 │   ├── conf/
-│   │   ├── models.yaml          # model registry for web UI
+│   │   ├── models.yaml          # legacy model registry (optional, unused)
 │   │   └── timers/              # persistent timers
 │   └── web.pid                  # web server PID (when daemonised)
 ├── run-opencode.flagship        # launcher (flagship)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Model health check — verifies that every model listed in models.yaml for a
+// Model health check — verifies that every model served by the
 // proxied provider is actually served and, optionally, that a minimal chat
 // request succeeds. Transient upstream failures (429/5xx, timeouts,
 // gRPC-style saturation) are retried; only hard errors mark a model as failed.
@@ -22,8 +22,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // CheckStatus is the health verdict for a single model.
@@ -141,68 +139,8 @@ func (st *HealthState) Get(id string) (ModelHealth, bool) {
 	return mh, ok
 }
 
-// catalogEntry is one models.yaml entry.
-type catalogEntry struct {
-	ID       string
-	Provider string
-	Label    string
-}
-
-// loadCatalogEntries parses .starfleet-ai/conf/models.yaml (the format the
-// `models sync` subcommand maintains) and returns the active entries, grouped
-// by provider id. A missing/corrupt file yields an empty map.
-func loadCatalogEntries(root string) map[string][]catalogEntry {
-	data, err := os.ReadFile(filepath.Join(root, ".starfleet-ai", "conf", "models.yaml"))
-	if err != nil {
-		return nil
-	}
-	// Strip the free-form header comments / "---" delimiter before parsing.
-	lines := strings.Split(string(data), "\n")
-	var clean []string
-	started := false
-	for _, l := range lines {
-		if !started {
-			if strings.HasPrefix(l, "---") {
-				started = true
-				clean = append(clean, l)
-			} else if strings.HasPrefix(l, "#") || strings.TrimSpace(l) == "" {
-				continue
-			} else {
-				started = true
-				clean = append(clean, l)
-			}
-			continue
-		}
-		clean = append(clean, l)
-	}
-	var doc struct {
-		Models []struct {
-			ID       string `yaml:"id"`
-			Provider string `yaml:"provider"`
-			Label    string `yaml:"label"`
-			Disabled bool   `yaml:"disabled"`
-		} `yaml:"models"`
-	}
-	if err := yaml.Unmarshal([]byte(strings.Join(clean, "\n")), &doc); err != nil {
-		return nil
-	}
-	out := map[string][]catalogEntry{}
-	for _, m := range doc.Models {
-		if m.ID == "" || m.Provider == "" || m.Disabled {
-			continue
-		}
-		out[m.Provider] = append(out[m.Provider], catalogEntry{
-			ID:       m.ID,
-			Provider: m.Provider,
-			Label:    m.Label,
-		})
-	}
-	return out
-}
-
-// RunCheck runs the health check over all active models.yaml catalog entries
-// of the configured proxied providers. With probe=true, one minimal chat
-// request per served model validates that it actually accepts requests;
+// RunCheck runs the health check over all models provided by the configured proxied and direct providers.
+// With probe=true, one minimal chat request per served model validates that it actually accepts requests;
 // transient failures are retried and only persist as "degraded", hard errors
 // mark the model as "failed".
 func RunCheck(root string, probe bool) (*CheckReport, error) {
@@ -210,73 +148,118 @@ func RunCheck(root string, probe bool) (*CheckReport, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Get unified model list from modelproxy (includes both proxied and direct providers)
+	modelInfos := ProxyModelInfos(root)
+	if modelInfos == nil {
+		return &CheckReport{At: time.Now(), Probe: probe}, nil
+	}
+
 	report := &CheckReport{At: time.Now(), Probe: probe}
-	if len(cfg.Providers) == 0 {
-		return report, nil
+
+	// Served set per provider, fetched once (not per model).
+	type servedCache struct {
+		ids  []string
+		err  error
+		done bool
+	}
+	cache := make(map[string]*servedCache)
+	servedFor := func(prov Provider) ([]string, error) {
+		if c, ok := cache[prov.ID]; ok {
+			return c.ids, c.err
+		}
+		ids, err := fetchModelsRetry(prov)
+		cache[prov.ID] = &servedCache{ids: ids, err: err, done: true}
+		return ids, err
 	}
 
-	catalog := loadCatalogEntries(root)
-	for _, entries := range catalog {
-		report.Total += len(entries)
-	}
+	for _, info := range modelInfos {
+		modelID := info.ID
+		if modelID == "" {
+			continue
+		}
 
-	for _, prov := range cfg.Providers {
-		entries := catalog[prov.ID]
+		// Provider is the owned_by field from the model info.
+		provider := info.OwnedBy
+		if provider == "" {
+			// Should not happen, but skip if empty.
+			continue
+		}
+
+		// Find the provider that serves this model by matching the Provider field in info
+		var prov Provider
+		found := false
+		for _, p := range cfg.Providers {
+			if p.ID == provider {
+				prov = p
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Provider not found in config — skip
+			continue
+		}
+
 		// Virtual meta-model providers have no real upstream — skip their
 		// served-listing fetch entirely (their catalog is strategy-synthesized
 		// and not verifiable against any /v1/models).
 		if prov.isVirtual() {
 			continue
 		}
-		// Served set (already filtered) fetched once per provider.
-		served, servedErr := fetchModelsRetry(prov)
+
+		// Served set fetched once per provider (cached above).
+		served, servedErr := servedFor(prov)
 		servedSet := modelSet(served)
-		for _, entry := range entries {
-			if servedErr != nil {
-				// Provider unreachable — no verdicts possible beyond "listed".
-				report.Models = append(report.Models, ModelHealth{
-					ID:       entry.ID,
-					Provider: prov.ID,
-					Served:   false,
-					Status:   StatusUnknown,
-					Detail:   "served listing unavailable: " + servedErr.Error(),
-				})
-				report.Unknown++
-				continue
-			}
-			bareID := strings.TrimPrefix(entry.ID, prov.ID+"/")
-			if !servedSet[bareID] {
-				report.Models = append(report.Models, ModelHealth{
-					ID:       entry.ID,
-					Provider: prov.ID,
-					Served:   false,
-					Status:   StatusNotServed,
-					Detail:   "not in provider /v1/models listing (filtered or removed upstream)",
-				})
-				report.NotServed++
-				continue
-			}
-			mh := ModelHealth{ID: entry.ID, Provider: prov.ID, Served: true, Status: StatusOK}
-			if probe {
-				detail, retries, ok := probeModel(prov, bareID)
-				mh.Retries = retries
-				if !ok {
-					if strings.HasPrefix(detail, "transient:") {
-						mh.Status = StatusDegraded
-						report.Degraded++
-					} else {
-						mh.Status = StatusFailed
-						report.Failed++
-					}
-					mh.Detail = detail
-					report.Models = append(report.Models, mh)
-					continue
-				}
-			}
-			report.OK++
-			report.Models = append(report.Models, mh)
+
+		bareID := strings.TrimPrefix(modelID, provider+"/")
+		if servedErr != nil {
+			// Provider unreachable — no verdicts possible beyond "listed".
+			report.Models = append(report.Models, ModelHealth{
+				ID:       modelID,
+				Provider: provider,
+				Served:   false,
+				Status:   StatusUnknown,
+				Detail:   "served listing unavailable: " + servedErr.Error(),
+			})
+			report.Unknown++
+			continue
 		}
+
+		if !servedSet[bareID] {
+			report.Models = append(report.Models, ModelHealth{
+				ID:       modelID,
+				Provider: provider,
+				Served:   false,
+				Status:   StatusNotServed,
+				Detail:   "not in provider /v1/models listing (filtered or removed upstream)",
+			})
+			report.NotServed++
+			continue
+		}
+
+		mh := ModelHealth{ID: modelID, Provider: provider, Served: true, Status: StatusOK}
+		if probe {
+			detail, retries, ok := probeModel(prov, bareID)
+			mh.Retries = retries
+			if !ok {
+				if strings.HasPrefix(detail, "transient:") {
+					mh.Status = StatusDegraded
+					report.Degraded++
+				} else {
+					mh.Status = StatusFailed
+					report.Failed++
+				}
+				mh.Detail = detail
+				report.Models = append(report.Models, mh)
+				continue
+			}
+		}
+
+		report.OK++
+		report.Models = append(report.Models, mh)
 	}
+
 	return report, nil
 }
 
@@ -298,7 +281,6 @@ func fetchModelsRetry(prov Provider) ([]string, error) {
 			time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
 			continue
 		}
-		return nil, lastErr
 	}
 	return nil, lastErr
 }

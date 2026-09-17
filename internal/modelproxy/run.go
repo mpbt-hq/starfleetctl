@@ -18,7 +18,7 @@ import (
 //	autostart  ensure the proxy daemon is running (cron)
 //	status     print running state + listen address
 //	models     query the model catalog per configured provider (diagnostics)
-//	check      verify models.yaml entries (--probe: minimal chat request, --json)
+//	check      verify served models (--probe: minimal chat request, --json)
 //	meta-models meta-model routing strategies (list, show, sessions, switch, force)
 func Run(root string, args []string) int {
 	if len(args) == 0 {
@@ -114,14 +114,14 @@ restart     stop + autostart
 autostart   ensure the proxy daemon is running (cron)
 status      print running state + listen address
 models      query the model catalog per configured provider (diagnostics)
-check       verify models.yaml entries (--probe: minimal chat request, --json)
+check       verify served models (--probe: minimal chat request, --json)
 `)
 }
 
 func checkUsage() {
 	fmt.Fprint(os.Stderr, `usage: starfleetctl model-proxy check [--probe] [--json]
 
-Checks every active models.yaml entry of the proxied providers:
+Checks every model of the configured (proxied and direct) providers:
   • listing check — is each model served by the provider's /v1/models?
   • --probe — plus a minimal 1-token chat request per served model
 Transient upstream failures (429/5xx, timeouts, saturation) are retried; only

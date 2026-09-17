@@ -50,14 +50,15 @@ background ship directly from the browser:
 
 - **Name** (optional): ship name; auto-assigned if left blank
 - **Modell** (dropdown): select from available models, grouped by provider.
-  The dropdown is populated from `/api/models` (backed by `models.yaml`).
+  The dropdown is populated from `/api/models` (queried live from the
+  model-proxy providers).
   The last-used model is remembered via `localStorage`.
 - **Provider** (dropdown): auto-set when a model is selected; can be overridden
   manually. Options: openai, anthropic, google, nvidia, mistral, meta.
 - **Übergeordnet** (optional): parent ship for hierarchical ordering
 
-Model registry is generated from `opencode models --verbose` via the
-`gen-models-yaml` script (see [Model Registry](#model-registry) below).
+Model catalog comes live from the model-proxy backends (see
+[Model Registry](#model-registry) below); no static registry file is used.
 
 ### Tasks
 
@@ -184,7 +185,7 @@ All endpoints return JSON. The web UI consumes these, but they're also usable fr
 | `/api/tell` | POST | Send a message (JSON body: `{target, text}` or form: `target` + `text`) |
 | `/api/cmd` | POST | Post a command verb to a ship (JSON body: `{target, verb, args}`). Used for `model`, etc. |
 | `/api/identity` | GET | Viewing ship's identity (`{ship_id, handle, project}`) |
-| `/api/models` | GET | Available models for ship launch (from `models.yaml`) |
+| `/api/models` | GET | Available models for ship launch (live-queried from model-proxy providers) |
 | `/api/ship` | POST | Launch a new ship (JSON body: `{name, model, provider, parent}`) |
 | `/api/timers` | GET | List all timers. Optional `?all=1` for all ships |
 | `/api/timer` | POST | Create a timer (JSON body: `{schedule_type, target_type, text/cmd, ...}`) |
@@ -221,7 +222,7 @@ Browser  ──HTTP──▶  starfleetctl web start
                        ├── /api/tasks     ──▶ dashboard/topics/*.md
                        ├── /api/tell      ──▶ comms tell/broadcast
                        ├── /api/cmd       ──▶ comms command
-                       ├── /api/models    ──▶ models.yaml
+                       ├── /api/models    ──▶ modelproxy.ProxyModelInfos()
                        ├── /api/ship      ──▶ session.LaunchShip()
                        ├── /api/timers    ──▶ timer.Store.List()
                        ├── /api/files     ──▶ os.ReadDir()
@@ -244,27 +245,13 @@ uses a 2 MiB read window and is capped at 5000 lines.
 
 ## Model Registry
 
-The ship launch dropdown is populated from `.starfleet-ai/conf/models.yaml`,
-which is auto-generated from `opencode models --verbose`:
-
-```sh
-# Regenerate the model list (filters for text models with tool-call support)
-.starfleet-ai/bin/gen-models-yaml
-```
-
-The script outputs YAML with entries like:
-
-```yaml
-models:
-  - id: "opencode/big-pickle"
-    provider: "opencode"
-    label: "Big Pickle"
-    context: 200000
-```
-
-Only models with `toolcall: true` and `context > 0` are included (required
-for agent use). The web UI fetches this list via `GET /api/models` and groups
-models by provider in the dropdown.
+The ship launch dropdown is populated from `GET /api/models`, which queries
+the model catalog **live** from the configured model-proxy backends (upstream
+`/v1/models` endpoints, enriched with label/context/caps). Virtual meta-model
+providers contribute one entry per strategy. There is no static registry file
+anymore — the `starfleetctl models` subcommand and `gen-models-yaml` were removed.
+The web UI fetches this list via `GET /api/models` and groups models by
+provider in the dropdown.
 
 ## Web Server Management
 

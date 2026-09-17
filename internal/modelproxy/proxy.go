@@ -651,9 +651,9 @@ func fetchModelInfo(prov Provider) ([]ModelInfo, error) {
 // handleModels serves GET /v1/models — the consolidated list of all upstream
 // models, enriched with display metadata (label, context, caps) from the
 // opencode catalog. The listing is queried straight from the upstream /models
-// endpoints (never from models.yaml). With ?provider=<id> only that provider's
-// models are returned (used by opencode-config generation to enumerate one
-// backend's catalog).
+// endpoints (never from a static catalog file). With ?provider=<id> only that
+// provider's models are returned (used by opencode-config generation to
+// enumerate one backend's catalog).
 //
 // A virtual meta-model provider contributes one model endpoint per strategy,
 // named by the strategy ID (never the real upstream models inside a strategy —

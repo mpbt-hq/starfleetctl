@@ -67,9 +67,9 @@ func TestFilterAvailableModelsNonProxiedProvider(t *testing.T) {
 	}
 }
 
-// TestFilterAvailableModelsDropsUnserved: models.yaml entries marked as
-// proxied (placed under a model-proxy config dir with a provider entry) are
-// dropped when the provider's served list does not contain the bare id.
+// TestFilterAvailableModelsDropsUnserved: models whose provider is served via
+// the model-proxy are dropped when the provider's served list does not contain
+// the bare id.
 func TestFilterAvailableModelsDropsUnserved(t *testing.T) {
 	root := t.TempDir()
 	addr := seedModelProxyConfig(t, root, "nim-proxy")

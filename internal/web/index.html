@@ -1904,7 +1904,7 @@ async function loadModels(){
     sel.addEventListener('change', function(){
       localStorage.setItem('fleet_model', this.value);
     });
-  } catch(e){ /* models.yaml not found — fallback to empty dropdown */ }
+  } catch(e){ /* /api/models unavailable — fallback to empty dropdown */ }
 }
 
 // shipLaunch starts a new ship from the web "Neues Schiff" form. Provider is

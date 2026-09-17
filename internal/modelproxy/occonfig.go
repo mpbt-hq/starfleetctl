@@ -309,8 +309,8 @@ func modalitiesFromCaps(caps []string) ([]string, []string) {
 // ProxyModelInfos returns the full model catalog (with label/context/caps)
 // for every configured model-proxy backend. The data is sourced from the
 // running local proxy's /v1/models when reachable (the same code path ships
-// use), otherwise from a direct upstream query. It is used by `models sync`
-// to make the proxy models selectable in the web console.
+// use), otherwise from a direct upstream query. It backs the web console model
+// dropdown and the model health check.
 func ProxyModelInfos(root string) []ModelInfo {
 	cfg, err := Load(root)
 	if err != nil {
