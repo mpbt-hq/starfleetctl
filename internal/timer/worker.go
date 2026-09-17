@@ -322,7 +322,8 @@ func removePIDFile(pidFile string) {
 }
 
 func openLogFile(root string) (*os.File, error) {
-	logDir := filepath.Join(config.BusDir(root), "logs")
+	// Use .starfleet-ai/var/logs/ (plural) to match other logs location
+	logDir := filepath.Join(config.WorkDir(root), "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return nil, fmt.Errorf("timer worker: mkdir logs: %w", err)
 	}

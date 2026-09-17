@@ -177,6 +177,9 @@
          <input id="ns_parent" data-i18n-ph="ns_parent.ph" placeholder="Übergeordnet (leer = Flagship)" style="width:100%;">
        </div>
        <div style="margin-top:8px">
+         <select id="ns_template"><option value="" data-i18n="ns_template.ph">Vorlage (optional)</option></select>
+       </div>
+       <div style="margin-top:8px">
          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
            <input type="checkbox" id="ns_unrestricted">
            <span data-i18n="ns_unrestricted">Uneingeschränkte Berechtigungen (allow all)</span>
@@ -641,6 +644,7 @@ const I18N = {
     'tab.reports': 'Berichte', 'tab.files': 'Files', 'tab.sops': 'SOPs',
     'ship.new': 'Neues Schiff', 'ns_name.ph': 'Name (leer = freier)',
     'ns_model.ph': 'Modell wählen...', 'ns_parent.ph': 'Übergeordnet (leer = Flagship)',
+    'ns_template.ph': 'Vorlage (optional)',
     'model.check': 'Modelle prüfen', 'model.health.ok': 'OK — Modell verfügbar', 'model.health.degraded': 'Degradiert — nur transient Fehler',
     'model.health.failed': 'Fehlgeschlagen — harter Fehler', 'model.health.not-served': 'Nicht serviert — gefiltert/entfernt',
     'model.health.unknown': 'Unbekannt — Provider nicht erreichbar',
@@ -761,6 +765,7 @@ const I18N = {
     'tab.reports': 'Reports', 'tab.files': 'Files', 'tab.sops': 'SOPs',
     'ship.new': 'New ship', 'ns_name.ph': 'Name (empty = auto)',
     'ns_model.ph': 'Choose model...', 'ns_parent.ph': 'Parent (empty = Flagship)',
+    'ns_template.ph': 'Template (optional)',
     'model.check': 'Check models', 'model.health.ok': 'OK — model available', 'model.health.degraded': 'Degraded — transient errors only',
     'model.health.failed': 'Failed — hard error', 'model.health.not-served': 'Not served — filtered/removed',
     'model.health.unknown': 'Unknown — provider unreachable',
@@ -1262,6 +1267,7 @@ async function loadBoard(){
       const meta = [];
       if (r.model) meta.push(`<span class="pill dim">🧠 ${esc(r.model)}</span>`);
       else if (r.provider) meta.push(`<span class="pill dim">🧠 ${esc(r.provider)}</span>`);
+      if (r.class) meta.push(`<span class="pill dim">🏷 ${esc(r.class)}</span>`);
       if (r.launch_type) meta.push(`<span class="pill dim">${esc(r.launch_type)}</span>`);
       if (r.parent) meta.push(`<span class="muted">↳ ${esc(r.parent)}</span>`);
       if (r.timers && r.timers.length) meta.push(r.timers.map(tr=>{
@@ -1909,16 +1915,14 @@ async function loadModels(){
   } catch(e){ /* /api/models unavailable — fallback to empty dropdown */ }
 }
 
-// shipLaunch starts a new ship from the web "Neues Schiff" form. Provider is
-// taken from the explicit select when set, otherwise derived server-side from
-// the model id. Web launches are auto-launches under the flagship.
 async function shipLaunch(){
 const name = document.getElementById('ns_name').value.trim();
    const model = document.getElementById('ns_model').value.trim();
    if (!model) { toast(t('ship.nomodel'), true); return; }
    const parent = document.getElementById('ns_parent').value.trim();
    const unrestricted = document.getElementById('ns_unrestricted').checked;
-   const body = { name, model, parent, unrestricted };
+   const template = document.getElementById('ns_template').value.trim();
+   const body = { name, model, parent, unrestricted, template };
    try {
      const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
        body: JSON.stringify(body)});
@@ -1943,6 +1947,30 @@ async function modelCheck(){
     toast(t('err.prefix')+esc(e.message), true);
   } finally {
     if(btn) { btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+// loadTemplates fetches available ship templates from /api/templates and populates
+// the ns_template <select> dropdown.
+async function loadTemplates(){
+  try {
+    const data = await api('/api/templates');
+    const sel = document.getElementById('ns_template');
+    if (!sel) return;
+    const prev = localStorage.getItem('fleet_template') || '';
+    sel.innerHTML = '<option value="" data-i18n="ns_template.ph">'+t('ns_template.ph')+'</option>';
+    for (const tpl of data) {
+      const opt = document.createElement('option');
+      opt.value = tpl.name;
+      opt.textContent = tpl.name + (tpl.description ? ' — ' + tpl.description : '');
+      if (tpl.name === prev) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener('change', function(){
+      localStorage.setItem('fleet_template', sel.value);
+    });
+  } catch(e) {
+    // templates endpoint might not exist or fail; silently ignore
   }
 }
 
@@ -2577,7 +2605,7 @@ document.addEventListener('keydown', function(e){
 });
 
 applyI18n();
-loadIdentity().then(()=>{ refresh(); loadModels(); });
+loadIdentity().then(()=>{ refresh(); loadModels(); loadTemplates(); });
 // Seed the initial history entry so the first tab/bus switch pops cleanly.
 history.replaceState({tab:'status', bus:curBus}, '');
     // If the status tab is active, start the board refresh interval.

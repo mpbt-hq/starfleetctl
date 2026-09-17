@@ -37,6 +37,7 @@ type BoardEntryJSON struct {
 	Parent       string `json:"parent,omitempty"`
 	Provider     string `json:"provider,omitempty"`
 	Model        string `json:"model,omitempty"`
+	Class        string `json:"class,omitempty"`
 	Server       string `json:"server,omitempty"`
 	ErrorTag     string `json:"error_tag,omitempty"`
 	Updated      string `json:"updated,omitempty"`
@@ -91,6 +92,9 @@ func (b *Bus) BoardEntries() []BoardEntryJSON {
 		}
 		if r.Model != "" {
 			e.Model = r.Model
+		}
+		if r.Class != "" {
+			e.Class = r.Class
 		}
 		if r.Server != "" {
 			e.Server = r.Server
