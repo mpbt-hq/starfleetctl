@@ -1072,7 +1072,7 @@ func (s *Server) apiTimerCreate(w http.ResponseWriter, r *http.Request) {
 	s.timerCreate(w, r)
 }
 
-// apiTimerDispatch handles /api/timer/{id}, /api/timer/{id}/pause, /api/timer/{id}/resume.
+// apiTimerDispatch handles /api/timer/{id}, /api/timer/{id}/pause, /api/timer/{id}/resume, /api/timer/{id}/run.
 func (s *Server) apiTimerDispatch(w http.ResponseWriter, r *http.Request) {
 	// Strip /api/timer/ prefix to get the path remainder.
 	rest := strings.TrimPrefix(r.URL.Path, "/api/timer/")
@@ -1088,12 +1088,51 @@ func (s *Server) apiTimerDispatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for /{id}/run (fire timer immediately).
+	if strings.HasSuffix(rest, "/run") {
+		if r.Method != http.MethodPost {
+			writeErr(w, 405, "method not allowed")
+			return
+		}
+		id := strings.TrimSuffix(rest, "/run")
+		s.timerRunNow(w, r, id)
+		return
+	}
+
 	// Plain DELETE /api/timer/{id}.
 	if r.Method == http.MethodDelete {
 		s.timerDelete(w, r, rest)
 		return
 	}
 	writeErr(w, 405, "method not allowed")
+}
+
+// timerRunNow fires a timer immediately by setting its NextFire to now
+// and notifying the timer worker to pick it up on the next poll.
+func (s *Server) timerRunNow(w http.ResponseWriter, r *http.Request, id string) {
+	for _, td := range timer.TimerDirs(s.Root) {
+		store, err := timer.NewStore(td.Dir)
+		if err != nil {
+			continue
+		}
+		rec, err := store.Get(id)
+		if err == nil {
+			if !rec.Enabled {
+				writeErr(w, 409, "timer is disabled (pause)")
+				return
+			}
+			// Set NextFire to now so it fires on the next worker poll.
+			rec.NextFire = time.Now().Unix()
+			if err := store.Update(rec); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			timer.NotifyWorker(s.Root)
+			writeJSON(w, map[string]any{"ok": true, "message": "timer fired immediately"})
+			return
+		}
+	}
+	writeErr(w, 404, "timer not found")
 }
 
 func (s *Server) timerCreate(w http.ResponseWriter, r *http.Request) {
@@ -2287,7 +2326,7 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 		}
 		var out []reports.ReportJSON
 		for _, rec := range all {
-			if filterShip != "" && rec.Ship != filterShip {
+			if filterShip != "" && rec.From != filterShip {
 				continue
 			}
 			if filterTag != "" {
@@ -2311,7 +2350,7 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var p struct {
-			Title       string   `json:"title"`
+			Subject     string   `json:"subject"`
 			Subtitle    string   `json:"subtitle"`
 			Body        string   `json:"body"`
 			Tags        []string `json:"tags"`
@@ -2322,19 +2361,27 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "bad json: "+err.Error())
 			return
 		}
-		if p.Title == "" {
-			writeErr(w, 400, "title required")
+		if p.Subject == "" {
+			writeErr(w, 400, "subject required")
 			return
 		}
+		// Prepend subtitle to body if present
+		if p.Subtitle != "" {
+			p.Body = p.Subtitle + "\n\n" + p.Body
+		}
+		now := time.Now()
+		messageID := fmt.Sprintf("<r-%d@starfleet>", now.UnixNano())
 		rec := &reports.ReportRecord{
-			ID:          fmt.Sprintf("r-%d", time.Now().UnixNano()),
-			Title:       p.Title,
-			Subtitle:    p.Subtitle,
-			Ship:        s.bus.ShipID,
-			Body:        p.Body,
+			MessageID:   messageID,
+			Date:        now.Format(time.RFC3339),
+			From:        s.bus.ShipID,
+			Subject:     p.Subject,
+			To:          "",
 			Tags:        p.Tags,
 			TaskRef:     p.TaskRef,
 			Attachments: p.Attachments,
+			Body:        p.Body,
+			Created:     now.Unix(),
 		}
 		id, err := store.Create(rec)
 		if err != nil {

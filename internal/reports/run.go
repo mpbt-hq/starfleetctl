@@ -60,7 +60,7 @@ func runSubmit(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: reports submit <title> [--subtitle <text>] [--body <text>] [--body-file <path>] [--tags <tag1,tag2>] [--task-ref <slug>] [--attachment <file> ...]")
 		return 2
 	}
-	title := args[0]
+	subject := args[0]
 	subtitle := ""
 	body := ""
 	tagsStr := ""
@@ -112,6 +112,11 @@ func runSubmit(root string, args []string) int {
 		body = string(data)
 	}
 
+	// Prepend subtitle to body if present
+	if subtitle != "" {
+		body = subtitle + "\n\n" + body
+	}
+
 	var tags []string
 	if tagsStr != "" {
 		tags = strings.Split(tagsStr, ",")
@@ -145,16 +150,19 @@ func runSubmit(root string, args []string) int {
 		return 1
 	}
 
+	now := time.Now()
+	messageID := fmt.Sprintf("<r-%d@starfleet>", now.UnixNano())
 	rec := &ReportRecord{
-		ID:          fmt.Sprintf("r-%d", time.Now().UnixNano()),
-		Title:       title,
-		Subtitle:    subtitle,
-		Ship:        b.ShipID,
-		Body:        body,
+		MessageID:   messageID,
+		Date:        now.Format(time.RFC3339),
+		From:        b.ShipID,
+		Subject:     subject,
+		To:          "",
 		Tags:        tags,
 		TaskRef:     taskRef,
 		Attachments: attachNames,
-		Created:     time.Now().Unix(),
+		Body:        body,
+		Created:     now.Unix(),
 	}
 
 	id, err := store.Create(rec)
@@ -202,7 +210,7 @@ func runList(root string, args []string) int {
 
 	var filtered []*ReportRecord
 	for _, r := range recs {
-		if filterShip != "" && r.Ship != filterShip {
+		if filterShip != "" && r.From != filterShip {
 			continue
 		}
 		if filterTag != "" {
@@ -236,7 +244,7 @@ func runList(root string, args []string) int {
 		if len(r.Tags) > 0 {
 			tags = fmt.Sprintf(" [%s]", strings.Join(r.Tags, ","))
 		}
-		fmt.Printf("%s  %s  %s%s\n", ago(r.Created), r.Ship, r.Title, tags)
+		fmt.Printf("%s  %s  %s%s\n", ago(r.Created), r.From, r.Subject, tags)
 	}
 	return 0
 }
@@ -256,18 +264,18 @@ func runShow(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "reports:", err)
 		return 1
 	}
-	fmt.Printf("ID:       %s\n", r.ID)
-	fmt.Printf("Title:    %s\n", r.Title)
-	if r.Subtitle != "" {
-		fmt.Printf("Subtitle: %s\n", r.Subtitle)
+	fmt.Printf("Message-ID: %s\n", r.MessageID)
+	fmt.Printf("Date:       %s\n", r.Date)
+	fmt.Printf("From:       %s\n", r.From)
+	fmt.Printf("Subject:    %s\n", r.Subject)
+	if r.To != "" {
+		fmt.Printf("To:         %s\n", r.To)
 	}
-	fmt.Printf("Ship:     %s\n", r.Ship)
-	fmt.Printf("Created:  %s\n", time.Unix(r.Created, 0).Format(time.RFC3339))
 	if len(r.Tags) > 0 {
-		fmt.Printf("Tags:     %s\n", strings.Join(r.Tags, ", "))
+		fmt.Printf("Tags:       %s\n", strings.Join(r.Tags, ", "))
 	}
 	if r.TaskRef != "" {
-		fmt.Printf("TaskRef:  %s\n", r.TaskRef)
+		fmt.Printf("Task-Ref:   %s\n", r.TaskRef)
 	}
 	if len(r.Attachments) > 0 {
 		fmt.Printf("Attachments:\n")

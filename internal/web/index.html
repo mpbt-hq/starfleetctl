@@ -737,8 +737,9 @@ const I18N = {
     'timers.created': 'Timer {id} erstellt',
     'timers.workerstarted': 'gestartet', 'timers.workerstoppt': 'gestoppt',
     'timer.active': 'aktiv', 'timer.paused': 'pausiert', 'timer.delete': 'Löschen',
+    'timer.pause': 'Pausieren', 'timer.resume': 'Fortsetzen', 'timer.run_now': 'Jetzt ausführen',
     'timer.paused.suffix': ' pausiert', 'timer.resumed.suffix': ' fortgesetzt',
-    'timer.deleted.suffix': ' gelöscht',
+    'timer.deleted.suffix': ' gelöscht', 'timer.run_now.suffix': ' sofort ausgeführt',
     'rep.none': 'keine Berichte', 'rep.attach.label': 'Anhänge: ', 'rep.file': 'Datei wählen',
     'rep.uploadfailed': 'Upload fehlgeschlagen', 'rep.uploaderr': 'Upload Fehler: ',
     'rep.loaderror': 'Fehler beim Laden: ',
@@ -856,8 +857,9 @@ const I18N = {
     'timers.created': 'Timer {id} created',
     'timers.workerstarted': 'started', 'timers.workerstoppt': 'stopped',
     'timer.active': 'active', 'timer.paused': 'paused', 'timer.delete': 'Delete',
+    'timer.pause': 'Pause', 'timer.resume': 'Resume', 'timer.run_now': 'Run Now',
     'timer.paused.suffix': ' paused', 'timer.resumed.suffix': ' resumed',
-    'timer.deleted.suffix': ' deleted',
+    'timer.deleted.suffix': ' deleted', 'timer.run_now.suffix': ' fired now',
     'rep.none': 'no reports', 'rep.attach.label': 'Attachments: ', 'rep.file': 'Choose file',
     'rep.uploadfailed': 'Upload failed', 'rep.uploaderr': 'Upload error: ',
     'rep.loaderror': 'Error while loading: ',
@@ -2166,8 +2168,9 @@ async function loadTimers(){
         ${desc?`<div style="margin-top:4px">${esc(desc)}</div>`:''}
         <div class="actions">
           ${t.enabled
-            ?`<button class="sec" onclick="timerPause('${esc(t.id)}')">Pause</button>`
-            :`<button class="sec" onclick="timerResume('${esc(t.id)}')">Resume</button>`}
+            ?`<button class="sec" onclick="timerPause('${esc(t.id)}')">${i18nT('timer.pause')}</button>
+              <button class="sec" onclick="timerRunNow('${esc(t.id)}')">${i18nT('timer.run_now')}</button>`
+            :`<button class="sec" onclick="timerResume('${esc(t.id)}')">${i18nT('timer.resume')}</button>`}
           <button class="sec" onclick="timerCancel('${esc(t.id)}')">${i18nT('timer.delete')}</button>
         </div>
       </div>`;
@@ -2224,6 +2227,14 @@ async function timerCancel(id){
   try {
     await api('/api/timer/'+id, {method:'DELETE'});
     toast(id+t('timer.deleted.suffix'));
+    loadTimers();
+  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
+}
+
+async function timerRunNow(id){
+  try {
+    await api('/api/timer/'+id+'/run', {method:'POST'});
+    toast(id+' '+t('timer.run_now.suffix'));
     loadTimers();
   } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }

@@ -165,15 +165,17 @@ func runModelCheck(root string) error {
 			body.WriteString(fmt.Sprintf("  [%-11s] %s — %s\n", mh.Status, mh.ID, mh.Detail))
 		}
 	}
+	now := time.Now()
+	messageID := fmt.Sprintf("<r-%d@starfleet>", now.UnixNano())
 	rec := &reports.ReportRecord{
-		ID:    fmt.Sprintf("r-%d", time.Now().UnixNano()),
-		Title: "Model health check",
-		Subtitle: fmt.Sprintf("%d models checked — %d OK, %d not-served, %d degraded, %d failed, %d unknown",
-			report.Total, report.OK, report.NotServed, report.Degraded, report.Failed, report.Unknown),
-		Ship:    "system",
-		Body:    body.String(),
-		Tags:    []string{"model-health", "timer"},
-		Created: time.Now().Unix(),
+		MessageID: messageID,
+		Date:      now.Format(time.RFC3339),
+		From:      "system",
+		Subject:   "Model health check",
+		To:        "",
+		Tags:      []string{"model-health", "timer"},
+		Body:      body.String(),
+		Created:   now.Unix(),
 	}
 	if _, err := store.Create(rec); err != nil {
 		return fmt.Errorf("model-check: submit report: %w", err)
