@@ -260,6 +260,7 @@ func RunCheck(root string, probe bool) (*CheckReport, error) {
 		report.Models = append(report.Models, mh)
 	}
 
+	report.Total = report.OK + report.NotServed + report.Failed + report.Degraded + report.Unknown
 	return report, nil
 }
 
