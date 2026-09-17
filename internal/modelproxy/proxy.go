@@ -60,6 +60,13 @@ const (
 	CircuitBreakerHalfOpen
 )
 
+// circuitBreakerCooldown is how long an Open circuit breaker stays out of
+// rotation before it is given a HalfOpen probe. It must be enforced from the
+// routing path as well (see breakerStateForRoutingLocked): a model whose
+// breaker is Open is skipped by every strategy, so checkCircuitBreaker would
+// otherwise never run for it and the breaker could never recover.
+const circuitBreakerCooldown = 5 * time.Minute
+
 // CircuitBreakerState represents the circuit breaker for a model.
 type CircuitBreakerState struct {
 	State           CircuitBreakerStateEnum
@@ -218,6 +225,40 @@ func (p *Proxy) getStrategyForModel(model string) *StrategyState {
 }
 
 // routeStrategyModel picks the model to use for a request within a strategy.
+// breakerStateForRoutingLocked returns the circuit-breaker state to use for a
+// routing decision. An Open breaker whose cooldown has expired is advanced to
+// HalfOpen here — making it selectable as a probe — and its measurement window
+// is reset, so a model that has recovered can actually be tried again and
+// closed. Without this, routeStrategyModel skips Open models forever and
+// checkCircuitBreaker never runs for them, wedging the breaker until restart.
+//
+// The caller must hold ss.mu; this only locks the breaker and metrics.
+func (p *Proxy) breakerStateForRoutingLocked(ss *StrategyState, modelID string) CircuitBreakerStateEnum {
+	cb := ss.CircuitBreakers[modelID]
+	if cb == nil {
+		return CircuitBreakerClosed
+	}
+	cb.mu.Lock()
+	state := cb.State
+	if state == CircuitBreakerOpen && time.Since(cb.LastStateChange) > circuitBreakerCooldown {
+		cb.State = CircuitBreakerHalfOpen
+		cb.LastStateChange = time.Now()
+		state = CircuitBreakerHalfOpen
+		if metrics := ss.ModelMetrics[modelID]; metrics != nil {
+			metrics.mu.Lock()
+			metrics.RequestCount = 0
+			metrics.ErrorCount = 0
+			metrics.TotalLatency = 0
+			metrics.TotalTokens = 0
+			metrics.ConsecutiveFailures = 0
+			metrics.mu.Unlock()
+		}
+		p.logf("circuit breaker HALF-OPEN for model %s in strategy %s (cooldown expired — probing)", modelID, ss.Name)
+	}
+	cb.mu.Unlock()
+	return state
+}
+
 func (p *Proxy) routeStrategyModel(ss *StrategyState, sessionID, requestedModel string) (string, *Provider, error) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -233,16 +274,12 @@ func (p *Proxy) routeStrategyModel(ss *StrategyState, sessionID, requestedModel 
 			chosen, ok := p.sessionAffinity.mapping[sessionID]
 			p.sessionAffinity.mu.Unlock()
 			if ok && chosen != "" {
-				// Verify the model is still available and circuit breaker is closed
-				if cb := ss.CircuitBreakers[chosen]; cb != nil {
-					cb.mu.Lock()
-					state := cb.State
-					cb.mu.Unlock()
-					if state == CircuitBreakerClosed {
-						prov := ss.GetProviderForModel(chosen, p.cfg.Providers)
-						if prov != nil {
-							return chosen, prov, nil
-						}
+				// Keep the sticky model unless its breaker is Open (HalfOpen is
+				// allowed, so a recovered model can be reused directly).
+				if p.breakerStateForRoutingLocked(ss, chosen) != CircuitBreakerOpen {
+					prov := ss.GetProviderForModel(chosen, p.cfg.Providers)
+					if prov != nil {
+						return chosen, prov, nil
 					}
 				}
 			}
@@ -259,13 +296,8 @@ func (p *Proxy) routeStrategyModel(ss *StrategyState, sessionID, requestedModel 
 	case config.ModelProxyStrategyTypeFallback:
 		// Sort by priority (lower = first)
 		for _, m := range ss.Models {
-			if cb := ss.CircuitBreakers[m.ID]; cb != nil {
-				cb.mu.Lock()
-				state := cb.State
-				cb.mu.Unlock()
-				if state == CircuitBreakerOpen {
-					continue // skip open circuit breakers
-				}
+			if p.breakerStateForRoutingLocked(ss, m.ID) == CircuitBreakerOpen {
+				continue // skip open circuit breakers (HalfOpen probes are allowed)
 			}
 			chosenModel = m.ID
 			chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
@@ -278,13 +310,8 @@ func (p *Proxy) routeStrategyModel(ss *StrategyState, sessionID, requestedModel 
 		for i := 0; i < len(ss.Models); i++ {
 			idx := (ss.CurrentIndex + i) % len(ss.Models)
 			m := ss.Models[idx]
-			if cb := ss.CircuitBreakers[m.ID]; cb != nil {
-				cb.mu.Lock()
-				state := cb.State
-				cb.mu.Unlock()
-				if state == CircuitBreakerOpen {
-					continue
-				}
+			if p.breakerStateForRoutingLocked(ss, m.ID) == CircuitBreakerOpen {
+				continue
 			}
 			chosenModel = m.ID
 			chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
@@ -301,14 +328,9 @@ func (p *Proxy) routeStrategyModel(ss *StrategyState, sessionID, requestedModel 
 				chosen, ok := p.sessionAffinity.mapping[sessionID]
 				p.sessionAffinity.mu.Unlock()
 				if ok && chosen != "" {
-					if cb := ss.CircuitBreakers[chosen]; cb != nil {
-						cb.mu.Lock()
-						state := cb.State
-						cb.mu.Unlock()
-						if state == CircuitBreakerClosed {
-							chosenModel = chosen
-							chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
-						}
+					if p.breakerStateForRoutingLocked(ss, chosen) != CircuitBreakerOpen {
+						chosenModel = chosen
+						chosenProv = ss.GetProviderForModel(chosenModel, p.cfg.Providers)
 					}
 				}
 			}
@@ -324,13 +346,8 @@ func (p *Proxy) routeStrategyModel(ss *StrategyState, sessionID, requestedModel 
 			var available []weightedModel
 			totalWeight := 0
 			for _, m := range ss.Models {
-				if cb := ss.CircuitBreakers[m.ID]; cb != nil {
-					cb.mu.Lock()
-					state := cb.State
-					cb.mu.Unlock()
-					if state == CircuitBreakerOpen {
-						continue
-					}
+				if p.breakerStateForRoutingLocked(ss, m.ID) == CircuitBreakerOpen {
+					continue
 				}
 				prov := ss.GetProviderForModel(m.ID, p.cfg.Providers)
 				if prov != nil {
@@ -428,6 +445,23 @@ func (p *Proxy) checkCircuitBreaker(ss *StrategyState, modelID string) {
 	metrics.mu.Lock()
 	defer metrics.mu.Unlock()
 
+	// Probation: a HalfOpen breaker is judged only on the requests made since
+	// it was re-probed (its window is reset on the Open→HalfOpen transition).
+	// This must run before the lifetime heuristics below, otherwise a model
+	// that had accumulated a high error rate could never close again.
+	if cb.State == CircuitBreakerHalfOpen {
+		if metrics.ConsecutiveFailures == 0 && metrics.RequestCount > 0 {
+			p.logf("circuit breaker CLOSED for model %s in strategy %s (recovery)", modelID, ss.Name)
+			cb.State = CircuitBreakerClosed
+			cb.LastStateChange = time.Now()
+		} else if metrics.ConsecutiveFailures >= 3 {
+			p.logf("circuit breaker OPEN for model %s in strategy %s (half-open probe failed)", modelID, ss.Name)
+			cb.State = CircuitBreakerOpen
+			cb.LastStateChange = time.Now()
+		}
+		return
+	}
+
 	// Check consecutive failures threshold
 	if metrics.ConsecutiveFailures >= 3 {
 		if cb.State == CircuitBreakerClosed {
@@ -477,25 +511,19 @@ func (p *Proxy) checkCircuitBreaker(ss *StrategyState, modelID string) {
 		}
 	}
 
-	// Half-open recovery: if half-open and we have successes, close
-	if cb.State == CircuitBreakerHalfOpen {
-		if metrics.ConsecutiveFailures == 0 && metrics.RequestCount > 0 {
-			p.logf("circuit breaker CLOSED for model %s in strategy %s (recovery)", modelID, ss.Name)
-			cb.State = CircuitBreakerClosed
-			cb.LastStateChange = time.Now()
-			metrics.ConsecutiveFailures = 0
-		}
-	}
-
-	// Auto-recover: if open for more than cooldown, go to half-open
-	if cb.State == CircuitBreakerOpen {
-		// Default cooldown: 5 minutes
-		cooldown := 5 * time.Minute
-		if time.Since(cb.LastStateChange) > cooldown {
-			p.logf("circuit breaker HALF-OPEN for model %s in strategy %s (cooldown expired)", modelID, ss.Name)
-			cb.State = CircuitBreakerHalfOpen
-			cb.LastStateChange = time.Now()
-		}
+	// Auto-recover: if open for more than the cooldown, go HalfOpen and reset
+	// the measurement window so the probe is judged on fresh data. Routing also
+	// performs this transition (breakerStateForRoutingLocked); this branch only
+	// matters for a model that is not currently being selected.
+	if cb.State == CircuitBreakerOpen && time.Since(cb.LastStateChange) > circuitBreakerCooldown {
+		p.logf("circuit breaker HALF-OPEN for model %s in strategy %s (cooldown expired)", modelID, ss.Name)
+		cb.State = CircuitBreakerHalfOpen
+		cb.LastStateChange = time.Now()
+		metrics.RequestCount = 0
+		metrics.ErrorCount = 0
+		metrics.TotalLatency = 0
+		metrics.TotalTokens = 0
+		metrics.ConsecutiveFailures = 0
 	}
 }
 func (p *Proxy) providerModelSet(prov Provider) map[string]bool {
