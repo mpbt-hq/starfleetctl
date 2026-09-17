@@ -42,7 +42,9 @@ func Serve(root string) error {
 	if len(cfg.Providers) == 0 {
 		return fmt.Errorf("model-proxy: no providers configured in model-proxy.yaml")
 	}
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: New(cfg)}
+	proxy := New(cfg)
+	proxy.root = root
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: proxy}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -52,6 +54,10 @@ func Serve(root string) error {
 			errCh <- err
 		}
 	}()
+	// Automated background health check loop (if configured).
+	if cfg.Health.Interval > 0 {
+		go RunHealthBackground(ctx, root, cfg)
+	}
 	select {
 	case err := <-errCh:
 		return err

@@ -238,6 +238,30 @@ model list needed.
 | `pid_file` | string | `.starfleet-ai/var/model-proxy.pid` | daemon PID file |
 | `log_file` | string | `.starfleet-ai/var/log/model-proxy.log` | daemon log |
 | `providers` | list | — | ordered upstream backends |
+| `strategies` | list | — | meta-model routing strategies (see below) |
+| `health` | object | — | automated background health check (see below) |
+
+**`health` (automated background health check):**
+
+When `health.interval` is set, the proxy daemon runs a periodic health check
+in the background (served-listing + chat probe + agent-capability probe),
+persists the verdicts to `.starfleet-ai/var/model-health.json`, and serves
+them read-only at `GET /v1/model-health` (for agents and the web console).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `interval` | string | `""` (disabled) | how often to run the background check (e.g. `30m`); empty disables it |
+| `timeout` | string | `30s` | per-probe HTTP timeout |
+| `parallel` | int | `4` | concurrent chat probes per run (0/1 = sequential) |
+| `capability_probe` | bool | `true` | also test opencode-agent compatibility (tool-call support) after each reachable probe |
+| `endpoint` | string | `/v1/model-health` | proxy route serving the persisted state (informational) |
+
+The per-model verdict includes `served` (in the provider catalog), `reachable`
+(chat probe roundtrip), `tool_calls` (tool-call capable — the base requirement
+for opencode agents), `probe_latency_ms` and `checked_at`. The tool-capable
+subset is the decision basis for strategy tuning (only verified-usable models
+should go into strategies). Query the current state without a live request via
+`starfleetctl model-proxy check status`.
 
 **Provider fields:**
 

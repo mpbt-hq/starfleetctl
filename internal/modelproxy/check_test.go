@@ -253,3 +253,87 @@ func TestRunCheck_Probe_TransientExhausted_Degraded(t *testing.T) {
 		}
 	}
 }
+
+// TestProbeAgentCapability_ToolCall verifies the capability probe recognizes a
+// chat reply carrying tool_calls as tool-call capable.
+func TestProbeAgentCapability_ToolCall(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"","tool_calls":[{"function":{"name":"e2e_check","arguments":"{}"}}]}}]}`))
+	}))
+	defer upstream.Close()
+
+	prov := Provider{ID: "nim-proxy", BaseURL: upstream.URL, APIKey: "k", Type: "generic"}
+	got, note := probeAgentCapability(prov, "model-x", 5*time.Second)
+	if !got {
+		t.Errorf("tool_calls not detected: %s", note)
+	}
+	if note != "tool_calls ok" {
+		t.Errorf("note: %s", note)
+	}
+}
+
+// TestProbeAgentCapability_NoToolCall verifies the capability probe flags
+// models that answer without tool_calls.
+func TestProbeAgentCapability_NoToolCall(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok here is my text answer"}}]}`))
+	}))
+	defer upstream.Close()
+
+	prov := Provider{ID: "nim-proxy", BaseURL: upstream.URL, APIKey: "k"}
+	got, note := probeAgentCapability(prov, "model-x", 5*time.Second)
+	if got {
+		t.Errorf("expected no tool_calls, got tool call")
+	}
+	if !strings.Contains(note, "no tool_calls") {
+		t.Errorf("note should mention missing tool_calls: %s", note)
+	}
+}
+
+// TestProbeAgentCapability_HTTPError ensures hard upstream errors surface as
+// non-capable rather than hanging or panicking.
+func TestProbeAgentCapability_HTTPError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"no account"}`))
+	}))
+	defer upstream.Close()
+
+	prov := Provider{ID: "nim-proxy", BaseURL: upstream.URL, APIKey: "k"}
+	got, note := probeAgentCapability(prov, "model-x", 5*time.Second)
+	if got {
+		t.Errorf("expected failure, got tool call")
+	}
+	if !strings.Contains(note, "HTTP 404") {
+		t.Errorf("note should mention HTTP 404: %s", note)
+	}
+}
+
+// TestHealthState_ToolCallsRoundtrip checks the capability verdict survives a
+// persist/load cycle.
+func TestHealthState_ToolCallsRoundtrip(t *testing.T) {
+	root := t.TempDir()
+	tc := true
+	state := &HealthState{
+		At:    time.Now(),
+		Probe: true,
+		Models: map[string]ModelHealth{
+			"nim-proxy/m": {ID: "nim-proxy/m", Provider: "nim-proxy", Served: true, Status: StatusOK, Reachable: true, ToolCalls: &tc},
+		},
+	}
+	if err := WriteHealthState(root, state); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	loaded := LoadHealthState(root)
+	mh, _ := loaded.Get("nim-proxy/m")
+	if mh.ToolCalls == nil || *mh.ToolCalls != true {
+		t.Errorf("ToolCalls verdict lost in roundtrip: %+v", mh.ToolCalls)
+	}
+}

@@ -14,6 +14,7 @@ package modelproxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -194,10 +195,6 @@ func runCheckWithConfig(cfg *Config, root string, probe bool) (*CheckReport, err
 	}
 
 	// Phase 1 (sequential): served listing + partition into probe candidates.
-	type probeJob struct {
-		modelID, provider, bareID string
-		prov                      Provider
-	}
 	var jobs []probeJob
 
 	for _, info := range modelInfos {
@@ -326,6 +323,57 @@ func runProbe(job probeJob, cfg *Config, at time.Time) ModelHealth {
 	return mh
 }
 
+// RunHealthBackground runs the automated health check loop: it runs once at
+// startup and then every cfg.Health.Interval, persisting the fresh state via
+// WriteHealthState after each run. It stops when ctx is done. Logs are written
+// to the model-proxy log file (cfg.LogFile). This is spawned by Serve when the
+// health interval is configured.
+func RunHealthBackground(ctx context.Context, root string, cfg *Config) {
+	logf, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer logf.Close()
+	logf.WriteString(fmt.Sprintf("[health] background loop started (interval=%s, parallel=%d, capability=%v)\n",
+		cfg.Health.Interval, cfg.Health.Parallel, cfg.Health.CapabilityProbe))
+
+	run := func() {
+		report, err := runCheckWithConfig(cfg, root, true)
+		if err != nil {
+			logf.WriteString(fmt.Sprintf("[health] run failed: %v\n", err))
+			return
+		}
+		st := LoadHealthState(root)
+		st.Merge(report)
+		if err := WriteHealthState(root, st); err != nil {
+			logf.WriteString(fmt.Sprintf("[health] persist failed: %v\n", err))
+			return
+		}
+		// Tool-call capable subset (for strategy tuning).
+		capable := 0
+		for _, m := range report.Models {
+			if m.Reachable && m.ToolCalls != nil && *m.ToolCalls {
+				capable++
+			}
+		}
+		logf.WriteString(fmt.Sprintf("[health] run %s: total=%d ok=%d (reachable, tool-capable=%d) failed=%d degraded=%d\n",
+			report.At.Format(time.RFC3339), report.Total, report.OK, capable, report.Failed, report.Degraded))
+	}
+
+	run() // initial pass at startup
+	t := time.NewTicker(cfg.Health.Interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			logf.WriteString("[health] loop stopped\n")
+			return
+		case <-t.C:
+			run()
+		}
+	}
+}
+
 // fetchModelsRetry wraps fetchModels with the provider's transient-retry
 // policy so a saturated upstream doesn't masquerade as "no models served".
 func fetchModelsRetry(prov Provider) ([]string, error) {
@@ -438,6 +486,69 @@ func probeModel(prov Provider, model string) (string, int, bool) {
 		return "transient:" + lastFail, retries, false
 	}
 	return "transient:request failed", retries, false
+}
+
+// probeTimeout returns the configured probe timeout (30s default).
+func probeTimeout(cfg *Config) time.Duration {
+	if cfg != nil && cfg.Health.Timeout > 0 {
+		return cfg.Health.Timeout
+	}
+	return 30 * time.Second
+}
+
+// capabilityTestTool is a minimal tool definition used to probe whether the
+// model supports tool-calling (the base requirement for opencode agents).
+const capabilityTestTool = `[{"type":"function","function":{"name":"e2e_check","description":"end-to-end capability probe","parameters":{"type":"object","properties":{}}}}]`
+
+// probeAgentCapability sends a chat request that forces a tool call and
+// reports whether the model replied with tool_calls. It complements the
+// reachability probe: a model may answer "ping" fine but still be unusable by
+// opencode agents if it cannot emit tool calls.
+func probeAgentCapability(prov Provider, model string, timeout time.Duration) (toolCalls bool, note string) {
+	client := &http.Client{Timeout: timeout}
+	payload, _ := json.Marshal(map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": "call_e2e_check"},
+		},
+		"tools":      json.RawMessage(capabilityTestTool),
+		"max_tokens": 2000,
+		"stream":     false,
+	})
+	req, err := http.NewRequest(http.MethodPost, prov.BaseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return false, "request: " + err.Error()
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if prov.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+prov.APIKey)
+	}
+	prov.applyUpstreamHeaders(req, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, "request failed: " + firstLine(err.Error())
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return false, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, firstLine(string(body)))
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				ToolCalls []any `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false, "unparseable reply"
+	}
+	for _, c := range parsed.Choices {
+		if len(c.Message.ToolCalls) > 0 {
+			return true, "tool_calls ok"
+		}
+	}
+	return false, "no tool_calls in reply"
 }
 
 // firstLine returns the first non-empty line of s, trimmed and bounded (for

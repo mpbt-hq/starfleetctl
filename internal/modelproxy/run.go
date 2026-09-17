@@ -70,7 +70,11 @@ func Run(root string, args []string) int {
 	case "check":
 		probe := false
 		asJSON := false
-		for _, a := range args[1:] {
+		args := args[1:]
+		if len(args) > 0 && (args[0] == "status") {
+			return runHealthStatus(root, len(args) > 1 && args[1] == "--json")
+		}
+		for _, a := range args {
 			switch a {
 			case "--probe":
 				probe = true
@@ -120,10 +124,14 @@ check       verify served models (--probe: minimal chat request, --json)
 
 func checkUsage() {
 	fmt.Fprint(os.Stderr, `usage: starfleetctl model-proxy check [--probe] [--json]
+       starfleetctl model-proxy check status [--json]
 
 Checks every model of the configured (proxied and direct) providers:
   • listing check — is each model served by the provider's /v1/models?
-  • --probe — plus a minimal 1-token chat request per served model
+  • --probe — plus a minimal 1-token chat request per served model,
+    and (by default) an agent-capability probe (tool-call support)
+  • status — read the persisted health state (.starfleet-ai/var/model-health.json)
+    without performing live requests (cheap query path)
 Transient upstream failures (429/5xx, timeouts, saturation) are retried; only
 hard errors mark a model as failed. The result is persisted to
 .starfleet-ai/var/model-health.json (shown in the web model dropdown) and can
@@ -180,6 +188,53 @@ func runMetaModels(root string, args []string) int {
 		metaModelsUsage()
 		return 2
 	}
+}
+
+// runHealthStatus reads the persisted health state (written by a previous
+// check run or the automated background loop) and prints it. This is the
+// cheap query path for agents / the web console — it performs no live
+// requests.
+func runHealthStatus(root string, asJSON bool) int {
+	st := LoadHealthState(root)
+	if asJSON {
+		enc, err := json.MarshalIndent(st, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "model-proxy check status: %v\n", err)
+			return 1
+		}
+		fmt.Println(string(enc))
+		return 0
+	}
+	fmt.Printf("model health state: %s — probe=%v\n", st.At.Format(time.RFC3339), st.Probe)
+	reachable, capable, failed, degraded := 0, 0, 0, 0
+	for _, mh := range st.Models {
+		switch mh.Status {
+		case StatusFailed:
+			failed++
+		case StatusDegraded:
+			degraded++
+		}
+		if mh.Reachable {
+			reachable++
+			if mh.ToolCalls != nil && *mh.ToolCalls {
+				capable++
+			}
+		}
+	}
+	fmt.Printf("  models=%d reachable=%d tool-capable=%d degraded=%d failed=%d\n",
+		len(st.Models), reachable, capable, degraded, failed)
+	for _, mh := range st.Models {
+		cap := ""
+		if mh.ToolCalls != nil {
+			if *mh.ToolCalls {
+				cap = "tools"
+			} else {
+				cap = "no-tools"
+			}
+		}
+		fmt.Printf("  [%-11s] %-38s %s %s\n", mh.Status, mh.ID, cap, mh.Detail)
+	}
+	return 0
 }
 
 // runHealthCheck runs the check, persists the state and prints the result

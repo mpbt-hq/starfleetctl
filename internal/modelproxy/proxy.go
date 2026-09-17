@@ -97,6 +97,7 @@ type SessionAffinity struct {
 // Proxy is the local OpenAI-compatible model API server that fronts the
 // configured upstream providers.
 type Proxy struct {
+	root   string
 	cfg    *Config
 	logger *log.Logger
 	// modelCache maps provider ID → set of model IDs, refreshed on demand.
@@ -149,6 +150,8 @@ func New(cfg *Config) *Proxy {
 	p.mux.HandleFunc("/v1/meta-models/sessions", p.handleMetaModelSessions)
 	p.mux.HandleFunc("/v1/meta-models/switch", p.handleMetaModelSwitch)
 	p.mux.HandleFunc("/v1/meta-models/force", p.handleMetaModelForce)
+	// Persisted model-health state (read-only query for agents / web).
+	p.mux.HandleFunc("/v1/model-health", p.handleModelHealth)
 	// Initialize strategy state
 	p.initStrategies()
 	return p
@@ -168,6 +171,17 @@ func (p *Proxy) logf(format string, args ...any) {
 
 func (p *Proxy) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleModelHealth serves the persisted model-health state (written by a
+// check run or the automated background loop). Read-only query path for
+// agents and the web console — performs no live upstream requests.
+func (p *Proxy) handleModelHealth(w http.ResponseWriter, _ *http.Request) {
+	if p.root == "" {
+		writeJSON(w, map[string]any{"error": "proxy root not set"})
+		return
+	}
+	writeJSON(w, LoadHealthState(p.root))
 }
 
 // initStrategies initializes the strategy state from config.
