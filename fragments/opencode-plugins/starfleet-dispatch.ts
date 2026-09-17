@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.2'
+const PLUGIN_VERSION = '2.5.3'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -154,12 +154,14 @@ export const plugin = async ({ client, $ }: any) => {
   // nothing). Real model switches go through session.switchModel with a
   // Model.Ref object {id, providerID, variant?}, matching the DB shape
   // {"id":"...","providerID":"...","variant":"default"}.
-  const STRATEGY_IDS = ['heavy-model', 'cruiser-model', 'scout-model', 'balanced-model']
+  // Strategy names (meta-model virtuals) are NOT special here — they are just
+  // another provider/model pair (e.g. "meta-model/heavy-model") from opencode's
+  // point of view, so plain provider/model parsing suffices.
   const toModelRef = (target: string): { id: string; providerID: string } => {
-    const slash = target.lastIndexOf('/')
+    const slash = target.indexOf('/')
     if (slash > 0) return { id: target.slice(slash + 1), providerID: target.slice(0, slash) }
-    const providerID = STRATEGY_IDS.includes(target) ? 'meta-model' : (currentModel.server || 'opencode')
-    return { id: target, providerID }
+    // Bare model name: same provider as the current session.
+    return { id: target, providerID: currentModel.server || 'opencode' }
   }
   const switchSessionModel = async (c: any, sid: string, target: string): Promise<void> => {
     const ref = toModelRef(target)
