@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.1'
+const PLUGIN_VERSION = '2.5.2'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -148,6 +148,29 @@ export const plugin = async ({ client, $ }: any) => {
   let currentTask = ''
   const hasSwitchedToFallback = { v: false }
 
+  // Model-switch helpers.
+  // opencode's session.update only accepts {title, time.archived} — a `model`
+  // field there is silently dropped (the switch looked successful but did
+  // nothing). Real model switches go through session.switchModel with a
+  // Model.Ref object {id, providerID, variant?}, matching the DB shape
+  // {"id":"...","providerID":"...","variant":"default"}.
+  const STRATEGY_IDS = ['heavy-model', 'cruiser-model', 'scout-model', 'balanced-model']
+  const toModelRef = (target: string): { id: string; providerID: string } => {
+    const slash = target.lastIndexOf('/')
+    if (slash > 0) return { id: target.slice(slash + 1), providerID: target.slice(0, slash) }
+    const providerID = STRATEGY_IDS.includes(target) ? 'meta-model' : (currentModel.server || 'opencode')
+    return { id: target, providerID }
+  }
+  const switchSessionModel = async (c: any, sid: string, target: string): Promise<void> => {
+    const ref = toModelRef(target)
+    if (typeof c.session.switchModel === 'function') {
+      await c.session.switchModel({ path: { id: sid }, body: { model: ref } })
+      return
+    }
+    // Fallback for SDKs without switchModel: at least store a well-formed ref.
+    await c.session.update({ path: { id: sid }, body: { model: ref } })
+  }
+
   // Toast factories (need client & bus from closure)
   const toast = (variant: string, title: string, message: string, duration = 2500): void => {
     try {
@@ -192,7 +215,7 @@ export const plugin = async ({ client, $ }: any) => {
         ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
         : Promise.resolve()
       promise
-        .then(() => client.session.update({ path: { id: sid }, body: { model: targetModel } }))
+        .then(() => switchSessionModel(client, sid, targetModel))
         .then(() => {
           currentModel.model = targetModel
           tickLog(`${src}: ok → ${targetModel}`)
@@ -346,7 +369,7 @@ export const plugin = async ({ client, $ }: any) => {
                 ? clearMethod({ path: { id: sid } }).then(() => new Promise(r => setTimeout(r, 500)))
                 : Promise.resolve()
               promise
-                .then(() => client.session.update({ path: { id: sid }, body: { model: target } }))
+                .then(() => switchSessionModel(client, sid, target))
                 .then(() => {
                   tickLog(`${src}: ok → ${target}`)
                   toastBus('success', 'starfleet-dispatch', `Abort-retry + switch to ${target} done`, 5000)
@@ -484,7 +507,7 @@ export const plugin = async ({ client, $ }: any) => {
         ? clearMethod({ path: { id: sessionID } }).then(() => new Promise(r => setTimeout(r, 500)))
         : Promise.resolve()
       promise
-        .then(() => client.session.update({ path: { id: sessionID }, body: { model: targetModel } }))
+        .then(() => switchSessionModel(client, sessionID, targetModel))
         .then(() => {
           tickLog(`ERROR-HANDLE ${src}: update ok → ${targetModel}`)
           return client.session.promptAsync({
