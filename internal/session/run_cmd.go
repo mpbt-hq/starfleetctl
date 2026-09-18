@@ -218,19 +218,30 @@ func RunCmd(root string, args []string) int {
 	}
 
 	// Build env vars for client
-	env := append(os.Environ(),
-		"STARFLEET_SHIP_ID="+shipID,
-		"STARFLEET_ROLE="+role,
-	)
-	if role == "ship" {
-		env = append(env, "STARFLEET_TARGET="+shipnames.FlagshipName(root))
-	}
+	env := runClientEnv(shipID, role, root)
 
 	if useExec {
 		return execClientDirect(root, client, shipID, systemPrompt, prompt, model, env, clientArgs)
 	}
 
 	return execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model, env, clientArgs)
+}
+
+// runClientEnv assembles the environment passed to a `run`-launched client.
+// The `run` command always launches a terminal client (see generateOpencodeConfig
+// + heartbeat above), so STARFLEET_LAUNCH_TYPE is pinned to "terminal" — the
+// client process must see the same truth as the config and heartbeat instead of
+// inheriting a stale/default "background" label.
+func runClientEnv(shipID, role, root string) []string {
+	env := append(os.Environ(),
+		"STARFLEET_SHIP_ID="+shipID,
+		"STARFLEET_ROLE="+role,
+		"STARFLEET_LAUNCH_TYPE=terminal",
+	)
+	if role == "ship" {
+		env = append(env, "STARFLEET_TARGET="+shipnames.FlagshipName(root))
+	}
+	return env
 }
 
 // defaultPrompt returns the standard prompt for the given client/role combination.
