@@ -1916,22 +1916,24 @@ async function loadModels(){
 }
 
 async function shipLaunch(){
-const name = document.getElementById('ns_name').value.trim();
-   const model = document.getElementById('ns_model').value.trim();
-   if (!model) { toast(t('ship.nomodel'), true); return; }
-   const parent = document.getElementById('ns_parent').value.trim();
-   const unrestricted = document.getElementById('ns_unrestricted').checked;
-   const template = document.getElementById('ns_template').value.trim();
-   const body = { name, model, parent, unrestricted, template };
-   try {
-     const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
-       body: JSON.stringify(body)});
-toast(t('ship.launched')+(r.ship_id||name||'?'));
-      document.getElementById('ns_name').value='';
-      document.getElementById('ns_parent').value='';
-      document.getElementById('ns_unrestricted').checked=false;
-      refresh();
-   } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
+ const name = document.getElementById('ns_name').value.trim();
+    const model = document.getElementById('ns_model').value.trim();
+    if (!model) { toast(t('ship.nomodel'), true); return; }
+    const parent = document.getElementById('ns_parent').value.trim();
+    const unrestricted = document.getElementById('ns_unrestricted').checked;
+    const template = document.getElementById('ns_template').value.trim();
+    const body = { name, model, parent, unrestricted, template };
+    try {
+      const r = await api('/api/ship', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)});
+ toast(t('ship.launched')+(r.ship_id||name||'?'));
+       document.getElementById('ns_name').value='';
+       document.getElementById('ns_parent').value='';
+       document.getElementById('ns_unrestricted').checked=false;
+       refresh();
+       // Reload models dropdown to preserve pre-selection from localStorage
+       await loadModels();
+    } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
 }
 
 async function modelCheck(){
