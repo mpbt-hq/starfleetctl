@@ -2481,15 +2481,13 @@ async function loadReports(){
     if (!rows.length){ el.innerHTML = '<div class="empty">'+t('rep.none')+'</div>'; return; }
     el.innerHTML = rows.map(r=>{
       const tags = r.tags?.length ? ' <span class="muted">['+esc(r.tags.join(', '))+']</span>' : '';
-      const sub = r.subtitle ? '<div class="muted" style="font-size:13px;margin-top:2px">'+esc(r.subtitle)+'</div>' : '';
       const taskBadge = r.task_ref ? ' <span class="pill" style="font-size:11px">📋</span>' : '';
       const attachBadge = r.attachments?.length ? ' <span class="pill" style="font-size:11px">📎'+r.attachments.length+'</span>' : '';
-      return `<div class="card" onclick="openRepModal('${r.id}')" style="cursor:pointer">
-        <div class="row"><span class="agent grow">${esc(r.title)}${taskBadge}${attachBadge}</span>
-          <span class="pill dim">${esc(r.ship)}</span>
+      return `<div class="card" onclick="openRepModal('${r.message_id}')" style="cursor:pointer">
+        <div class="row"><span class="agent grow">${esc(r.subject)}${taskBadge}${attachBadge}</span>
+          <span class="pill dim">${esc(r.from)}</span>
           <span class="muted">${esc(r.ago||'')}</span></div>
-        ${sub}
-        <div class="muted" style="margin-top:2px;font-size:11px">${esc(r.id)}${tags}</div>
+        <div class="muted" style="margin-top:2px;font-size:11px">${esc(r.message_id)}${tags}</div>
       </div>`;
     }).join('');
   } catch(e){ document.getElementById('reports_list').innerHTML = '<div class="empty">'+t('err.prefix')+esc(e.message)+'</div>'; }
@@ -2499,12 +2497,12 @@ async function openRepModal(id){
   try {
     const r = await api('/api/reports/'+id);
     const titleEl = document.getElementById('rep_m_title');
-    titleEl.textContent = r.title || '—';
-    titleEl.dataset.reportId = id;
-    document.getElementById('rep_m_subtitle').textContent = r.subtitle || '';
+    titleEl.textContent = r.subject || '—';
+    titleEl.dataset.reportId = r.message_id || id;
+    document.getElementById('rep_m_subtitle').textContent = '';
     const ago = /* relative time */
       (()=>{ const d=Date.now()/1000-r.created; if(d<60)return t('rel.justnow'); if(d<3600)return t('rel.before')+Math.floor(d/60)+'m'; if(d<86400)return t('rel.before')+Math.floor(d/3600)+'h'; return t('rel.before')+Math.floor(d/86400)+'t'; })();
-    document.getElementById('rep_m_meta').textContent = r.ship+' • '+ago+(r.tags?.length ? ' • ['+r.tags.join(', ')+']' : '');
+    document.getElementById('rep_m_meta').textContent = r.from+' • '+ago+(r.tags?.length ? ' • ['+r.tags.join(', ')+']' : '');
     document.getElementById('rep_m_body').innerHTML = '<div class="md-body">'+mdHtml(r.body)+'</div>';
 
     // task reference
