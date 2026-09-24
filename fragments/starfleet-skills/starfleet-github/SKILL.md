@@ -18,6 +18,15 @@ starfleetctl github pr claim <pr#> "what"             # claim PR branch
 starfleetctl github pr claim --release <pr#>          # release claim
 ```
 
+**Isolation: machine erzeugt Clone/Worktrees IMMER über das Tooling**, nie roh per
+`git worktree`/`git clone`:
+- `starfleetctl github pr checkout <pr#>` — isolierter Agent-Clone für Reparatur/Review
+  (git gibt den Clone-Pfad aus; der geht 1:1 in `github pr amend-push <pfad>`).
+- `starfleetctl github pr mk-agent-clone <branch> [name]` — benannter agent-owned Clone.
+- Allgemeine, nicht-PR temporäre Worktrees: `starfleetctl worktree add|list|remove|prune`
+  (siehe `starfleet-sessions`-Skill).
+- Mutierende Work im selben Clone mit `starfleetctl with-clone-lock <cmd...>` serialisieren.
+
 ## Read-only
 
 | Subcommand | Purpose |

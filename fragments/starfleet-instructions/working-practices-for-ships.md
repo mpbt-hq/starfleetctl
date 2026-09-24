@@ -48,6 +48,14 @@ cleared:
   `/.starfleet-ai/...` — that is outside the workspace and denied), access dashboard/session data via
   `starfleetctl` commands instead of raw files, or pick an allowed alternative. Then continue the
   task and report what you did.
+- **Worktrees & agent clones: IMMER starfleet-Tooling, nie direkt `git worktree`/`git clone`.**
+  Für temporäre/isolierte Arbeit: `starfleetctl worktree add repos/<repo> <name>` (→ `_WORK_/worktrees/<repo>/<name>`,
+  Branch `wt/<name>`, per `worktree list/remove/prune` verwaltet). Für PRs: `starfleetctl github pr checkout <pr#>`
+  bzw. `github pr mk-agent-clone <branch> [name]` (isolierte PR-Clones — deren Pfad wartet das PR-Tooling ab).
+  Rohes `git worktree`/manuelle Clones erzeugen verstreute Orte, Orphan-Branches und Races zwischen Ships.
+  Mutierende git-Operationen im selben Clone mit `starfleetctl with-clone-lock <cmd...>` serialisieren (derselbe
+  `mpbt-clone.lock`, den `ws-commit` nutzt). Vor jeder Arbeit erst prüfen, ob ein anderes Schiff im Repo aktiv ist
+  (siehe inter-ship-communication).
 - **Dashboard & topics: CLI only, never raw files.** All access to the dashboard and its
   topics goes through `starfleetctl dashboard`/`starfleetctl task` subcommands. **NEVER**
   use `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md` —

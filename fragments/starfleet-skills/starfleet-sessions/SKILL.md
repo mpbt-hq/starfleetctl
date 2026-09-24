@@ -22,16 +22,34 @@ practices) — hand them a task via the dashboard/comms, not as extra CLI args.
 
 ## Git worktrees
 
-**Rule: Worktrees werden immer über starfleetctl verwaltet, nie direkt git worktree.**
+**Rule: Worktrees & agent clones werden IMMER über starfleetctl verwaltet, nie direkt
+`git worktree` / `git clone` / `mkdir` in einen Repo-Nachbarn.**
 
 | Subcommand | Purpose |
 |---|---|
-| `worktree add <repo-path> [name] [--from <ref>] [--branch <existing-branch>]` | Create a per-task git worktree |
-| `worktree list [repo-path]` | List worktrees |
-| `worktree remove <repo-path> <name> [--force] [--keep-branch]` | Remove a worktree |
-| `worktree prune [repo-path]` | Garbage-collect stale worktrees |
+| `worktree add <repo-path> [name] [--from <ref>] [--branch <existing-branch>]` | Create an isolated per-task worktree |
+| `worktree list [repo-path]` | List worktrees (all, or for one repo) |
+| `worktree remove <repo-path> <name> [--force] [--keep-branch]` | Remove worktree (and its `wt/<name>` branch unless `--keep-branch`) |
+| `worktree prune [repo-path]` | Prune stale worktree entries |
+| `github pr checkout <pr#> [name]` | Isolated agent clone/worktree for a **specific PR** (repair/review) |
+| `github pr mk-agent-clone <branch> [name]` | Agent-owned clone for a PR branch |
 
-**Rationale:** starfleetctl maintains its own worktree registry (`.starfleet-ai/var/worktrees/`), handles concurrent access via flock, and ensures consistent naming/cleanup. Direct `git worktree` bypasses this and causes conflicts.
+**Mechanics (starter):**
+```bash
+starfleetctl worktree add  _WORK_/xserver-master/sources/xlibre/xserver mytask        # -> _WORK_/worktrees/xserver/mytask, branch wt/mytask (from origin/HEAD)
+starfleetctl worktree add  _WORK_/starfleetctl/sources/starfleetctl myfix --from master
+starfleetctl worktree list _WORK_/xserver-master/sources/xlibre/xserver
+starfleetctl worktree remove _WORK_/xserver-master/sources/xlibre/xserver mytask      # cleans wt/mytask too
+```
+
+**Why starfleet tooling and not raw `git worktree`:**
+- Standardized location `_WORK_/worktrees/<repo-basename>/<name>` (inside the workspace/`_WORK_`, cleaned up consistently), default branch `wt/<name>`, and `remove` also drops the branch — so no orphan state accumulates across ships.
+- `github pr checkout` / `mk-agent-clone` wire the clone to the PR branch correctly (and are what PR repair/review skills expect back: `github pr amend-push <clone-dir>` takes the printed clone dir).
+- Concurrent **mutating** git operations on a shared clone are serialized separately via
+  `starfleetctl with-clone-lock <cmd...>` (flock on `<gitdir>/mpbt-clone.lock`, same lock `ws-commit`
+  uses) — wrap push/amend/ws-commit-style ops that run inside a shared checkout.
+- Raw `git worktree`/manual clones bypass all of this → unknown locations, orphan branches, and
+  races with other ships. For anything temporary: `worktree …`; for PR work: `github pr …`.
 
 ## Web console & setup
 
