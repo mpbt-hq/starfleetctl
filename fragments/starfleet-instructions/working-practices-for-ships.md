@@ -63,6 +63,20 @@ cleared:
   direkt im mpbt-workspace-Root** (das beschädigt den Agent-Config-Checkout des Root-Repos) und **kein
   vollständiger Source-Clone in `_WORK_/tmp` oder unter einem Repo-Nachbarn**. Bei Unsicherheit: erst
   `starfleetctl worktree add` bzw. das passende mpbt/PR-Tooling nutzen.
+- **Vor JEDEM mutierenden Git-Befehl: `rev-parse --show-toplevel` prüfen!** `git checkout|switch|pull|
+  reset|rebase|cherry-pick|stash` läuft NUR innerhalb des tatsächlich gemeinten Repos. Der Workspace-Root
+  hat sein eigenes `.git` (das Agent-Config-Repo `/home/nekrad/src/xorg/mpbt-workspace`) — ein
+  `git checkout <xserver-branch>` dort wechselt/erzeugt den Branch **im falschen Repo** (Footgun, bereits
+  mehrfach passiert: `wip/*`, `wt/*`, `xserver/master`-Refs landeten im Workspace-Repo; Worktrees wurden
+  als Workspace-Repo-Worktrees statt als xserver-Worktrees angelegt). Guard-Befehl VOR jeder Aktion:
+  `git rev-parse --show-toplevel` — Ergebnis muss exakt dem gewünschten Clone/Worktree entsprechen
+  (z.B. `…/_WORK_/xserver-master/sources/xlibre/xserver` bzw.
+  `…/_WORK_/worktrees/xserver/<name>`), sonst erst `cd` in das richtige Verzeichnis oder
+  `starfleetctl worktree add <expliziter-repo-pfad>` (Ort danach verifizieren).
+- **Primary/shared Clone ist passiv.** Branch-Wechsel, Rebases, `--amend`, Force-Push-Vorbereitung usw.
+  gehören ausschließlich in den EIGENEN separaten Worktree/PR-Clone — nie im primären mpbt-Clone. Andere
+  Ships lesen/bauen dort. Für aktive Arbeit: `starfleetctl worktree add _WORK_/xserver-master/sources/xlibre/xserver <name>`
+  bzw. `github pr checkout`.
 - **Dashboard & topics: CLI only, never raw files.** All access to the dashboard and its
   topics goes through `starfleetctl dashboard`/`starfleetctl task` subcommands. **NEVER**
   use `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md` —

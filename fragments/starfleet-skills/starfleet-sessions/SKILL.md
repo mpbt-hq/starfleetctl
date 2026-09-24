@@ -56,6 +56,20 @@ starfleet worktrees (`_WORK_/worktrees/<repo>/<name>`), and PR/agent clones from
 `mk-agent-clone`. **Never** `git checkout`/`git clone` into the workspace root (clobbers the
 agent-config checkout), into `_WORK_/tmp`, or into ad-hoc directories next to a repo.
 
+**Toplevel guard (before ANY mutating git command):**
+```bash
+git rev-parse --show-toplevel   # must equal the INTENDED repo, e.g. …/_WORK_/xserver-master/sources/xlibre/xserver
+```
+The workspace root itself is a git repo (agent-config) — `git checkout <xserver-branch>` there
+switches/creates branches in the **wrong** repo (footgun: `wip/*`, `wt/*`, `xserver/*` refs have
+landed there), and `worktree add` run from the root creates a worktree **of the workspace repo**.
+Always pass the explicit repo path to `worktree add` and verify the printed destination is under
+`_WORK_/worktrees/<repo>/<name>`.
+
+**Primary clone is passive:** branch switching / rebase / amend / force-push prep happen only in your
+own worktree or PR clone, never in the shared mpbt clone (other ships build/read there; a visible
+`[wt/…]`/`[wip/…]` branch in the *wrong* repo is a red flag).
+
 ## Web console & setup
 
 | Subcommand | Purpose |
