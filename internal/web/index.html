@@ -2006,7 +2006,7 @@ function msgCard(r, indented){
   let attachHtml = '';
   // API returns 'Attach' (capitalized) not 'attach'
   if (r.Attach) {
-    attachHtml = `<div style="margin-top:6px"><a href="/api/store/${encodeURIComponent(r.Attach)}" target="_blank" class="pill" style="background:var(--chip);color:var(--acc)">📎 ${esc(r.Attach)}</a></div>`;
+    attachHtml = `<div style="margin-top:6px"><a href="/api/store/${encodeURIComponent(r.Attach)}" target="_blank" class="rep-attach">📎 ${esc(r.Attach)}</a></div>`;
   }
   return `<div class="card" style="${indented?'margin-left:18px;border-left:3px solid var(--acc)':''}">
     <div class="row"><span class="agent grow">${esc(r.id)}</span>${tag}
