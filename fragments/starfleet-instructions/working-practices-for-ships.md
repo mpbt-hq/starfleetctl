@@ -56,6 +56,13 @@ cleared:
   Mutierende git-Operationen im selben Clone mit `starfleetctl with-clone-lock <cmd...>` serialisieren (derselbe
   `mpbt-clone.lock`, den `ws-commit` nutzt). Vor jeder Arbeit erst prüfen, ob ein anderes Schiff im Repo aktiv ist
   (siehe inter-ship-communication).
+- **Source-Checkouts nur an den erlaubten Orten — NIE im Workspace-Root, `_WORK_`-Root, `_WORK_/tmp` oder
+  in ad-hoc Verzeichnissen.** Erlaubt sind ausschließlich: die mpbt-managed Clone
+  (`_WORK_/<solution>/sources/**`), starfleet-Worktrees (`_WORK_/worktrees/<repo>/<name>`) und
+  PR-/Agent-Clones (`github pr checkout` / `mk-agent-clone`). Insbesondere gilt: **kein `git checkout`/`git clone`
+  direkt im mpbt-workspace-Root** (das beschädigt den Agent-Config-Checkout des Root-Repos) und **kein
+  vollständiger Source-Clone in `_WORK_/tmp` oder unter einem Repo-Nachbarn**. Bei Unsicherheit: erst
+  `starfleetctl worktree add` bzw. das passende mpbt/PR-Tooling nutzen.
 - **Dashboard & topics: CLI only, never raw files.** All access to the dashboard and its
   topics goes through `starfleetctl dashboard`/`starfleetctl task` subcommands. **NEVER**
   use `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md` —

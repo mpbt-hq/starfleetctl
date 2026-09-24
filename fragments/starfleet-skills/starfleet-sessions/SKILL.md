@@ -51,6 +51,11 @@ starfleetctl worktree remove _WORK_/xserver-master/sources/xlibre/xserver mytask
 - Raw `git worktree`/manual clones bypass all of this → unknown locations, orphan branches, and
   races with other ships. For anything temporary: `worktree …`; for PR work: `github pr …`.
 
+**Where checkouts may (only) live:** mpbt-managed clones (`_WORK_/<solution>/sources/**`),
+starfleet worktrees (`_WORK_/worktrees/<repo>/<name>`), and PR/agent clones from `github pr checkout` /
+`mk-agent-clone`. **Never** `git checkout`/`git clone` into the workspace root (clobbers the
+agent-config checkout), into `_WORK_/tmp`, or into ad-hoc directories next to a repo.
+
 ## Web console & setup
 
 | Subcommand | Purpose |
