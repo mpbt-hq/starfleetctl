@@ -2006,7 +2006,11 @@ function msgCard(r, indented){
   let attachHtml = '';
   // API returns 'Attach' (capitalized) not 'attach'
   if (r.Attach) {
-    attachHtml = `<div style="margin-top:6px"><a href="/api/store/${encodeURIComponent(r.Attach)}" target="_blank" class="rep-attach">📎 ${esc(r.Attach)}</a></div>`;
+    const isText = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xml|ini|cfg|conf)$/i.test(r.Attach);
+    attachHtml = `<div style="margin-top:6px">
+      <a href="/api/store/${encodeURIComponent(r.Attach)}" target="_blank" class="rep-attach">📎 ${esc(r.Attach)}</a>
+      ${isText ? `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="viewAttachment('${esc(r.Attach)}')">Anzeigen</button>` : ''}
+    </div>`;
   }
   return `<div class="card" style="${indented?'margin-left:18px;border-left:3px solid var(--acc)':''}">
     <div class="row"><span class="agent grow">${esc(r.id)}</span>${tag}
@@ -2032,6 +2036,34 @@ function jumpToMsg(id){
     }
   }
   toast(t('bus.notinview').replace('{id}', id));
+}
+async function viewAttachment(name){
+  try {
+    const resp = await fetch('/api/store/' + encodeURIComponent(name));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const text = await resp.text();
+    // Create modal for viewing attachment
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+      <div class="modal" style="max-width:900px;max-height:90vh">
+        <div class="row" style="align-items:center;margin-bottom:8px">
+          <b>${esc(name)}</b>
+          <span style="flex:1"></span>
+          <button class="sec" onclick="this.closest('.modal-overlay').remove()" style="width:auto;padding:6px 12px">Schließen</button>
+          <button class="sec" onclick="downloadAttachment('${esc(name)}')" style="width:auto;padding:6px 12px">Herunterladen</button>
+        </div>
+        <pre style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:70vh;overflow:auto;font:13px/1.4 ui-monospace,monospace;background:var(--chip);padding:10px;border-radius:8px;border:1px solid var(--line)">${esc(text)}</pre>
+      </div>`;
+    document.body.appendChild(modal);
+  } catch(e) {
+    toast(t('err.prefix') + esc(e.message), true);
+  }
+}
+function downloadAttachment(name){
+  window.open('/api/store/' + encodeURIComponent(name) + '&download=1', '_blank');
 }
 async function loadBus(kind){
   const el = document.getElementById('busbody');
