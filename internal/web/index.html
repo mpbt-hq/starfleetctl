@@ -2340,7 +2340,14 @@ function mdHtml(src){
   // images
   h = h.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%">');
   // blockquote
-  h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  h = h.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+  // tables (must be before lists and paragraphs)
+  h = h.replace(/^\|(.+)\|\s*$/gm, '<tr><td>$1</td></tr>');
+  h = h.replace(/^(\|[-:|]+\|)\s*$/gm, '');
+  h = h.replace(/(<tr>.*<\/tr>\n?)+/g, '<table>$&</table>');
+  h = h.replace(/<tr>([^<]*)<\/tr>/g, (m, cells) => {
+    return '<tr>' + cells.split('|').map(c => c.trim()).filter(Boolean).map(c => '<td>' + c + '</td>').join('') + '</tr>';
+  });
   // unordered list
   h = h.replace(/^[*\-] (.+)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
