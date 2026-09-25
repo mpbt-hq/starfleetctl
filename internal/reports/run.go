@@ -7,6 +7,7 @@ package reports
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 const usage = `starfleetctl reports — fleet report system
 
 Usage:
-  reports submit <title> [--subtitle <text>] [--body <text>] [--body-file <path>]
+  reports submit <title> [--subtitle <text>] [--body <text>] [--body-file <path>|-]
                        [--tags <tag1,tag2>] [--task-ref <slug>]
                        [--attachment <file> ...]                   submit a new report
   reports list [--ship <name>] [--tag <tag>] [--json]             list reports (newest first)
@@ -29,6 +30,7 @@ Examples:
   reports submit "Build completed" --body "all tests pass" --tags "build,ci"
   reports submit "Release 25.2" --subtitle "CI-Status" --task-ref xlibre/release-25-2
   reports submit "Test log" --body-file test.log --attachment test.log --tags "ci,test"
+  reports submit "Long report" --body-file - < long.md          read body from stdin
   reports list --ship Enterprise
   reports list --json
   reports show build-report-abc123
@@ -56,8 +58,13 @@ func Run(root string, args []string) int {
 }
 
 func runSubmit(root string, args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: reports submit <title> [--subtitle <text>] [--body <text>] [--body-file <path>] [--tags <tag1,tag2>] [--task-ref <slug>] [--attachment <file> ...]")
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
+		fmt.Print(usage)
+		return 0
+	}
+	if strings.HasPrefix(args[0], "-") {
+		fmt.Fprintf(os.Stderr, "reports: submit: expected <title> as first argument, got %q\n", args[0])
+		fmt.Fprintln(os.Stderr, "usage: reports submit <title> [--subtitle <text>] [--body <text>] [--body-file <path>|-] [--tags <tag1,tag2>] [--task-ref <slug>] [--attachment <file> ...]")
 		return 2
 	}
 	subject := args[0]
@@ -104,12 +111,21 @@ func runSubmit(root string, args []string) int {
 	}
 
 	if bodyFile != "" {
-		data, err := os.ReadFile(bodyFile)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "reports: read body-file:", err)
-			return 1
+		if bodyFile == "-" {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "reports: read stdin:", err)
+				return 1
+			}
+			body = string(data)
+		} else {
+			data, err := os.ReadFile(bodyFile)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "reports: read body-file:", err)
+				return 1
+			}
+			body = string(data)
 		}
-		body = string(data)
 	}
 
 	// Prepend subtitle to body if present

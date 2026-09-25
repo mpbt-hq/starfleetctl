@@ -67,7 +67,7 @@ When you **take on / work a task**, the following applies to every session:
    is flagged **unattached** (you get a loud hint + the board shows a warning badge); attach to
    a task or add a `--note`, never silently work unattached.
 4. **Finish = report.** When a task is complete, submit a structured report
-   (`starfleetctl reports submit --title ... --body ... --taskref <slug>`) **and** notify
+   (`starfleetctl reports submit "<Title>" --body ... --task-ref <slug>`) **and** notify
    the commissioning ship via comms. "Done" is not done until both exist.
 5. **Questions you must ask back** (ambiguity, missing info, decisions needed):
    - Record the open questions **in the task itself** (`dashboard topic write <slug> <file>`
@@ -151,9 +151,13 @@ starfleetctl reports show <id>
 starfleetctl reports delete <id>
 ```
 
-⚠️ **WARNING**: The title is the **first positional argument**, not a `--title` flag!
-Using `--title "Title"` will cause the title to be interpreted as the literal
-string `--title` and the actual title will be lost. This is a common mistake.
+⚠️ **WARNING**: The title is the **first positional argument**, not a `--title`
+flag! Using `--title ...`/`--help`/`--` as the first argument is now **rejected**
+with a usage error (no junk report is created), so never pass any `-`-prefixed
+value as the title.
+
+`--body-file -` reads the body from **stdin** (e.g.
+`starfleetctl reports submit "Title" --body-file - < log.txt`).
 
 Attachments are uploaded to the filestore (`file put` → `/api/store/<name>`).
 See `doc/reports.md` for full reference and web UI walkthrough.
