@@ -2004,12 +2004,12 @@ function msgCard(r, indented){
               (r.acked!==undefined ? `<span class="pill ${r.acked?'ok':'warn'}">${r.acked?'✓':'…'}</span>` : '');
   const q = r.question ? esc(r.question) : esc(r.text);
   let attachHtml = '';
-  // API returns 'Attach' (capitalized) not 'attach'
-  if (r.Attach) {
-    const isText = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xml|ini|cfg|conf)$/i.test(r.Attach);
+  // API returns 'attach' (lowercase) per json tag in internal/comms/json.go
+  if (r.attach) {
+    const isText = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xml|ini|cfg|conf)$/i.test(r.attach);
     attachHtml = `<div style="margin-top:6px">
-      <a href="/api/store/${encodeURIComponent(r.Attach)}" target="_blank" class="rep-attach">📎 ${esc(r.Attach)}</a>
-      ${isText ? `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="viewAttachment('${esc(r.Attach)}')">Anzeigen</button>` : ''}
+      <a href="/api/store/${encodeURIComponent(r.attach)}" target="_blank" class="rep-attach">📎 ${esc(r.attach)}</a>
+      ${isText ? `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="viewAttachment('${esc(r.attach)}')">Anzeigen</button>` : ''}
     </div>`;
   }
   return `<div class="card" style="${indented?'margin-left:18px;border-left:3px solid var(--acc)':''}">

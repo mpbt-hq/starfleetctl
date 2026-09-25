@@ -1728,7 +1728,7 @@ func (s *Server) apiShipX11Term(w http.ResponseWriter, r *http.Request, id strin
 	writeJSON(w, map[string]any{"ok": true, "ship_id": id, "action": "detached"})
 }
 
-// apiStoreFile serves files from the agent file store.
+// apiStoreFile serves files from the agent file store AND comms attachments.
 // GET /api/store/<name>  — serves the file with infered Content-Type.
 func (s *Server) apiStoreFile(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/store/")
@@ -1736,19 +1736,32 @@ func (s *Server) apiStoreFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid file name")
 		return
 	}
+
+	// Try filestore first
 	store, err := filestore.New(s.Root)
-	if err != nil {
-		writeErr(w, 500, err.Error())
+	var path string
+	found := false
+	if err == nil && store.Exists(name) {
+		path = store.Path(name)
+		found = true
+	}
+
+	// Fallback: check comms attachments directory
+	if !found {
+		attachPath := filepath.Join(s.Root, ".starfleet-ai", "var", "comms", "attachments", name)
+		if _, err := os.Stat(attachPath); err == nil {
+			path = attachPath
+			found = true
+		}
+	}
+
+	if !found {
+		writeErr(w, 404, "file not found or expired")
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		if !store.Exists(name) {
-			writeErr(w, 404, "file not found or expired")
-			return
-		}
-		path := store.Path(name)
 		mime.AddExtensionType(filepath.Ext(name), "")
 		ctype := mime.TypeByExtension(filepath.Ext(name))
 		if ctype == "" {
