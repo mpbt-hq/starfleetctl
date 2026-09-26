@@ -19,6 +19,15 @@ cleared:
    (`starfleetctl comms ask "<question>"` or `tell <sender>`), which the praetor/another ship can
    answer asynchronously. Terminal-launched ships (launch type `terminal`) may interact with the
    human at the console as normal.
+- **Never block on a console prompt — a `terminal` launch type is NOT a guarantee that anyone is
+   watching.** The praetor may have walked away from a console-launched session at any moment, and
+   a blocking question tool freezes the whole turn: nothing progresses, no other directive gets
+   processed, and there is no timeout that saves you. So: do not use an interactive ask/prompt tool
+   to clarify a decision, not even from a `terminal` ship. Instead, put the open question on the
+   bus (`starfleetctl comms ask "<question>"` / `tell <sender>`, plus a dashboard note if it belongs
+   to a task) and **keep working on every part that is not blocked**. Record what you assumed, so
+   the answer can be applied afterwards. A question that waits on the bus is cheap; a frozen turn is
+   not.
 - **Always call starfleetctl as `.starfleet-ai/bin/starfleetctl`, never bare `starfleetctl`.** The
    workspace binary lives under `.starfleet-ai/bin/` (symlink into the starfleetctl source). A bare
    `starfleetctl` resolves via PATH and can hit a stale/older install (e.g. `~/go/bin`) that predates
