@@ -1430,7 +1430,7 @@ async function loadShipChat(name){
         (m.reply_to ? ` · <a href="#" onclick="jumpToMsg('${esc(m.reply_to)}');return false">↩ ${esc(m.reply_to)}</a>` : '');
       out.push(`<div class="bubble${me?' me':''}" style="${depth>0?'margin-left:18px;border-left:3px solid var(--acc)':''}">
         <div class="meta">${meta}</div>
-        <pre>${esc(m.text)}</pre>
+        <pre>${linkifyAttach(m.text, m.id)}</pre>
       </div>`);
       // Children are already in correct order (newest first from API)
       (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
@@ -2152,18 +2152,9 @@ async function loadTalk(){
       const tgt = m.target==='all' ? '📡 all' : ('→ '+m.target);
       const meta = `${esc(m.from)} ${tgt} · ${age(m.age_seconds)}` +
         (m.reply_to ? ` · <a href="#" onclick="jumpToMsg('${esc(m.reply_to)}');return false">↩ ${esc(m.reply_to)}</a>` : '');
-      let attachHtml = '';
-      if (m.attach) {
-        const isText = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xml|ini|cfg|conf)$/i.test(m.attach);
-        attachHtml = `<div style="margin-top:6px">
-          <a href="/api/store/${encodeURIComponent(m.attach)}" target="_blank" class="rep-attach">📎 ${esc(m.attach)}</a>
-          ${isText ? `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="viewAttachment('${esc(m.attach)}')">${t('rep.file')}</button>` : ''}
-        </div>`;
-      }
       out.push(`<div class="bubble${me?' me':''}" style="${depth>0?'margin-left:18px;border-left:3px solid var(--acc)':''}">
         <div class="meta">${meta}</div>
-        <pre>${esc(m.text)}</pre>
-        ${attachHtml}
+        <pre>${linkifyAttach(m.text, m.id)}</pre>
       </div>`);
       (children[m.id]||[]).forEach(ch=>walk(ch, depth+1));
     };
