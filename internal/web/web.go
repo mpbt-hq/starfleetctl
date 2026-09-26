@@ -2573,6 +2573,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = io.Copy(w, strings.NewReader(string(data)))
 }
 
