@@ -84,6 +84,13 @@ cleared:
 - **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
    (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,
    no dashboard scanning, no proactive work — wait for a `tell`/`ask`/`broadcast` directive.
+- **Never stop a console-launched ship.** `session stop` is only allowed for ships whose
+   `STARFLEET_LAUNCH_TYPE` is `background` or `auto`. A ship launched with launch type `terminal`
+   has a human sitting at that console — stopping it kills the interactive session out from under
+   that person. Check the launch type first (`starfleetctl session list` / the board entry); if a
+   ship is a console ship, leave it running and tell the praetor via comms that it should be
+   stopped by hand. This applies to respawns too: replacing a stuck console ship means asking for
+   a human, never `session stop`.
 - **Keep board status current during long tasks.** Long-running operations (rebases, builds,
    test suites, large edits) must periodically refresh the board heartbeat so the fleet sees
    accurate state. Call `starfleetctl comms status working "<what>"` or `starfleetctl comms touch`

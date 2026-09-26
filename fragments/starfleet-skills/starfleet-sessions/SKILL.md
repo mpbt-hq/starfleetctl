@@ -20,6 +20,12 @@ Comms/task core lives in the **`starfleet`** and **`starfleet-tasks`** skills.
 Background ships never prompt on their console (see the starfleet-instructions working
 practices) — hand them a task via the dashboard/comms, not as extra CLI args.
 
+**Rule: `session stop` is only for detached ships.** Check the launch type first
+(`starfleetctl session list`). Only `background` and `auto` ships may be stopped — a ship
+launched with launch type `terminal` has a human at that console and must be left running;
+report it via comms so the praetor can stop it by hand. This includes respawns of a stuck
+console ship: no autonomous `session stop`.
+
 ## Git worktrees
 
 **Rule: Worktrees & agent clones werden IMMER über starfleetctl verwaltet, nie direkt

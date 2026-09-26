@@ -62,6 +62,11 @@ starfleetctl session stop Voyager
 
 Kills the terminal, clears the comms heartbeat, and releases the ship name.
 
+Only detached ships may be stopped this way — check the launch type with
+`starfleetctl session list` first. Ships launched with launch type `terminal`
+have a human at that console; leave them running and ask the praetor to stop
+them by hand.
+
 ### autoscale
 
 ```sh
