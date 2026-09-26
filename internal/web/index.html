@@ -948,6 +948,33 @@ function toast(msg, err){
   setTimeout(()=>t.classList.remove('show'), 2200);
 }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// Attach markers are the transport format for comms payloads: the text carries
+// [[attach:<name>:<bytes>:<sha256>]] while the file is stored as <msgid>__<name>.
+// The marker alone therefore cannot address the file — the message id is needed.
+// Renders the marker itself as the link, so no raw marker is left in the text.
+// Takes the RAW text and escapes every piece it emits itself, so the marker's
+// filename is escaped exactly once (escaping up front would double-escape it).
+const ATTACH_RE = /\[\[attach:([^:\]]+):(\d+):([0-9a-f]{64})\]\]/g;
+const ATTACH_TEXTY = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xml|ini|cfg|conf)$/i;
+function escAttr(s){ return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function linkifyAttach(rawText, msgid){
+  if (!rawText) return '';
+  let out = '', last = 0, m;
+  ATTACH_RE.lastIndex = 0;
+  while ((m = ATTACH_RE.exec(rawText)) !== null) {
+    out += esc(rawText.slice(last, m.index));
+    last = m.index + m[0].length;
+    const name = m[1], bytes = m[2];
+    if (!msgid) { out += esc(m[0]); continue; }
+    const stored = msgid + '__' + name;
+    out += `<a href="/api/store/${encodeURIComponent(stored)}" target="_blank" class="rep-attach">`
+         + `📎 ${esc(name)} (${esc(bytes)} B)</a>`;
+    if (ATTACH_TEXTY.test(name))
+      out += `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px"`
+           + ` onclick="viewAttachment(${escAttr(JSON.stringify(stored))})">Anzeigen</button>`;
+  }
+  return out + esc(rawText.slice(last));
+}
 function age(s){ s=Number(s)||0;
   if (s>=3600) return Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m';
   if (s>=60) return Math.floor(s/60)+'m';
@@ -2002,21 +2029,11 @@ function toggleThread(){
 function msgCard(r, indented){
   const tag = r.target ? `<span class="pill dim">→${esc(r.target)}</span>` :
               (r.acked!==undefined ? `<span class="pill ${r.acked?'ok':'warn'}">${r.acked?'✓':'…'}</span>` : '');
-  const q = r.question ? esc(r.question) : esc(r.text);
-  let attachHtml = '';
-  // API returns 'attach' (lowercase) per json tag in internal/comms/json.go
-  if (r.attach) {
-    const isText = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xml|ini|cfg|conf)$/i.test(r.attach);
-    attachHtml = `<div style="margin-top:6px">
-      <a href="/api/store/${encodeURIComponent(r.attach)}" target="_blank" class="rep-attach">📎 ${esc(r.attach)}</a>
-      ${isText ? `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="viewAttachment('${esc(r.attach)}')">Anzeigen</button>` : ''}
-    </div>`;
-  }
+  const q = linkifyAttach(r.question || r.text, r.id);
   return `<div class="card" style="${indented?'margin-left:18px;border-left:3px solid var(--acc)':''}">
     <div class="row"><span class="agent grow">${esc(r.id)}</span>${tag}
       <span class="muted">${age(r.age_seconds)}</span></div>
     <div style="margin-top:6px">${q}</div>
-    ${attachHtml}
     <div class="row" style="margin-top:4px">
       ${r.from?`<span class="muted">${t('bus.from')}${esc(r.from)}</span>`:''}
       ${r.reply_to?`<a class="pill dim" href="#" onclick="jumpToMsg('${esc(r.reply_to)}');return false">↩ ${esc(r.reply_to)}</a>`:''}
@@ -2505,7 +2522,13 @@ async function loadOCLog(){
   try {
     const data = await api('/api/oclog?n='+n);
     const lines = data.lines || [];
-    el.innerHTML = lines.map(l=>esc(l)).join('\n') || '('+t('bus.empty')+')';
+    // Log lines are plain text, but a payload marker still has to be usable:
+    // the line carries the message id as "comms get <id>", which is what
+    // addresses the stored file together with the marker's own filename.
+    el.innerHTML = lines.map(l => {
+      const id = l.match(/comms get (\S+)/);
+      return linkifyAttach(l, id ? id[1] : null);
+    }).join('\n') || '('+t('bus.empty')+')';
     el.scrollTop = el.scrollHeight;
   } catch(e){ el.innerHTML = t('err.prefix')+esc(e.message); }
 }
