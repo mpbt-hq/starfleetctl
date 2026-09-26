@@ -30,7 +30,13 @@ injection — **never call `comms inbox` manually** (the poller already injects 
 | Command | Purpose |
 |---|---|
 | `comms tell <ship> "<msg>"` | Send a directive to a ship |
-| `comms tell <ship> --stdin` | Send a large payload via stdin |
+| `comms tell <ship> --stdin` | Send a large payload via stdin (`<<'EOF'` heredoc) |
+
+⚠️ **Gocha**: `comms tell <ship> -F - <<EOF` is **NOT** a thing — there is no `-F`
+flag. `-F` (and `-`) become part of the message text, and the heredoc on stdin is
+ignored, so the receiver gets a message that literally contains `-F -`. For any
+multi-line body always use `comms tell <ship> --stdin <<'EOF' ... EOF` (or the
+`--attach <file>` form for very large payloads). Same for `broadcast`.
 | `comms broadcast "<msg>"` | Send to all ships |
 | `comms ask "<question>"` | Ask a question (async reply expected) |
 | `comms ack <id>` | Acknowledge/remove a message from inbox |
