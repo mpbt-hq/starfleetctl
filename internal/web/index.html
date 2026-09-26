@@ -2063,7 +2063,7 @@ async function viewAttachment(name){
   }
 }
 function downloadAttachment(name){
-  window.open('/api/store/' + encodeURIComponent(name) + '&download=1', '_blank');
+  window.open('/api/store/' + encodeURIComponent(name) + '?download=1', '_blank');
 }
 async function loadBus(kind){
   const el = document.getElementById('busbody');

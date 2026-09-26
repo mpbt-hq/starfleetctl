@@ -1768,6 +1768,9 @@ func (s *Server) apiStoreFile(w http.ResponseWriter, r *http.Request) {
 			ctype = "application/octet-stream"
 		}
 		w.Header().Set("Content-Type", ctype)
+		if r.URL.Query().Get("download") == "1" {
+			w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+		}
 		http.ServeFile(w, r, path)
 
 	case http.MethodPost, http.MethodPut:
