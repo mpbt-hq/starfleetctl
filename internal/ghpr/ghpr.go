@@ -26,6 +26,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/metux/starfleetctl/internal/projectconfig"
 )
 
 // prNumberRE matches a (possibly '#'-prefixed) numeric PR/issue id. Shared
@@ -74,6 +76,22 @@ func repo() string {
 		fprintErr("ghpr", err)
 		os.Exit(1)
 	}
+	return r
+}
+
+// UpstreamRepo returns the configured upstream repository for backport operations.
+// It loads the project config from the given root and returns the upstream_repo field.
+// If not configured, it falls back to the auto-detected repo via Repo().
+func UpstreamRepo(root string) string {
+	fmt.Fprintf(os.Stderr, "DEBUG UpstreamRepo: root=%s\n", root)
+	projCfg, err := projectconfig.Load(root)
+	if err == nil && projCfg.UpstreamRepo != "" {
+		fmt.Fprintf(os.Stderr, "DEBUG UpstreamRepo: found upstream_repo=%s\n", projCfg.UpstreamRepo)
+		return projCfg.UpstreamRepo
+	}
+	fmt.Fprintf(os.Stderr, "DEBUG UpstreamRepo: not found, falling back to Repo()\n")
+	// Fallback to auto-detected repo
+	r, _ := Repo()
 	return r
 }
 

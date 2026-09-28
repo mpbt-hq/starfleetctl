@@ -23,7 +23,8 @@ const backportAppliesUsage = `usage: starfleetctl backport-applies <master-path>
 `
 
 // RunBackportApplies implements `starfleetctl backport-applies <path> <ere> [release ...]`.
-func RunBackportApplies(args []string) int {
+func RunBackportApplies(root string, args []string) int {
+	fmt.Fprintf(os.Stderr, "DEBUG RunBackportApplies: root=%s\n", root)
 	if len(args) >= 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Print(backportAppliesUsage)
 		return 0
@@ -35,12 +36,13 @@ func RunBackportApplies(args []string) int {
 	pathIn, ere := args[0], args[1]
 	rels := args[2:]
 
-	// Load project config to get default release lines
-	projCfg, err := projectconfig.Load("")
+	// Load project config to get default release lines and upstream repo
+	projCfg, err := projectconfig.Load(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "backport-applies: load project config: %v\n", err)
 		return 1
 	}
+	fmt.Fprintf(os.Stderr, "DEBUG RunBackportApplies: loaded config, upstream_repo=%s\n", projCfg.UpstreamRepo)
 	if len(rels) == 0 {
 		rels = projCfg.GetReleaseLines()
 	}
@@ -51,9 +53,12 @@ func RunBackportApplies(args []string) int {
 		return 2
 	}
 
+	upstreamRepo := UpstreamRepo(root)
+	fmt.Fprintf(os.Stderr, "DEBUG RunBackportApplies: upstreamRepo=%s\n", upstreamRepo)
+
 	for _, r := range rels {
 		fmt.Printf("########## release/%s ##########\n", r)
-		content, used, ferr := fetchBranchFile("release/"+r, pathIn)
+		content, used, ferr := fetchBranchFileWithRepo(upstreamRepo, "release/"+r, pathIn)
 		if ferr != nil {
 			fmt.Printf("  file not found on release/%s (%s)\n", r, pathIn)
 			continue
@@ -61,7 +66,7 @@ func RunBackportApplies(args []string) int {
 		// Mirrors show-branch-file's own resolved-path stderr line, since
 		// bash backport-applies calls it as a subprocess and inherits that
 		// diagnostic on the terminal (only its stdout is captured).
-		fmt.Fprintf(os.Stderr, "show-branch-file: %s@release/%s :: %s\n", repo(), r, used)
+		fmt.Fprintf(os.Stderr, "show-branch-file: %s@release/%s :: %s\n", upstreamRepo, r, used)
 		matched := false
 		for i, line := range strings.Split(content, "\n") {
 			if re.MatchString(line) {

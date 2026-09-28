@@ -15,6 +15,11 @@ type ProjectConfig struct {
 	// Name is a human-readable project name
 	Name string `yaml:"name"`
 
+	// UpstreamRepo is the GitHub repo slug for the upstream source repository
+	// (e.g., "X11Libre/xserver"). Used by backport commands to fetch files
+	// from the correct repository instead of auto-detecting the current repo.
+	UpstreamRepo string `yaml:"upstream_repo"`
+
 	// WorktreeLayout describes how release worktrees are organized
 	WorktreeLayout WorktreeLayout `yaml:"worktree_layout"`
 
@@ -68,7 +73,8 @@ type SolutionConfig struct {
 // DefaultProjectConfig returns the default project configuration (generic, no project-specifics)
 func DefaultProjectConfig() *ProjectConfig {
 	return &ProjectConfig{
-		Name: "generic",
+		Name:         "generic",
+		UpstreamRepo: "",
 		WorktreeLayout: WorktreeLayout{
 			BaseDir:       "{project}-{rel}",
 			SourcesSubdir: "sources/{project}",
@@ -102,6 +108,12 @@ func Load(root string) (*ProjectConfig, error) {
 
 	// Merge with defaults for any missing fields
 	def := DefaultProjectConfig()
+	if cfg.Name == "" {
+		cfg.Name = def.Name
+	}
+	if cfg.UpstreamRepo == "" {
+		cfg.UpstreamRepo = def.UpstreamRepo
+	}
 	if cfg.WorktreeLayout.BaseDir == "" {
 		cfg.WorktreeLayout.BaseDir = def.WorktreeLayout.BaseDir
 	}

@@ -32,6 +32,14 @@ env:
 // the file content and the path that actually resolved. Mirrors
 // scripts/show-branch-file's candidate-list + first-success loop.
 func fetchBranchFile(ref, pathIn string) (content, used string, err error) {
+	return fetchBranchFileWithRepo("", ref, pathIn)
+}
+
+// fetchBranchFileWithRepo fetches path from the given repo (or auto-detected if empty).
+func fetchBranchFileWithRepo(repoSlug, ref, pathIn string) (content, used string, err error) {
+	if repoSlug == "" {
+		repoSlug = repo()
+	}
 	// Load project config for path remapping
 	projCfg, err := projectconfig.Load("")
 	if err != nil {
@@ -45,7 +53,7 @@ func fetchBranchFile(ref, pathIn string) (content, used string, err error) {
 
 		var lastErr error
 		for _, p := range candidates {
-			out, e := runGHQuiet("api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", repo(), p, ref),
+			out, e := runGHQuiet("api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", repoSlug, p, ref),
 				"-H", "Accept: application/vnd.github.raw")
 			if e == nil {
 				return string(out), p, nil
@@ -58,7 +66,7 @@ func fetchBranchFile(ref, pathIn string) (content, used string, err error) {
 
 		var lastErr error
 		for _, p := range candidates {
-			out, e := runGHQuiet("api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", repo(), p, ref),
+			out, e := runGHQuiet("api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", repoSlug, p, ref),
 				"-H", "Accept: application/vnd.github.raw")
 			if e == nil {
 				return string(out), p, nil

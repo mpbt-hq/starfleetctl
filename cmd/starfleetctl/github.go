@@ -159,16 +159,16 @@ func runGithubBackport(args []string) int {
 	}
 	verb := args[0]
 	rest := args[1:]
+	root, err := workspaceRoot()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "github:", err)
+		return 1
+	}
 	if verb == "commit" {
-		root, err := workspaceRoot()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "github:", err)
-			return 1
-		}
 		return ghpr.RunBackportCommit(root, rest)
 	}
 	if verb == "applies" {
-		return ghpr.RunBackportApplies(rest)
+		return ghpr.RunBackportApplies(root, rest)
 	}
 	fmt.Fprintf(os.Stderr, "github backport: unknown verb: %s\n\n", verb)
 	printGithubBackportHelp()
