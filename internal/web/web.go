@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -220,6 +221,20 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	// A nil slice encodes as `null`, not `[]`. The frontend then does
+	// `taskState.rows = rows` and later `rows.length`, which throws
+	// "Cannot read properties of null" on a desktop browser and "rows is
+	// null" on older WebKit — i.e. an empty result surfaces as a crash
+	// instead of an empty list. Normalise nil slices here, once, instead of
+	// guarding each handler: apiTasksOrphans already had a local nil guard
+	// and the other list endpoints did not.
+	// []byte is excluded on purpose: encoding/json renders it as a base64
+	// string, not an array, so it carries data rather than a list. Turning a
+	// nil []byte into an empty one would silently change `null` into `""`.
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice &&
+		rv.IsNil() && rv.Type().Elem().Kind() != reflect.Uint8 {
+		v = reflect.MakeSlice(rv.Type(), 0, 0).Interface()
+	}
 	_ = enc.Encode(v)
 }
 

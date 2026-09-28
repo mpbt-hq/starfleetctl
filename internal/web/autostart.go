@@ -8,7 +8,9 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,14 +43,35 @@ func DefaultAutostartConfig(root string) autostartConfig {
 	}
 }
 
-// IsWebServerRunning checks if a server is listening on the given address.
+// IsWebServerRunning reports whether the web server is actually serving.
+//
+// This used to be a bare TCP dial, which cannot tell a healthy server from a
+// hung one: a listening socket with a full accept queue still completes the
+// handshake in the kernel, even though the application never calls accept().
+// That blindness is what let the frontend stay dead for 18 hours while the
+// minute-cron called `web autostart` every minute and got "web server
+// running" back — the port was open, the process just could not accept.
+//
+// So probe the application, not the socket: one real HTTP request, a bounded
+// timeout, and require a 2xx. A hung server now fails the probe, which lets
+// Autostart notice and replace it.
 func IsWebServerRunning(addr string) bool {
-	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		// Redirects are irrelevant for a liveness probe and following them
+		// would only add round trips to a server that may be struggling.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Get("http://" + addr + "/")
 	if err != nil {
 		return false
 	}
-	conn.Close()
-	return true
+	defer resp.Body.Close()
+	// Drain a little so the connection can be reused/closed cleanly.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
 // IsPIDAlive checks if a process with the given PID exists.
