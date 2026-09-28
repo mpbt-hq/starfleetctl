@@ -83,13 +83,10 @@ func repo() string {
 // It loads the project config from the given root and returns the upstream_repo field.
 // If not configured, it falls back to the auto-detected repo via Repo().
 func UpstreamRepo(root string) string {
-	fmt.Fprintf(os.Stderr, "DEBUG UpstreamRepo: root=%s\n", root)
 	projCfg, err := projectconfig.Load(root)
 	if err == nil && projCfg.UpstreamRepo != "" {
-		fmt.Fprintf(os.Stderr, "DEBUG UpstreamRepo: found upstream_repo=%s\n", projCfg.UpstreamRepo)
 		return projCfg.UpstreamRepo
 	}
-	fmt.Fprintf(os.Stderr, "DEBUG UpstreamRepo: not found, falling back to Repo()\n")
 	// Fallback to auto-detected repo
 	r, _ := Repo()
 	return r

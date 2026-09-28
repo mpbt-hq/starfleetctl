@@ -24,7 +24,6 @@ const backportAppliesUsage = `usage: starfleetctl backport-applies <master-path>
 
 // RunBackportApplies implements `starfleetctl backport-applies <path> <ere> [release ...]`.
 func RunBackportApplies(root string, args []string) int {
-	fmt.Fprintf(os.Stderr, "DEBUG RunBackportApplies: root=%s\n", root)
 	if len(args) >= 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Print(backportAppliesUsage)
 		return 0
@@ -42,7 +41,6 @@ func RunBackportApplies(root string, args []string) int {
 		fmt.Fprintf(os.Stderr, "backport-applies: load project config: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "DEBUG RunBackportApplies: loaded config, upstream_repo=%s\n", projCfg.UpstreamRepo)
 	if len(rels) == 0 {
 		rels = projCfg.GetReleaseLines()
 	}
@@ -54,7 +52,6 @@ func RunBackportApplies(root string, args []string) int {
 	}
 
 	upstreamRepo := UpstreamRepo(root)
-	fmt.Fprintf(os.Stderr, "DEBUG RunBackportApplies: upstreamRepo=%s\n", upstreamRepo)
 
 	for _, r := range rels {
 		fmt.Printf("########## release/%s ##########\n", r)
