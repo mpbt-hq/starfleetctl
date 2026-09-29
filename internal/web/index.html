@@ -2617,12 +2617,9 @@ async function deleteReport(){
 }
 
 function showTaskFromReport(slug){
-  // Switch to tasks tab and try to highlight the task
+  // Switch to tasks tab and open the task detail modal
   show('tasks', true);
-  // Filter task list by slug
-  const input = document.getElementById('t_filter');
-  if (input) input.value = slug;
-  loadTasks();
+  taskDetail(slug);
 }
 
 async function reportSubmit(){
