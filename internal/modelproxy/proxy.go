@@ -13,6 +13,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,67 @@ import (
 
 	"github.com/metux/starfleetctl/internal/config"
 )
+
+// rotatingWriter implements io.Writer with time-based rotation (daily at midnight).
+// It writes to a log file and rotates when the day changes.
+type rotatingWriter struct {
+	mu         sync.Mutex
+	file       *os.File
+	path       string
+	currentDay int // day of year
+}
+
+func newRotatingWriter(path string) (*rotatingWriter, error) {
+	rw := &rotatingWriter{path: path}
+	if err := rw.rotate(); err != nil {
+		return nil, err
+	}
+	return rw, nil
+}
+
+func (rw *rotatingWriter) currentDayOfYear() int {
+	return time.Now().YearDay()
+}
+
+func (rw *rotatingWriter) rotate() error {
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	day := rw.currentDayOfYear()
+	if rw.file != nil && day == rw.currentDay {
+		return nil
+	}
+	if rw.file != nil {
+		_ = rw.file.Close()
+	}
+	f, err := os.OpenFile(rw.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	rw.file = f
+	rw.currentDay = day
+	return nil
+}
+
+func (rw *rotatingWriter) Write(p []byte) (int, error) {
+	if err := rw.rotate(); err != nil {
+		return 0, err
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	return rw.file.Write(p)
+}
+
+// close closes the underlying file.
+func (rw *rotatingWriter) Close() error {
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	if rw.file != nil {
+		err := rw.file.Close()
+		rw.file = nil
+		return err
+	}
+	return nil
+}
 
 // ModelInfo is one model entry served by GET /v1/models. The upstream fields
 // (id, object, created, owned_by) are taken verbatim from the backend's
@@ -97,9 +159,10 @@ type SessionAffinity struct {
 // Proxy is the local OpenAI-compatible model API server that fronts the
 // configured upstream providers.
 type Proxy struct {
-	root   string
-	cfg    *Config
-	logger *log.Logger
+	root      string
+	cfg       *Config
+	logger    *log.Logger
+	logWriter *rotatingWriter
 	// modelCache maps provider ID → set of model IDs, refreshed on demand.
 	cacheMu   sync.RWMutex
 	modelSets map[string]map[string]bool
@@ -129,9 +192,24 @@ type saturationState struct {
 
 // New builds a Proxy from a resolved config.
 func New(cfg *Config) *Proxy {
+	// Determine log file path: prefer environment variable (set by daemon), else config.
+	logPath := os.Getenv("MODEL_PROXY_LOG_FILE")
+	if logPath == "" {
+		logPath = cfg.LogFile
+	}
+	// Create rotating writer for the log file.
+	logWriter, err := newRotatingWriter(logPath)
+	if err != nil {
+		// Fallback to stderr if we can't open the log file.
+		log.Printf("[model-proxy] warning: cannot open log file %s: %v; falling back to stderr", logPath, err)
+	} else {
+		// Replace the standard logger's output with our rotating writer.
+		log.SetOutput(logWriter)
+	}
 	p := &Proxy{
 		cfg:             cfg,
 		logger:          log.Default(),
+		logWriter:       logWriter,
 		modelSets:       map[string]map[string]bool{},
 		modelInfo:       map[string][]ModelInfo{},
 		cacheAt:         map[string]time.Time{},
@@ -162,7 +240,22 @@ func (p *Proxy) Handler() http.Handler { return p.mux }
 
 // ServeHTTP implements http.Handler.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p.mux.ServeHTTP(w, r)
+	start := time.Now()
+	// Wrap response writer to capture status code.
+	rw := &responseRecorder{ResponseWriter: w}
+	p.mux.ServeHTTP(rw, r)
+	duration := time.Since(start)
+	p.logf("request: method=%s path=%s remote=%s status=%d latency=%s", r.Method, r.URL.Path, r.RemoteAddr, rw.status, duration)
+}
+
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseRecorder) WriteHeader(statusCode int) {
+	rw.status = statusCode
+	rw.ResponseWriter.WriteHeader(statusCode)
 }
 
 func (p *Proxy) logf(format string, args ...any) {

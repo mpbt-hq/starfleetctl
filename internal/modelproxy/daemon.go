@@ -79,22 +79,21 @@ func Daemonize(root string) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(cfg.LogFile), 0o755); err != nil {
 		return 0, err
 	}
-	logF, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
+	// Ensure the log file exists (the proxy will open it for writing)
+	if _, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err != nil {
 		return 0, err
 	}
-	defer logF.Close()
 
 	cmd := exec.Command(os.Args[0], "model-proxy", "start")
 	cmd.Dir = root
-	cmd.Stdout = logF
-	cmd.Stderr = logF
 	cmd.Stdin = nil
 	// Same PATH story as the web daemon: cron spawns us with a minimal PATH,
 	// and the proxy itself may exec things. Env refs that were not set in our
 	// environment (e.g. because cron started us) are back-filled from the
 	// user's opencode config, which is where the real API keys live.
 	cmd.Env = append(daemonEnv(cfg), "PATH="+daemonPath())
+	// Pass the log file path to the proxy so it can set up its own rotating logger.
+	cmd.Env = append(cmd.Env, "MODEL_PROXY_LOG_FILE="+cfg.LogFile)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 		Pgid:    0,
