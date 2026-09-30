@@ -18,6 +18,105 @@ Handwerkliche Grundregeln stehen in `AGENTS.md` im Repo. Dieser Skill ist die
 **Ablauf-Korrektur** dazu — also was in welcher Reihenfolge passieren muss, damit eine
 Änderung wirklich bei der Flotte ankommt.
 
+## Zwei Kopien — wer entwickelt, wer deployed
+
+Das ist der Standard-Mechanismus, **kein Sonderfall**: `starfleet-bootstrap` clont
+die Repo selbst nach `.starfleet-ai/src/starfleetctl` (Zeile 33 `SRC=`, Zeile 80
+`git clone`). Das ist der **Produktivpfad für Nutzer** und gehört so.
+
+Für **aktive Entwicklung** haben wir zusätzlich den mpbt-Clone
+`_WORK_/starfleetctl/sources/starfleetctl` — dort kann man sich frei austoben, ohne
+das Deployment zu stören.
+
+| | mpbt-Clone | Bootstrap-Clone |
+|---|---|---|
+| Pfad | `_WORK_/starfleetctl/sources/starfleetctl` | `.starfleet-ai/src/starfleetctl` |
+| Zweck | **Entwicklung**, Branches, Tests, austoben | **Produktiv-Deployment** |
+| Upstream | `mpbt-hq/starfleetctl` | `mpbt-hq/starfleetctl` |
+| Angefasst von | aktivem Entwickeln | niemandem — nur `git pull` durch Bootstrap |
+| Verwaltet von | mpbt | Bootstrap-Skript |
+
+**Faustregel: aktive Entwicklung nur im mpbt/workspace-Clone, Produktiv-Deployment
+über den Bootstrap-Clone.** Nie im Bootstrap-Clone editieren — dort liegen nur
+Artefakte, jeder Handgriff wird beim nächsten `git merge --ff-only` überschrieben.
+
+### Welche Datei ist die Originalquelle? — die Verwechslung, die wirklich passiert
+
+**Für Skills und Plugins ist die Originalquelle IMMER dieses Repo** unter
+`fragments/`. Der Workspace-Copy ist ein **generiertes Artefakt**. Nicht umgekehrt.
+
+| Wer | Originalquelle | Workspace-Copy |
+|---|---|---|
+| Skill `starfleet*` | `fragments/starfleet-skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` — **generiert, nicht editieren** |
+| opencode-Plugin | `fragments/opencode-plugins/<name>.ts` | `.opencode/plugins/<name>.ts` — **generiert, nicht editieren** |
+| xlibre-Skill (`backport`, `licensing`, …) | `.claude/skills/<name>/SKILL.md` im **mpbt-workspace** | — (handgepflegt, Bootstrap fasst sie nicht an) |
+
+Die Verwechslung ist natürlich, weil beides unter `.claude/skills/` liegt und 26 von
+26 Workspace-Skills nebeneinander im selben Verzeichnis stehen — die meisten davon
+sind handgepflegt, die sechs `starfleet*` sind generiert. Ein Diff-Zustand im
+Workspace-Copy sieht deshalb vollkommen normal aus.
+
+**Was beim Editieren im Workspace-Copy passiert:** `verifyStarfleetSkills()`
+(`internal/bootstrap/checks.go:520`) vergleicht byte-genau (`string(data) !=
+string(current)`, Zeile 555) gegen das, was der Binary ausliefern würde, meldet
+`stale: <name>/SKILL.md` (Zeile 568), und `fixStarfleetSkills()` (Zeile 573)
+**schreibt beim nächsten `./starfleet-bootstrap` die Fragment-Fassung zurück**. Kein
+Fehler, kein Abbruch — der Edit ist einfach weg. Es gab trotz geprüftem
+`git status` keinen Hinweis.
+
+Am 2026-09-30 ist das genau so gelaufen: eine Skill-Erweiterung committet und
+gepusht ins mpbt-workspace, „fertig" gemeldet, und beim nächsten Bootstrap
+(12:18) still überschrieben. Der Fix war trivial (`git show <commit>:<pfad>`),
+die verlorene Zeit nicht.
+
+**Vor dem Editieren eines `starfleet*`-Skills also prüfen:**
+
+```sh
+ls _WORK_/starfleetctl/sources/starfleetctl/fragments/starfleet-skills/
+# taucht der Name dort auf, ist das Fragment die Quelle — dort editieren.
+```
+
+Für `xlibre/*`-Skills gilt das Umgekehrte: die liegen bewusst nur im Workspace und
+gehören in `mtx/agent-config` committet. Beides ist richtig — entscheidend ist, dass
+man weiß, welcher der beiden Fälle vorliegt.
+
+### Kopplungskette — warum „Kopie manuell aktualisieren" nichts bringt
+
+Der entscheidende Punkt: **`.starfleet-ai/src/` ist der `go:embed`-Input des Binaries,
+nicht die Direktquelle des Plugins.** Das ausgelieferte Plugin kommt aus dem
+*eingebetteten* Stand des Builds.
+
+Das ist der Punkt, der am häufigsten Zeit kostet (2026-09-30 dreimal geschehen):
+
+```
+_mpbt-Clone__  commit + PUSH  ──►  origin/master
+                                        │
+                                        ▼  git fetch + merge --ff-only
+                              .starfleet-ai/src/starfleetctl/     (go:embed-INPUT)
+                                        │
+                                        ▼  go build  →  bettet Fragmente/Skills ein
+                              .starfleet-ai/bin/starfleetctl
+                                        │
+                                        ▼  "starfleetctl self-install"
+                              .opencode/plugins/*.ts               (was OpenCode lädt)
+```
+
+Der entscheidende Punkt: **`.starfleet-ai/src/` ist der `go:embed`-Input des Binaries,
+nicht die Direktquelle des Plugins.** Das ausgelieferte Plugin kommt aus dem
+*eingebetteten* Stand des Builds.
+
+Daraus folgt zwingend:
+
+- Wer `.starfleet-ai/src/` von Hand „hoizieht", erreicht **nichts** — das Binary
+  bettet weiter den alten Stand ein. Erst der **Neu-Bau** wirkt.
+- Wer die Datei nur manuell nach `.opencode/plugins/` kopiert, erreicht **nichts** —
+  der nächste `self-install` überschreibt sie aus dem alten Build.
+- Solange der Commit nicht auf `origin/master` ist, gibt es **nichts zum Ziehen**.
+  Deshalb scheitern alle Kopier-Versuche von Hand.
+
+Die korrekte Kette steht in Schritt 1–2; die Verifikation in Schritt 4 ist kein
+Opt-out, denn nur sie unterscheidet „kompiliert" von „angekommen".
+
 ## 0. Claim, bevor du anfasst
 
 Es darf **immer nur ein Schiff gleichzeitig** den starfleetctl-Source ändern.
@@ -123,6 +222,28 @@ git rev-parse HEAD origin/master   # muss identisch sein
 Erst wenn **alle vier** passen, darf „fertig" gemeldet werden. Wenn ein Schritt fehlt,
 ist der Task `in-progress`, nicht `done`.
 
+### Bei Fragmente-/Plugin-Änderungen zusätzlich: Inhalt vergleichen, nicht Version lesen
+
+Ein Versions-String ist **kein Nachweis**. Am 2026-09-30 meldete ein Schiff
+„v2.5.4 deployed, verifiziert über `bootstrap --fix`" — deployed war weiterhin 2.5.3,
+weil nur die Versionskonstante geprüft wurde und der Bootstrap-Output naturgemäß
+„up to date" sagt, sobald eine Datei existiert.
+
+```sh
+# Version UND Inhalt müssen übereinstimmen — mit beiden Kopien:
+grep -n "PLUGIN_VERSION = " _WORK_/starfleetctl/sources/starfleetctl/fragments/opencode-plugins/starfleet-dispatch.ts
+grep -n "PLUGIN_VERSION = " .starfleet-ai/src/starfleetctl/fragments/opencode-plugins/starfleet-dispatch.ts
+grep -n "PLUGIN_VERSION = " .opencode/plugins/starfleet-dispatch.ts   # <- was OpenCode wirklich lädt
+
+# Der eigentliche Beweis — Byte-Vergleich Source vs. ausgeliefert:
+diff -q _WORK_/starfleetctl/sources/starfleetctl/fragments/opencode-plugins/starfleet-dispatch.ts \
+        .opencode/plugins/starfleet-dispatch.ts
+# "identisch" — erst das ist deployed. Bei jeder anderen Abweichung: nicht fertig.
+
+# Und die Wirksamkeit, nicht nur die Ankunft: hat die neue Logik eine
+# beobachtbare Wirkung? Sonst ist "deployed" nur eine Behauptung über Bytes.
+```
+
 Zusätzlich: **Wenn `index.html` oder ein Fragment geändert wurde**, ist ein
 `./starfleet-bootstrap` nötig — der Bootstrap installiert sie. Ein reines `make all`
 ändert die ausgelieferte SPA **nicht**.
@@ -145,6 +266,24 @@ Merksatz: **`ninja` kompiliert, `ninja install` linkt und installiert. Beides z�
 Zweimal wurde „fertig" gemeldet, während die Änderung nur im Working Tree lag — einmal
 davon wurde schon gepusht und war damit ein kaputter Branch auf `origin`. Nach jeder
 Änderung `git status --short`. Wenn dort etwas steht, ist es nicht fertig.
+
+**Und: committet ist nicht gepusht.** Für Fragmente/Skills/Plugins ist der
+*gepushte* Stand auf `origin/master` die Voraussetzung — der Bootstrap zieht
+`.starfleet-ai/src/` per `git merge --ff-only origin/master`, also sieht er nur,
+was auf `origin` liegt. Eine committete, aber nicht gepuschte Änderung liefert
+dieselbe Fehlermeldung wie gar keine: deployed bleibt der alte Stand, ohne dass
+irgendwo ein Fehler sichtbar wird.
+
+Der 2.5.4-Fall vom 2026-09-30 lief drei Runden, bis das gefunden war: Hand-Kopie ins
+Deployment, dann `bootstrap --fix` — beides wirkungslos, weil der Commit nie
+erstellt war. Diagnose in einem Schritt:
+
+```sh
+cd _WORK_/starfleetctl/sources/starfleetctl
+git status --short fragments/                     # uncommittet?
+git show HEAD:fragments/opencode-plugins/starfleet-dispatch.ts | grep PLUGIN_VERSION
+git rev-parse HEAD origin/master                  # identisch? sonst fehlt der Push
+```
 
 ## Pitfall: Temp-Dateien im Source
 
