@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.3'
+const PLUGIN_VERSION = '2.5.4'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -54,6 +54,11 @@ function loadConfig(): void {
     LOG_COOLDOWN_MS = r.log_cooldown_ms || 10000
   }
 }
+
+let lastSessionErrorTime = 0;
+let sessionErrorBuffer: string[] = [];
+let sessionErrorTimer: any = null;
+const SESSION_ERROR_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 // Log-monitoring: detect errors that opencode doesn't surface via session.error
 // or retry status (e.g. ResourceExhausted stream errors). Reads the tail of
@@ -825,30 +830,50 @@ const logPollTimer = setInterval(async () => {
           bus({ cmd: 'health', state: 'working', error_tag: undefined, plugin_last_run: new Date().toISOString() })
         }
       }
-      if (event.type === 'session.error') {
-        // opencode's session.error often surfaces a generic "unknown error" for
-        // stream/API errors like ResourceExhausted — the real detail is only in
-        // the opencode.log (handled by LOG-MONITOR). Only dispatch if we have
-        // something real.
-        const err = event.properties?.error as any
-        const candidate =
-          err?.message || err?.code || err?.error ||
-          (typeof err === 'string' ? err : '') || ''
-        if (!candidate || candidate === 'unknown error') {
-          tickLog(`session.error: "${candidate}" — skipping, LOG-MONITOR will handle`)
-          return
-        }
+if (event.type === 'session.error') {
+         // opencode's session.error often surfaces a generic "unknown error" for
+         // stream/API errors like ResourceExhausted — the real detail is only in
+         // the opencode.log (handled by LOG-MONITOR). Only dispatch if we have
+         // something real.
+         const err = event.properties?.error as any
+         const candidate =
+           err?.message || err?.code || err?.error ||
+           (typeof err === 'string' ? err : '') || ''
+         if (!candidate || candidate === 'unknown error') {
+           tickLog(`session.error: "${candidate}" — skipping, LOG-MONITOR will handle`)
+           return
+         }
 
-        // Delegate policy to starfleetctl — plugin just executes.
-        const r = bus({
-          cmd: 'error-handle', detail: candidate, source: 'session.error',
-          ship: aid(), pid: process.pid, current_model: currentModel.model || '',
-          session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
-        })
-        if (r.ok && r.action) {
-          await executeAction(r.action, r.target_model || '', candidate, client, currentSessionID, hasSwitchedToFallback)
-        }
-      }
+         // Rate-limit/coalesce session.error reports: buffer unique errors and
+         // send a single aggregated report after a cooldown period of no new errors.
+         const now = Date.now()
+         if (!sessionErrorBuffer.includes(candidate)) {
+           sessionErrorBuffer.push(candidate)
+         }
+         // Reset the timer: if there is an existing timer, clear it and start a new one.
+         if (sessionErrorTimer !== null) {
+           clearTimeout(sessionErrorTimer)
+         }
+         sessionErrorTimer = setTimeout(() => {
+           // Time to send the aggregated report.
+           if (sessionErrorBuffer.length > 0) {
+             const aggregated = sessionErrorBuffer.join('; ')
+             bus({
+               cmd: 'error-handle',
+               detail: `Multiple session errors (count: ${sessionErrorBuffer.length}): ${aggregated}`,
+               source: 'session.error',
+               ship: aid(),
+               pid: process.pid,
+               current_model: currentModel.model || '',
+               session_id: currentSessionID,
+               has_fallback: hasSwitchedToFallback.v,
+             })
+             sessionErrorBuffer = []
+             sessionErrorTimer = null
+           }
+         }, SESSION_ERROR_COOLDOWN_MS)
+         return
+       }
     },
   }
 }
