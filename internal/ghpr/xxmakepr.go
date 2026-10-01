@@ -116,14 +116,10 @@ func RunXXMakePR(dir string, args []string) int {
 		fprintErr("xx-make-pr", err)
 		return 1
 	}
-
-	// Ensure tmp branch is cleaned up on any error path.
-	// We must switch back to incubatorBranch before deleting tmpBranch,
-	// since we cannot delete the currently checked-out branch.
-	defer func() {
-		_ = gitRun(dir, "checkout", incubatorBranch)
-		_ = gitRun(dir, "branch", "-D", tmpBranch)
-	}()
+	// NOTE: No cleanup of tmpBranch on error paths. This is intentional:
+	// a failed run leaves the tmp branch behind so the user can manually
+	// recover (e.g. resolve cherry-pick conflicts and continue). The tmp
+	// branch name is printed in the error message for easy identification.
 
 	for _, c := range commits {
 		if err := gitRun(dir, "cherry-pick", c); err != nil {
