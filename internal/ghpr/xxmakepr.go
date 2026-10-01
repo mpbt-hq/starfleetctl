@@ -101,6 +101,13 @@ func RunXXMakePR(dir string, args []string) int {
 	fmt.Printf("New PR branch: %s\n", branchName)
 	fmt.Printf("Commits: %s\n", strings.Join(commits, " "))
 
+	// Check for tmp-pr name collision: git treats branch names like a filesystem (D/F conflict).
+	// If a branch "foo" exists, you cannot create "foo/bar", and vice versa.
+	if hasBranchPrefixCollision(dir, tmpBranch) {
+		fmt.Fprintf(os.Stderr, "xx-make-pr: error: cannot create temporary branch '%s' due to git D/F conflict with existing branch(es). Remove conflicting branches first: git branch -D <branch>\n", tmpBranch)
+		return 1
+	}
+
 	if err := gitRun(dir, "fetch", upstreamRemote); err != nil {
 		fprintErr("xx-make-pr", err)
 		return 1
@@ -109,6 +116,14 @@ func RunXXMakePR(dir string, args []string) int {
 		fprintErr("xx-make-pr", err)
 		return 1
 	}
+
+	// Ensure tmp branch is cleaned up on any error path.
+	// We must switch back to incubatorBranch before deleting tmpBranch,
+	// since we cannot delete the currently checked-out branch.
+	defer func() {
+		_ = gitRun(dir, "checkout", incubatorBranch)
+		_ = gitRun(dir, "branch", "-D", tmpBranch)
+	}()
 
 	for _, c := range commits {
 		if err := gitRun(dir, "cherry-pick", c); err != nil {
@@ -365,4 +380,41 @@ func ghRetryCapture(max int, args ...string) (string, error) {
 		}
 		time.Sleep(time.Duration(tries*2) * time.Second)
 	}
+}
+
+// branchExists checks if a local branch with the given name exists in the repository.
+func branchExists(dir, branchName string) bool {
+	_, err := gitCapture(dir, "rev-parse", "--verify", "refs/heads/"+branchName)
+	return err == nil
+}
+
+// hasBranchPrefixCollision checks if there's a branch that would conflict with creating a new branch.
+// Git treats branch names like a filesystem (D/F conflict): if branch "foo" exists,
+// you cannot create "foo/bar", and if "foo/bar" exists, you cannot create "foo".
+func hasBranchPrefixCollision(dir, branchName string) bool {
+	// Check exact match
+	if branchExists(dir, branchName) {
+		return true
+	}
+	// Check if any existing branch has this as a prefix (e.g., branchName/xxx)
+	// or if branchName is a prefix of an existing branch (e.g., branchName is a prefix of existing/xxx)
+	output, err := gitCapture(dir, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	if err != nil {
+		return false
+	}
+	branches := strings.Split(strings.TrimSpace(output), "\n")
+	for _, b := range branches {
+		if b == "" {
+			continue
+		}
+		// Check if existing branch is our branchName/xxx (D/F conflict: branchName is a dir)
+		if strings.HasPrefix(b, branchName+"/") {
+			return true
+		}
+		// Check if our branchName is an existing branch/xxx (D/F conflict: existing is a dir)
+		if strings.HasPrefix(branchName, b+"/") {
+			return true
+		}
+	}
+	return false
 }
