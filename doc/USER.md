@@ -307,6 +307,50 @@ starfleetctl worktree list
 starfleetctl worktree remove <branch>
 ```
 
+**Branch created by `worktree add`:** the command creates a branch named `wt/<name>` (e.g., `wt/my-fix`) and checks it out in a new worktree under `_WORK_/worktrees/<repo>/<name>`. The `worktree remove <branch>` command removes both the worktree directory and the `wt/<name>` branch.
+
+### 4.11 Branch Namespaces
+
+Starfleetctl uses a branch-naming convention to keep different workflows isolated. The following prefixes are reserved:
+
+| Prefix | Created By | Purpose |
+|--------|------------|---------|
+| `wt/` | `starfleetctl worktree add` | Isolated worktrees for throwaway experiments |
+| `pr/` | `starfleetctl xx-make-pr` (auto-generated) | PR branches pushed to upstream |
+| `tmp-pr/` | `xx-make-pr` (staging) | Temporary staging branch for PR preparation |
+| `rfc/` | Manual / backport workflow | Long-lived incubator/backport branches |
+| `wip/` | Manual | Work-in-progress personal branches |
+| `fix/` | Manual | Bugfix branches |
+| `submit/` | Manual | Staging for upcoming PRs |
+
+**All other prefixes are free for personal use.**
+
+#### Temporary Staging Branch (`tmp-pr/`)
+
+`starfleetctl xx-make-pr` (invoked as `github pr make` or `xx-make-pr`) creates a temporary staging branch named `tmp-<branchName>` where `<branchName>` is the target PR branch name (e.g., `tmp-pr/master-fix_2026-01-02_15-04-05`).
+
+- The staging branch is checked out from the upstream base branch.
+- Commits are cherry-picked onto it, then the branch is renamed via `git branch -M` to the final PR branch name (`pr/...`) before pushing.
+- Only the final `pr/...` branch is pushed; the `tmp-pr/...` staging branch is **never pushed**.
+- On any error (e.g., cherry-pick failure), the `tmp-pr/...` branch is **left behind intentionally** so the user can manually resolve conflicts and continue. There is **no automatic cleanup** — this is intentional so a failed run can be manually recovered.
+
+#### Git D/F Conflict Warning
+
+Git treats branch names like a filesystem (D/F conflict): if a branch named `foo` exists, you cannot create `foo/bar`, and vice versa. This affects the `tmp-pr/` staging branch:
+
+```sh
+# If you create a branch named exactly 'tmp-pr':
+git branch tmp-pr
+
+# Then run xx-make-pr (which tries to create 'tmp-pr/...'):
+starfleetctl xx-make-pr --branch pr/master-feature_x
+# fatal: cannot lock ref 'refs/heads/tmp-pr/master-foo_x': 'refs/heads/tmp-pr' exists
+```
+
+**Avoid creating a branch named exactly `tmp-pr`** (or any prefix that would conflict with your PR branch name). If you encounter the error, remove the conflicting branch: `git branch -D tmp-pr`.
+
+Note: `tmp-pr-1`, `tmp-pr-2`, etc. do **not** conflict — only an exact prefix match (`tmp-pr` or `tmp-pr/...`) triggers the D/F conflict.
+
 ---
 
 ## 5. Subcommand Reference

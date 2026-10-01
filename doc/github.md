@@ -140,6 +140,34 @@ starfleetctl xx-make-pr --branch fix-my-bug HEAD~2..HEAD
 
 Uses `git config make-pr.*` keys for upstream configuration.
 
+#### Staging Branch (`tmp-<branchName>`)
+
+`xx-make-pr` creates a temporary staging branch named `tmp-<branchName>` where `<branchName>` is the PR branch name (auto-generated as `pr/<upstreamBranch>-<slug>_<timestamp>` or user-provided via `--branch`).
+
+1. **Staging branch creation**: `tmp-<branchName>` is checked out from the upstream base branch.
+2. **Cherry-pick**: Commits are cherry-picked onto the staging branch.
+3. **Rename**: The staging branch is renamed to the final PR branch name (`pr/...`) via `git branch -M` before pushing.
+4. **Push**: Only the final `pr/...` branch is pushed; the `tmp-<branchName>` staging branch is **never pushed**.
+
+**No automatic cleanup on error**: If a step fails (e.g., cherry-pick conflict), the `tmp-...` branch is **left behind intentionally** so you can manually resolve conflicts and continue. There is **no automatic cleanup** — this is intentional for manual recovery.
+
+#### Git D/F Conflict Warning
+
+Git treats branch names like a filesystem (D/F conflict): if a branch named `foo` exists, you cannot create `foo/bar`, and vice versa. This affects the `tmp-<branchName>` staging branch:
+
+```sh
+# If you create a branch named exactly 'tmp-pr':
+git branch tmp-pr
+
+# Then run xx-make-pr (which tries to create 'tmp-pr/...'):
+starfleetctl xx-make-pr --branch pr/master-feature_x
+# fatal: cannot lock ref 'refs/heads/tmp-pr/master-foo_x': 'refs/heads/tmp-pr' exists
+```
+
+**Avoid creating a branch named exactly `tmp-pr`** (or any prefix that would conflict with your PR branch name). If you encounter the error, remove the conflicting branch: `git branch -D tmp-pr`.
+
+Note: `tmp-pr-1`, `tmp-pr-2`, etc. do **not** conflict — only an exact prefix match (`tmp-pr` or `tmp-pr/...`) triggers the D/F conflict.
+
 ## Utilities
 
 ### json
