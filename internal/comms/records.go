@@ -43,6 +43,7 @@ type StatusRecord struct {
 	Model           string `json:"model,omitempty"`
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
+	PluginVersion   string `json:"plugin_version,omitempty"`
 
 	// Toast fields (from plugin commands, shown in web UI).
 	ToastVariant string `json:"toast_variant,omitempty"`

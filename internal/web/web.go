@@ -1607,30 +1607,32 @@ func (s *Server) apiShips(w http.ResponseWriter, r *http.Request) {
 	}
 	records := s.bus.AllStatusRecords()
 	type shipInfo struct {
-		Name     string `json:"name"`
-		State    string `json:"state"`
-		PID      int    `json:"pid,omitempty"`
-		Handle   string `json:"handle,omitempty"`
-		Note     string `json:"note,omitempty"`
-		Model    string `json:"model,omitempty"`
-		Server   string `json:"server,omitempty"`
-		Task     string `json:"task,omitempty"`
-		Progress int    `json:"progress,omitempty"`
-		Blocker  string `json:"blocker,omitempty"`
+		Name          string `json:"name"`
+		State         string `json:"state"`
+		PID           int    `json:"pid,omitempty"`
+		Handle        string `json:"handle,omitempty"`
+		Note          string `json:"note,omitempty"`
+		Model         string `json:"model,omitempty"`
+		Server        string `json:"server,omitempty"`
+		Task          string `json:"task,omitempty"`
+		Progress      int    `json:"progress,omitempty"`
+		Blocker       string `json:"blocker,omitempty"`
+		PluginVersion string `json:"plugin_version,omitempty"`
 	}
 	var ships []shipInfo
 	for _, rec := range records {
 		info := shipInfo{
-			Name:     rec.Agent,
-			State:    rec.State,
-			PID:      rec.PID,
-			Handle:   rec.Handle,
-			Note:     rec.Note,
-			Model:    rec.Model,
-			Server:   rec.Server,
-			Task:     rec.Task,
-			Progress: rec.Progress,
-			Blocker:  rec.Blocker,
+			Name:          rec.Agent,
+			State:         rec.State,
+			PID:           rec.PID,
+			Handle:        rec.Handle,
+			Note:          rec.Note,
+			Model:         rec.Model,
+			Server:        rec.Server,
+			Task:          rec.Task,
+			Progress:      rec.Progress,
+			Blocker:       rec.Blocker,
+			PluginVersion: rec.PluginVersion,
 		}
 		ships = append(ships, info)
 	}

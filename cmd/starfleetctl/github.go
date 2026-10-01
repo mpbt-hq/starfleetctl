@@ -65,7 +65,7 @@ func runGithubPR(args []string) int {
 	rest := args[1:]
 
 	// Verbs that operate on the workspace need the resolved root.
-	rootVerbs := map[string]bool{"checkout": true, "claim": true, "mk-agent-clone": true}
+	rootVerbs := map[string]bool{"checkout": true, "claim": true, "mk-agent-clone": true, "merge": true}
 	if rootVerbs[verb] {
 		root, err := workspaceRoot()
 		if err != nil {
@@ -79,6 +79,8 @@ func runGithubPR(args []string) int {
 			return prclaim.Run(root, rest)
 		case "mk-agent-clone":
 			return ghpr.RunMkAgentClone(root, rest)
+		case "merge":
+			return ghpr.RunPRMerge(root, rest)
 		}
 	}
 
@@ -229,6 +231,7 @@ Verbs:
   amend-push        amend and force-push a PR branch
   checkout          checkout a PR into a ship clone (needs workspace)
   claim             claim/unclaim a PR (needs workspace)
+  merge             merge a PR with rebase (needs workspace, --rebase only)
   show-branch-file  show a file from a branch (deprecated, use file-on-branch)
   show-conflict     show merge conflict details for a PR
   file-on-branch    fetch a file from a remote branch
