@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -21,6 +22,34 @@ import (
 	"github.com/metux/starfleetctl/internal/opencode"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
+
+// isShipRunning checks if a ship is actually running by reading its PID file
+// and verifying the process exists. Returns true if the ship is running.
+func isShipRunning(root, shipID string) bool {
+	pidPath := PidPath(root, shipID)
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return false // No PID file = not running
+	}
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return false // Invalid PID file
+	}
+	// Check if process exists by sending signal 0
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Unix, FindProcess always succeeds, so we need to send signal 0
+	err = process.Signal(syscall.Signal(0))
+	if err != nil {
+		// Process is dead, clean up stale PID file
+		_ = os.Remove(pidPath)
+		return false
+	}
+	return true
+}
 
 // LaunchVars holds the computed values from a `session run` invocation.
 type LaunchVars struct {
@@ -237,9 +266,11 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 		}
 	}
 
-	// Check if already running — pipe path is deterministic
+	// Pipe path is deterministic (needed for LaunchVars)
 	pipePath := PipePath(root, shipID)
-	if _, err := os.Stat(pipePath); err == nil {
+
+	// Check if already running — check PID liveness, not just FIFO existence
+	if isShipRunning(root, shipID) {
 		fmt.Fprintf(os.Stderr, "session run: session '%s' already running — attach with: starfleetctl session attach %s (or use --name for a second one)\n", shipID, shipID)
 		return nil, nil
 	}
@@ -536,14 +567,14 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		}
 	}
 
-	// Refuse if a terminal with this ship ID is already running.
-	pipePath := PipePath(root, name)
-	if _, err := os.Stat(pipePath); err == nil {
+	// Refuse if a terminal with this ship ID is already running (check PID liveness).
+	if isShipRunning(root, name) {
 		return "", fmt.Errorf("'%s' already running — stop it first (session stop %s)", name, name)
 	}
 
 	// State files under .starfleet-ai/var/ships/
 	logPath := LogPath(root, name)
+	pipePath := PipePath(root, name)
 
 	// Build the opencode ship command, mirroring run-opencode.ship.
 	flagship := shipnames.FlagshipName(root)
@@ -699,6 +730,10 @@ func StopShip(root string, id string) error {
 		}
 		// Name still reserved but pipe gone: ship crashed or already stopped.
 		// OnExit will handle heartbeat/name based on marker.
+	}
+	// Clean up stale PID file if process is dead
+	if !isShipRunning(root, id) {
+		_ = os.Remove(PidPath(root, id))
 	}
 	return nil
 }
@@ -964,6 +999,13 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 		return fmt.Errorf("spawn termctl-run: %w", err)
 	}
 
+	// Write PID file for liveness checking
+	pidPath := PidPath(root, vars.ShipID)
+	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0o644); err != nil {
+		logFile.Close()
+		return fmt.Errorf("write pid file: %w", err)
+	}
+
 	// Don't wait - the child process runs independently.
 	// The log file will be closed when the child exits (we don't close it here).
 
@@ -1060,6 +1102,15 @@ func RunTermctl(root string, args []string) int {
 	pipePath := args[1]
 	shellCmd := args[2]
 
+	// Write PID file for liveness checking (this process's PID)
+	wroot := os.Getenv("MPBT_WORKSPACE_ROOT")
+	if wroot != "" {
+		pidPath := PidPath(wroot, shipID)
+		if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "termctl-run: write pid file: %v\n", err)
+		}
+	}
+
 	// Detached terminals must survive the parent's shell exiting. Ignore
 	// SIGHUP so a closing controlling terminal doesn't kill us.
 	signal.Ignore(syscall.SIGHUP)
@@ -1118,6 +1169,10 @@ func RunTermctl(root string, args []string) int {
 				}
 			}
 			_ = os.Remove(pipePath)
+			// Also remove PID file
+			if wroot != "" {
+				_ = os.Remove(PidPath(wroot, shipID))
+			}
 		}),
 	)
 	if err != nil {

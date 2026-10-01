@@ -18,6 +18,12 @@ func PipePath(root, shipID string) string {
 	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".pipe")
 }
 
+// PidPath returns the PID file path for a ship.
+// The path is deterministic: .starfleet-ai/var/ships/<shipID>.pid
+func PidPath(root, shipID string) string {
+	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".pid")
+}
+
 // LogPath returns the canonical log path for a ship session.
 func LogPath(root, shipID string) string {
 	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".log")
