@@ -107,6 +107,16 @@ cleared:
    after each major step. A stale `idle`/`working` status misleads the fleet and the flagship.
    Use a timer (`starfleetctl timer set --every 5m --type ship --text "comms touch"`) as a
    self-reminder if needed. The board must reflect reality at all times.
+- **Verify recommendations before sharing.** Any recommendation that affects more than one
+   ship — a command, branch pattern, build rule, or convention — must be **tested once on a
+   concrete example** before being shared. For commits: `git log -1 --format=%B <commit>`, for
+   builds: build once and read the output, for branch patterns: `git rev-list --count <base>..HEAD`.
+   This is not distrust of recommendations; it limits the **blast radius** of an error. An
+   unverified recommendation spreads faster than its correction. On 2026-10-02, a recommendation
+   to add our own Signed-off-by was given to three ships without verification — three commits
+   were wrong, and one ship caught it only by chance. The check takes seconds.
 
-Task handling specifics (lifecycle, reports, capture-first) live in the **`starfleet-tasks`**
-skill; load it when you take on or work a task.
+- **Backport source discipline.** When backporting from xorg/main, always use the PR's `mergeCommit` SHA (from `gh pr view <pr> --json mergeCommit`) as the cherry-pick source, not the branch tip. The branch tip will produce `bad object` errors. Verify with `git merge-base --is-ancestor <sha> origin/master` (using a fresh `origin/master` in the clone) to ensure the commit is on master and carries the original author's Signed-off-by.
+
+ Task handling specifics (lifecycle, reports, capture-first) live in the **`starfleet-tasks`**
+ skill; load it when you take on or work a task.
