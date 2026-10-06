@@ -26,7 +26,7 @@ const (
 // runAutoscale implements `session autoscale <command> [args…]`.
 func runAutoscale(root string, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, "session autoscale: need <command> (status|need)\n")
+		fmt.Fprint(os.Stderr, "session autoscale: need <command> (status|need|respawn)\n")
 		return 2
 	}
 	switch args[0] {
@@ -42,16 +42,24 @@ Commands:
   need <N> --reason "<text>" [--release <rel>] [--client claude|opencode]
            [--max <cap>] [--supervisor <name>]
            [--permission-mode <mode>] [--dry-run]
-      Spawn up to <cap> minus the current non-stale fleet size, capped at
-      what's needed after subtracting currently-idle ships.  Always prints
-      a decision and appends it to the audit log; an actual spawn also
-      posts a loud comms broadcast.
+       Spawn up to <cap> minus the current non-stale fleet size, capped at
+       what's needed after subtracting currently-idle ships.  Always prints
+       a decision and appends it to the audit log; an actual spawn also
+       posts a loud comms broadcast.
+
+  respawn [--dry-run]
+       Respawn any declarative standing ships that have died (crashed/stopped
+       without stop-requested marker). Checks stop-requested marker to avoid
+       restarting intentionally stopped ships. Uses fleet.yaml ships config
+       for model, client, and launch-type.
 `)
 		return 0
 	case "status":
 		return runAutoscaleStatus(root, args[1:])
 	case "need":
 		return runAutoscaleNeed(root, args[1:])
+	case "respawn":
+		return runAutoscaleRespawn(root, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "session autoscale: unknown command '%s'\n", args[0])
 		return 2
@@ -244,8 +252,128 @@ func spawnShips(root string, spawn int, release, client, supervisor, permissionM
 	return spawned
 }
 
-// fleetCounts reads the status directory and returns (total, idle) counts of
-// non-stale entries.
+// runAutoscaleRespawn implements `session autoscale respawn [--dry-run]`.
+// Respawns any declarative standing ships that have died (crashed/stopped
+// without stop-requested marker). Checks stop-requested marker to avoid
+// restarting intentionally stopped ships. Uses fleet.yaml ships config
+// for model, client, and launch-type.
+func runAutoscaleRespawn(root string, args []string) int {
+	dry := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run":
+			dry = true
+		case "-h", "--help":
+			fmt.Print(`session autoscale respawn [--dry-run]
+
+Respawn any declarative standing ships that have died (crashed/stopped
+without stop-requested marker). Checks stop-requested marker to avoid
+restarting intentionally stopped ships. Uses fleet.yaml ships config
+for model, client, and launch-type.
+
+Options:
+  --dry-run    Show what would be respawned without actually doing it.
+`)
+			return 0
+		default:
+			fmt.Fprintf(os.Stderr, "session autoscale respawn: unknown option '%s'\n", args[i])
+			return 2
+		}
+	}
+
+	// Load fleet config to get declarative ships
+	cfg, err := config.Load("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "respawn: load config: %v\n", err)
+		return 1
+	}
+	if len(cfg.Fleet.Ships) == 0 {
+		fmt.Println("respawn: no declarative ships configured in fleet.yaml")
+		return 0
+	}
+
+	// Build map of live ships from status files
+	liveShips := make(map[string]bool)
+	entries, err := os.ReadDir(filepath.Join(config.BusDir(""), "status"))
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".tsv") {
+				continue
+			}
+			ship := strings.TrimSuffix(e.Name(), ".tsv")
+			data, err := os.ReadFile(filepath.Join(config.BusDir(""), "status", e.Name()))
+			if err != nil {
+				continue
+			}
+			fields := strings.SplitN(strings.TrimSpace(string(data)), "\t", 8)
+			if len(fields) >= 8 {
+				epoch, err := strconv.ParseInt(fields[0], 10, 64)
+				if err == nil && time.Now().Unix()-epoch < busTTL {
+					liveShips[ship] = true
+				}
+			}
+		}
+	}
+
+	// Check each declarative ship
+	var toRespawn []config.ShipConfig
+	for _, ship := range cfg.Fleet.Ships {
+		// Skip terminal/console launch types - they can't be auto-respawned
+		if ship.LaunchType == "terminal" || ship.LaunchType == "console" {
+			fmt.Printf("respawn: skipping %s (launch_type=%s not supported for auto-respawn)\n", ship.Name, ship.LaunchType)
+			continue
+		}
+
+		// Check if ship is alive
+		if liveShips[ship.Name] {
+			continue // ship is alive
+		}
+
+		// Check stop-requested marker - if present, ship was intentionally stopped
+		if isStopRequested("", ship.Name) {
+			fmt.Printf("respawn: skipping %s (intentional stop requested)\n", ship.Name)
+			continue
+		}
+
+		// Ship is dead and not intentionally stopped - needs respawn
+		toRespawn = append(toRespawn, ship)
+		fmt.Printf("respawn: ship %s is dead, will respawn\n", ship.Name)
+	}
+
+	if len(toRespawn) == 0 {
+		fmt.Println("respawn: no ships need respawning")
+		return 0
+	}
+
+	fmt.Printf("respawn: will respawn %d ship(s): %s\n", len(toRespawn), shipNames(toRespawn))
+
+	if dry {
+		fmt.Println("respawn: --dry-run, not actually respawning")
+		return 0
+	}
+
+	// Respawn each dead ship
+	for _, ship := range toRespawn {
+		if err := doSpawn("", []string{"master", "--client", ship.Client, "--name", ship.Name}); err != nil {
+			fmt.Fprintf(os.Stderr, "respawn: failed to respawn %s: %v\n", ship.Name, err)
+			continue
+		}
+		fmt.Printf("respawn: respawned %s\n", ship.Name)
+	}
+
+	return 0
+}
+
+// shipNames returns a comma-separated list of ship names.
+func shipNames(ships []config.ShipConfig) string {
+	names := make([]string, len(ships))
+	for i, s := range ships {
+		names[i] = s.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// appendAudit appends a line to the autoscale audit log, creating the log
 func fleetCounts(root string) (total, idle int) {
 	statDir := filepath.Join(config.BusDir(root), "status")
 	entries, err := os.ReadDir(statDir)

@@ -956,7 +956,17 @@ function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g, c=>({'&':'&amp;
 // filename is escaped exactly once (escaping up front would double-escape it).
 const ATTACH_RE = /\[\[attach:([^:\]]+):(\d+):([0-9a-f]{64})\]\]/g;
 const ATTACH_TEXTY = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xml|ini|cfg|conf)$/i;
-function escAttr(s){ return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// URL regex for linkification (http/https)
+const URL_RE = /\bhttps?:\/\/[^\s<>"'(){}|\\^`\[\]]+/g;
+function escAttr(s){ return esc(s).replace(/"/g,'"').replace(/'/g,'''); }
+function linkifyURLs(text){
+  if (!text) return '';
+  return text.replace(URL_RE, (url) => {
+    // Escape the URL for safe use in href attribute
+    const safeUrl = escAttr(url);
+    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
+  });
+}
 function linkifyAttach(rawText, msgid){
   if (!rawText) return '';
   let out = '', last = 0, m;
@@ -973,7 +983,9 @@ function linkifyAttach(rawText, msgid){
       out += `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px"`
            + ` onclick="viewAttachment(${escAttr(JSON.stringify(stored))})">Anzeigen</button>`;
   }
-  return out + esc(rawText.slice(last));
+  out += esc(rawText.slice(last));
+  // Also linkify URLs in the resulting text
+  return linkifyURLs(out);
 }
 function age(s){ s=Number(s)||0;
   if (s>=3600) return Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m';

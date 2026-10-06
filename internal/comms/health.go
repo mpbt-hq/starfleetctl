@@ -148,7 +148,7 @@ func (b *Bus) checkHealth(jsonOut bool, stalePlugin, staleModel int) (int, error
 		if jerr := json.Unmarshal(data, &rec); jerr != nil {
 			continue
 		}
-		out = append(out, evalHealth(ship, rec, stalePlugin, staleModel))
+		out = append(out, EvalHealth(ship, rec, stalePlugin, staleModel))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ship < out[j].Ship })
 
@@ -176,7 +176,7 @@ func (b *Bus) checkHealth(jsonOut bool, stalePlugin, staleModel int) (int, error
 	return unhealthy, nil
 }
 
-func evalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) healthEntry {
+func EvalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) healthEntry {
 	now := time.Now()
 	var pluginAge, modelAge int64
 	if rec.PluginLastRun != "" {

@@ -233,9 +233,15 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	if notifyFlagship {
 		// Tell the CONTROL agent (flagship) only, never broadcast — a broadcast
 		// would land in the errored ship's own inbox and restart the self-loop.
-		_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
-			fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
-		}, false, "", "", "control")
+		// Don't notify flagship if we ARE the flagship — prevents self-loop
+		flagship := shipnames.FlagshipName(b.Root)
+		if shipID != flagship {
+			_ = b.DoPost(flagship, []string{
+				fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
+			}, false, "", "", "control")
+		} else {
+			b.LogEvent("plugin", fmt.Sprintf("error: flagship %s suppressed self-notify [%s]", shipID, tag))
+		}
 	}
 
 	return nil

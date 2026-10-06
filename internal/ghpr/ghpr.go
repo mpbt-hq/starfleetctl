@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -47,8 +48,10 @@ func validPR(pr string) (string, error) {
 	return strings.TrimPrefix(pr, "#"), nil
 }
 
-// Repo resolves the GitHub repo slug from $STARFLEET_GITHUB_REPO, (deprecated) $REPO,
-// or auto-detects via `gh repo view --json nameWithOwner` as fallback.
+// Repo resolves the GitHub repo slug from project config's upstream_repo,
+// $STARFLEET_GITHUB_REPO, (deprecated) $REPO, or auto-detects via
+// `gh repo view --json nameWithOwner` as fallback.
+// It walks up from cwd to find .starfleet-ai/conf/project.yaml for upstream_repo.
 func Repo() (string, error) {
 	if r := os.Getenv("STARFLEET_GITHUB_REPO"); r != "" {
 		return r, nil
@@ -56,6 +59,22 @@ func Repo() (string, error) {
 	if r := os.Getenv("REPO"); r != "" {
 		return r, nil
 	}
+
+	// Try to find project config by walking up from cwd
+	cwd, err := os.Getwd()
+	if err == nil {
+		for dir := cwd; dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+			configPath := filepath.Join(dir, ".starfleet-ai", "conf", "project.yaml")
+			if _, err := os.Stat(configPath); err == nil {
+				projCfg, err := projectconfig.Load(dir)
+				if err == nil {
+					return projCfg.UpstreamRepo, nil
+				}
+				break // found config but no upstream_repo, don't walk further
+			}
+		}
+	}
+
 	// Auto-detect via gh CLI
 	out, err := runGHQuiet("repo", "view", "--json", "nameWithOwner")
 	if err == nil {
@@ -66,7 +85,7 @@ func Repo() (string, error) {
 			return result.NameWithOwner, nil
 		}
 	}
-	return "", fmt.Errorf("no GitHub repo: set $STARFLEET_GITHUB_REPO or (deprecated) $REPO")
+	return "", fmt.Errorf("no GitHub repo: set $STARFLEET_GITHUB_REPO or (deprecated) $REPO (tried: project config upstream_repo, env vars, gh repo auto-detect)")
 }
 
 // repo is the CLI convenience helper: calls Repo() and exits on failure.
@@ -160,12 +179,17 @@ func RunPRMerge(root string, args []string) int {
 		}
 	}
 
-	// Get repository
-	repoSlug, err := Repo()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "merge: %v\n", err)
-		return 1
+	// Get repository — consult project config (upstream_repo) first, then env/auto-detect
+	repoSlug := UpstreamRepo(root)
+	if repoSlug == "" {
+		var err error
+		repoSlug, err = Repo()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "merge: %v (tried upstream config, then env/auto-detect)\n", err)
+			return 1
+		}
 	}
+	fmt.Fprintf(os.Stderr, "merge: using repo %s\n", repoSlug)
 
 	// Get PR details to check base branch
 	prInfo, err := getPRInfo(repoSlug, prNum)

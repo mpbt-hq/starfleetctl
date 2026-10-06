@@ -185,6 +185,22 @@ type ModelProxyProvider struct {
 	Capabilities []string `yaml:"capabilities"`
 }
 
+// ShipConfig defines a declarative standing ship that should always be running.
+type ShipConfig struct {
+	// Name is the ship identifier (must be unique).
+	Name string `yaml:"name"`
+	// Model is the model identifier (e.g., "nim-primary" for meta-model).
+	Model string `yaml:"model"`
+	// Client is the client to use (e.g., "opencode").
+	Client string `yaml:"client"`
+	// Class is the ship class (e.g., "worker", "supervisor").
+	Class string `yaml:"class"`
+	// LaunchType must be "background" for standing ships (no console).
+	LaunchType string `yaml:"launch_type"`
+	// Respawn enables automatic restart on crash (default: true for standing ships).
+	Respawn bool `yaml:"respawn"`
+}
+
 // FleetConfig holds fleet-wide identity settings.
 type FleetConfig struct {
 	// Flagship is the canonical name of the flagship/control session.
@@ -193,6 +209,8 @@ type FleetConfig struct {
 	// ShipNames is the worker ship-name pool. When empty, the compiled-in
 	// Star Trek ship roster is used. The flagship name is always excluded.
 	ShipNames []string `yaml:"ship_names"`
+	// Ships defines declarative standing ships that should always be running.
+	Ships []ShipConfig `yaml:"ships"`
 	// ProviderMode controls which providers are included in generated
 	// per-ship opencode configs. "all" (default) copies user providers
 	// from ~/.config/opencode/opencode.json AND injects model-proxy

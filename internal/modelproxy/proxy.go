@@ -1138,7 +1138,7 @@ func (p *Proxy) routeModel(model string) (*Provider, string) {
 			return prov, model
 		}
 	}
-	// Fallback: "<providerID>/<model>" prefix routing.
+	// Fallback: "<provider>/<model>" prefix routing.
 	if idx := strings.IndexByte(model, '/'); idx > 0 {
 		prefix := model[:idx]
 		for i := range p.cfg.Providers {
@@ -1149,6 +1149,23 @@ func (p *Proxy) routeModel(model string) (*Provider, string) {
 		}
 	}
 	return nil, model
+}
+
+// getModelContextWindow returns the context window for a given model ID.
+// It searches through all providers' model catalogs to find the model's context window.
+func (p *Proxy) getModelContextWindow(modelID string) int {
+	for _, prov := range p.cfg.Providers {
+		if prov.isVirtual() {
+			continue
+		}
+		infos := p.providerModelInfo(prov)
+		for _, m := range infos {
+			if m.ID == modelID {
+				return m.ContextWindow
+			}
+		}
+	}
+	return 0
 }
 
 // handleShips serves GET /v1/ships — the per-ship usage/status statistics.
@@ -1194,6 +1211,7 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 	var prov *Provider
 	var upstreamModel string
 	var effectiveLimit int
+	var actualModelContextWindow int
 
 	if strat != nil {
 		// Route through strategy
@@ -1204,7 +1222,21 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 		prov = chosenProv
 		upstreamModel = chosenModel
-		effectiveLimit = strat.EffectiveLimit
+		// Get the actual model's context window from the config strategy
+		var modelInfo *config.ModelProxyStrategyModel
+		for _, s := range p.cfg.Strategies {
+			if s.ID == strat.Name {
+				modelInfo = s.GetModelByID(chosenModel)
+				break
+			}
+		}
+		if modelInfo != nil {
+			actualModelContextWindow = modelInfo.ContextWindow
+		}
+		effectiveLimit = actualModelContextWindow
+		if effectiveLimit == 0 {
+			effectiveLimit = strat.EffectiveLimit
+		}
 	} else {
 		// Direct provider routing — real models are never intercepted by a
 		// strategy; their context limit comes from the upstream catalog.
@@ -1213,9 +1245,12 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, fmt.Sprintf("model %q not served by any configured model-proxy provider", req.Model))
 			return
 		}
+		// For direct routing, get the model's context window from provider info
+		actualModelContextWindow = p.getModelContextWindow(upstreamModel)
+		effectiveLimit = actualModelContextWindow
 	}
 
-	// Set X-Context-Limit header for opencode
+	// Set X-Context-Limit header for opencode (use actual model's context window)
 	if effectiveLimit > 0 {
 		w.Header().Set("X-Context-Limit", fmt.Sprintf("%d", effectiveLimit))
 	}
@@ -1227,6 +1262,7 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 // forwardChat performs the (possibly retried) upstream chat request and
 // records the outcome in the per-ship tracker.
 func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string, effectiveLimit int) {
+	p.logf("route: ship=%s requested=%s model=%s provider=%s", ship, requestedModel, model, prov.ID)
 	client := &http.Client{Timeout: 0} // streaming needs no client-side deadline; server read deadline governs
 	attempts := prov.MaxRetries + 1
 

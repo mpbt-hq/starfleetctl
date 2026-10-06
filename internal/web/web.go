@@ -19,6 +19,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
@@ -2492,45 +2493,85 @@ func (s *Server) apiSessions(w http.ResponseWriter, r *http.Request) {
 
 // apiSessionDispatch handles GET /api/sessions/<id> — the session's meta plus
 // a chronological transcript window (?limit=, ?offset=).
+// Also handles DELETE /api/sessions/<id> to delete a session via opencode session delete.
 func (s *Server) apiSessionDispatch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErr(w, 405, "method not allowed")
-		return
-	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
 	if id == "" {
 		writeErr(w, 400, "need session id")
 		return
 	}
-	q := r.URL.Query()
-	limit, offset := 0, 0
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
+
+	switch r.Method {
+	case http.MethodGet:
+		q := r.URL.Query()
+		limit, offset := 0, 0
+		if v := q.Get("limit"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				writeErr(w, 400, "limit must be a number")
+				return
+			}
+			limit = n
+		}
+		if v := q.Get("offset"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				writeErr(w, 400, "offset must be a number")
+				return
+			}
+			offset = n
+		}
+		tr, err := ocsessions.SessionTranscript(id, limit, offset)
 		if err != nil {
-			writeErr(w, 400, "limit must be a number")
+			code := 500
+			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "invalid") {
+				code = 404
+			}
+			writeErr(w, code, err.Error())
 			return
 		}
-		limit = n
-	}
-	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
+		tr.Session.Running = s.liveShip(tr.Session.Title)
+		writeJSON(w, tr)
+
+	case http.MethodDelete:
+		// Check if session exists
+		tr, err := ocsessions.SessionTranscript(id, 1, 0)
 		if err != nil {
-			writeErr(w, 400, "offset must be a number")
+			code := 500
+			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "invalid") {
+				code = 404
+			}
+			writeErr(w, code, err.Error())
 			return
 		}
-		offset = n
-	}
-	tr, err := ocsessions.SessionTranscript(id, limit, offset)
-	if err != nil {
-		code := 500
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "invalid") {
-			code = 404
+
+		// Check if session is running (PID liveness check)
+		// Check if session is associated with a live ship process
+		sess := tr.Session
+		if sess.Running {
+			writeErr(w, 409, fmt.Sprintf("session %s is running (pid check passed), cannot delete", id))
+			return
 		}
-		writeErr(w, code, err.Error())
-		return
+
+		// Call opencode session delete
+		cmd := exec.Command("opencode", "session", "delete", id)
+		cmd.Stderr = os.Stderr
+		output, err := cmd.Output()
+		if err != nil {
+			// Check if session not found
+			if strings.Contains(err.Error(), "not found") || strings.Contains(string(output), "not found") {
+				writeErr(w, 404, "session not found")
+			} else {
+				writeErr(w, 500, fmt.Sprintf("failed to delete session: %v, output: %s", err, string(output)))
+			}
+			return
+		}
+
+		writeJSON(w, map[string]any{"ok": true, "deleted": id})
+
+	default:
+		writeErr(w, 405, "method not allowed")
 	}
-	tr.Session.Running = s.liveShip(tr.Session.Title)
-	writeJSON(w, tr)
 }
 
 // apiOCLog handles GET /api/oclog?n= — the last n lines (default 200) of the

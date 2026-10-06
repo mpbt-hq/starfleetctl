@@ -47,9 +47,9 @@ func RunMkAgentClone(root string, args []string) int {
 }
 
 // EnsureAgentClone creates or refreshes the agent clone for release rel
-// (agent name "name"), landing it on the shared rfc/backport-<rel>
-// incubator branch, and returns its path. Mirrors scripts/mk-agent-clone
-// exactly, including its progress output — which callers redirect
+// (agent name "name"), landing it on a task-specific rfc/backport-<rel>-<name>
+// branch, and returns its path. Mirrors scripts/mk-agent-clone exactly,
+// including its progress output — which callers redirect
 // differently (unredirected for the standalone CLI and backport-commit,
 // `>&2`-style for pr-checkout), so it's routed through the given stdout
 // writer rather than hardcoded to os.Stdout.
@@ -62,7 +62,8 @@ func EnsureAgentClone(root, rel, name string, stdout io.Writer) (string, error) 
 
 	ref := projCfg.RefDir(root, rel)
 	dest := projCfg.AgentDir(root, rel, name)
-	incubator := "rfc/backport-" + rel
+	taskBranch := "rfc/backport-" + rel + "-" + name
+	upstreamBranch := "origin/release/" + rel
 
 	if fi, err := os.Stat(filepath.Join(ref, ".git")); err != nil || !fi.IsDir() {
 		return "", fmt.Errorf("reference clone not found: %s", ref)
@@ -72,7 +73,6 @@ func EnsureAgentClone(root, rel, name string, stdout io.Writer) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	upBranch := gitConfigGet(ref, "make-pr.upstream-branch")
 
 	if fi, err := os.Stat(filepath.Join(dest, ".git")); err == nil && fi.IsDir() {
 		fmt.Fprintf(stdout, "mk-agent-clone: agent clone exists; fetching -> %s\n", dest)
@@ -109,21 +109,42 @@ func EnsureAgentClone(root, rel, name string, stdout io.Writer) (string, error) 
 		return "", err
 	}
 
-	// land on the shared incubator branch (track the remote one if it
-	// exists, otherwise fork it from the upstream release branch)
-	if err := gitRunSilent(dest, "ls-remote", "--exit-code", "--heads", "origin", incubator); err == nil {
-		if err := gitRunTo(dest, stdout, "checkout", "-B", incubator, "origin/"+incubator); err != nil {
-			return "", err
+	// Check if we're already on the correct task branch
+	currentBranch, _ := gitCaptureQuiet(dest, "rev-parse", "--abbrev-ref", "HEAD")
+	if strings.TrimSpace(currentBranch) == taskBranch {
+		// Verify no foreign commits compared to release branch
+		foreignCount, _ := gitCaptureQuiet(dest, "rev-list", "--count", upstreamBranch+"..HEAD")
+		foreignCountInt := 0
+		fmt.Sscanf(strings.TrimSpace(foreignCount), "%d", &foreignCountInt)
+		if foreignCountInt > 0 {
+			return "", fmt.Errorf("agent clone has %d foreign commits over %s", foreignCountInt, upstreamBranch)
 		}
-	} else {
-		if err := gitRunTo(dest, stdout, "checkout", "-B", incubator, "origin/"+upBranch); err != nil {
-			return "", err
-		}
+		fmt.Fprintf(stdout, "mk-agent-clone: agent clone exists; ready -> %s\n", dest)
+		fmt.Fprintf(stdout, "  branch: %s   upstream: %s\n", taskBranch, upstreamBranch)
+		fmt.Fprintf(stdout, "  objects shared from: %s\n", ref)
+		return dest, nil
 	}
 
-	upRemote := gitConfigGet(dest, "make-pr.upstream-remote")
+	// Create or reset the task branch from the release branch
+	if err := gitRunTo(dest, stdout, "checkout", "-B", taskBranch, upstreamBranch); err != nil {
+		return "", err
+	}
+
+	// Set the upstream for the task branch
+	if err := gitRunSilent(dest, "branch", "--set-upstream-to=origin/"+rel, taskBranch); err != nil {
+		return "", err
+	}
+
+	// Verify no foreign commits
+	foreignCount, _ := gitCaptureQuiet(dest, "rev-list", "--count", upstreamBranch+"..HEAD")
+	foreignCountInt := 0
+	fmt.Sscanf(strings.TrimSpace(foreignCount), "%d", &foreignCountInt)
+	if foreignCountInt > 0 {
+		return "", fmt.Errorf("agent clone has %d foreign commits over %s", foreignCountInt, upstreamBranch)
+	}
+
 	fmt.Fprintf(stdout, "mk-agent-clone: ready -> %s\n", dest)
-	fmt.Fprintf(stdout, "  branch: %s   upstream: %s/%s\n", incubator, upRemote, upBranch)
+	fmt.Fprintf(stdout, "  branch: %s   upstream: %s\n", taskBranch, upstreamBranch)
 	fmt.Fprintf(stdout, "  objects shared from: %s\n", ref)
 	return dest, nil
 }

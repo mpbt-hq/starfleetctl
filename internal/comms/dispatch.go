@@ -342,9 +342,15 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 	}
 
 	if notifyFlagship {
-		_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
-			fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, req.Detail),
-		}, false, "", "", "control")
+		// Don't notify flagship if we ARE the flagship — prevents self-loop
+		flagship := shipnames.FlagshipName(b.Root)
+		if shipID != flagship {
+			_ = b.DoPost(flagship, []string{
+				fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, req.Detail),
+			}, false, "", "", "control")
+		} else {
+			b.LogEvent("plugin", fmt.Sprintf("error: flagship %s suppressed self-notify [%s]", shipID, tag))
+		}
 	}
 	return dispatchResponse{OK: true, Tag: tag}
 }
@@ -391,9 +397,15 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	}
 
 	if notifyFlagship {
-		_ = b.DoPost(shipnames.FlagshipName(b.Root), []string{
-			fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
-		}, false, "", "", "control")
+		// Don't notify flagship if we ARE the flagship — prevents self-loop
+		flagship := shipnames.FlagshipName(b.Root)
+		if shipID != flagship {
+			_ = b.DoPost(flagship, []string{
+				fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
+			}, false, "", "", "control")
+		} else {
+			b.LogEvent("plugin", fmt.Sprintf("error-handle: flagship %s suppressed self-notify [%s]", shipID, tag))
+		}
 	}
 
 	// 4. Policy decision.
