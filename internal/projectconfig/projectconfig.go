@@ -6,6 +6,7 @@ package projectconfig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -187,7 +188,14 @@ func (c *ProjectConfig) GetRemapCandidates(pathIn string) []string {
 	candidates := []string{pathIn}
 	prefix := c.PathRemapping.Prefix
 	if len(pathIn) >= len(prefix) && pathIn[:len(prefix)] == prefix {
-		candidates = append(candidates, pathIn[len(prefix):])
+		stripped := pathIn[len(prefix):]
+		candidates = append(candidates, stripped)
+		// Also try stripping the first directory component. This covers the
+		// Xext/xkeyboard/xkb.c -> xkb/xkb.c reorg where a single prefix strip
+		// only yields xkeyboard/xkb.c, which does not exist on the older branches.
+		if idx := strings.IndexByte(stripped, '/'); idx != -1 {
+			candidates = append(candidates, stripped[idx+1:])
+		}
 	} else {
 		candidates = append(candidates, prefix+pathIn)
 	}
