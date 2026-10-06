@@ -56,6 +56,11 @@ type PathRemapping struct {
 
 	// Enabled whether path remapping is enabled
 	Enabled bool `yaml:"enabled"`
+
+	// Renames maps specific path prefixes to their target prefixes
+	// (e.g., "Xext/xkeyboard/" -> "xkb/") for directory renames
+	// that simple prefix stripping cannot handle.
+	Renames map[string]string `yaml:"renames"`
 }
 
 // SolutionConfig holds solution-specific configuration
@@ -83,6 +88,7 @@ func DefaultProjectConfig() *ProjectConfig {
 		PathRemapping: PathRemapping{
 			Prefix:  "Xext/",
 			Enabled: false,
+			Renames: map[string]string{},
 		},
 		ReleaseLines: []string{},
 		Solutions:    map[string]SolutionConfig{},
@@ -190,6 +196,14 @@ func (c *ProjectConfig) GetRemapCandidates(pathIn string) []string {
 		candidates = append(candidates, pathIn[len(prefix):])
 	} else {
 		candidates = append(candidates, prefix+pathIn)
+	}
+	// Also apply explicit renames (e.g., Xext/xkeyboard/ -> xkb/)
+	for from, to := range c.PathRemapping.Renames {
+		if len(pathIn) >= len(from) && pathIn[:len(from)] == from {
+			candidates = append(candidates, to+pathIn[len(from):])
+		} else if len(pathIn) >= len(to) && pathIn[:len(to)] == to {
+			candidates = append(candidates, from+pathIn[len(to):])
+		}
 	}
 	return candidates
 }
