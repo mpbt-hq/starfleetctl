@@ -959,20 +959,26 @@ const ATTACH_TEXTY = /\.(txt|log|json|yaml|yml|md|go|c|h|py|sh|js|ts|html|css|xm
 // URL regex for linkification (http/https)
 const URL_RE = /\bhttps?:\/\/[^\s<>"'(){}|\\^`\[\]]+/g;
 function escAttr(s){ return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Linkifies raw (unescaped) text: every piece it emits is escaped exactly once,
+// so the URLs come out single-escaped in both the href and the link text.
 function linkifyURLs(text){
   if (!text) return '';
-  return text.replace(URL_RE, (url) => {
-    // Escape the URL for safe use in href attribute
-    const safeUrl = escAttr(url);
-    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
-  });
+  let out = '', last = 0, m;
+  URL_RE.lastIndex = 0;
+  while ((m = URL_RE.exec(text)) !== null) {
+    out += esc(text.slice(last, m.index));
+    const url = m[0];
+    out += `<a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
+    last = URL_RE.lastIndex;
+  }
+  return out + esc(text.slice(last));
 }
 function linkifyAttach(rawText, msgid){
   if (!rawText) return '';
   let out = '', last = 0, m;
   ATTACH_RE.lastIndex = 0;
   while ((m = ATTACH_RE.exec(rawText)) !== null) {
-    out += esc(rawText.slice(last, m.index));
+    out += linkifyURLs(rawText.slice(last, m.index));
     last = m.index + m[0].length;
     const name = m[1], bytes = m[2];
     if (!msgid) { out += esc(m[0]); continue; }
@@ -983,9 +989,7 @@ function linkifyAttach(rawText, msgid){
       out += `<button class="sec" style="margin-left:8px;padding:4px 10px;font-size:12px"`
            + ` onclick="viewAttachment(${escAttr(JSON.stringify(stored))})">Anzeigen</button>`;
   }
-  out += esc(rawText.slice(last));
-  // Also linkify URLs in the resulting text
-  return linkifyURLs(out);
+  return out + linkifyURLs(rawText.slice(last));
 }
 function age(s){ s=Number(s)||0;
   if (s>=3600) return Math.floor(s/3600)+'h'+Math.floor((s%3600)/60)+'m';
