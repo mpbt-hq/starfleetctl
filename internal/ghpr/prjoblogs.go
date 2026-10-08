@@ -190,7 +190,7 @@ func resolveJobIDs(repo, pr string, wantAll bool) ([]string, error) {
 
 // fetchJobLog downloads a job's log via the GitHub REST API.
 func fetchJobLog(repo, jobID, outpath string) error {
-	raw, err := runGH("api", "--follow-redirects", "repos/"+repo+"/actions/jobs/"+jobID+"/logs")
+	raw, err := runGH("api", "repos/"+repo+"/actions/jobs/"+jobID+"/logs")
 	if err != nil {
 		return fmt.Errorf("API error: %v", err)
 	}
