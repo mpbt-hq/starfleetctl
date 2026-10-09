@@ -312,10 +312,7 @@ im Source.
 Report mit `starfleetctl reports submit ... --task-ref <slug>`, Body mit den Messwerten
 statt Behauptungen. Antwort auf comms an den Absender **und** an McKinley (die
 web-console), wenn die Web-Oberfläche betroffen ist.
-test
-test append
 
-### ABSCHNITT 5 (starfleetctl-dev) — aus ee3a6b7271
 ## 5. Modell-Proxy niemals direkt killen — immer starfleetctl model-proxy restart
 
 Der **model-proxy** ist ein eigener Daemon (Port 8443), der vom starfleetctl verwaltet wird.
@@ -367,7 +364,6 @@ curl -s http://127.0.0.1:8443/v1/health
 
 Die Ausgabe muss `served: true` und `status: ok` für alle Provider zeigen.
 
-### ABSCHNITT 6 (starfleetctl-dev) — aus d2e1a5d92d
 ## 6. Workflow für Entwicklung und Deployment (zwei Clones korrekt handhaben)
 
 Beim Arbeiten am starfleetctl-Source muss man stets zwischen zwei verschiedenen Clones unterscheiden:

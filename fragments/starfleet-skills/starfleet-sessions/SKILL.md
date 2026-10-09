@@ -97,7 +97,6 @@ starfleetctl genesis-init .
 
 Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` anytime to update.
 
-### starfleet-sessions-Regel — aus 36380eff06
 ## Wichtige Erinnerung: Modell-Proxy niemals direkt killen
 
 Bei Arbeiten am starfleetctl model-proxy NIEMALS den Prozess direkt mit `kill`, `pkill` oder `systemctl stop` beenden.

@@ -1174,8 +1174,18 @@ const gitignoreClaudeHooksEntry = "/.claude/hooks/"
 const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persisted to git)
 /comms/
 /logs/
-/var/
-/term-pipes/
+/var/comms/
+/var/logs/
+/var/term-pipes/
+/var/ships/
+/var/log/
+/var/files/
+/var/sop.d/
+/var/timers/
+/var/tmp/
+/var/model-health.json
+/var/model-proxy.pid
+/var/web.pid
 
 # Runtime state files
 /DASHBOARD.md
@@ -1206,19 +1216,22 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 
 func verifyStarfleetAIGitignore(b *Bootstrap) (bool, string) {
 	path := filepath.Join(b.Root, ".starfleet-ai", ".gitignore")
-	data, err := os.ReadFile(path)
+	_, err := os.Stat(path)
 	if err != nil {
 		return false, "missing .starfleet-ai/.gitignore"
 	}
-	if string(data) == starfleetAIGitignoreContent {
-		return true, "present, up to date"
-	}
-	return false, "content differs from template"
+	return true, "present"
 }
 
 func fixStarfleetAIGitignore(b *Bootstrap) error {
 	path := filepath.Join(b.Root, ".starfleet-ai", ".gitignore")
-	return os.WriteFile(path, []byte(starfleetAIGitignoreContent), 0o644)
+	_, err := os.Stat(path)
+	if err != nil {
+		// File doesn't exist, create it from template
+		return os.WriteFile(path, []byte(starfleetAIGitignoreContent), 0o644)
+	}
+	// File exists, leave it alone
+	return nil
 }
 
 func verifyGitignoreClaudeHooks(b *Bootstrap) (bool, string) {
