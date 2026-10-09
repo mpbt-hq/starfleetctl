@@ -1189,6 +1189,7 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 
 # Runtime state files
 /DASHBOARD.md
+-/var/DASHBOARD.md
 
 # Built binary (built from src/starfleetctl/)
 /bin/starfleetctl
