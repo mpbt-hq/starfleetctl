@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+	"time"
 )
 
 // Config holds all starfleetctl configuration.
@@ -164,15 +165,18 @@ type ModelProxyProvider struct {
 	// with keepalive comments after the retry budget is exhausted and a
 	// saturation error is received. Default 15000 (15s). 0 disables keepalive.
 	HoldTimeoutMS int `yaml:"hold_timeout_ms"`
+	// Timeout is the per-request HTTP timeout for upstream calls (streaming & non-streaming).
+	// If set, overrides the default (30s non-streaming, 15s for opencode-zen streaming).
+	Timeout time.Duration `yaml:"timeout"`
 	// Type selects the provider class, which drives upstream-specific
 	// request handling (headers, body tweaks, ...). Empty = generic
 	// OpenAI-compatible. Known types:
 	//   - "opencode-zen": OpenCode Zen — gates anonymous/free capacity by
 	//     validating the User-Agent, so the proxy stamps an opencode UA.
 	Type string `yaml:"type"`
-	// UserAgent, when set, is sent as the upstream request's User-Agent
-	// header (overrides the type's default). Mainly relevant for
-	// "opencode-zen", whose free tier requires an "opencode/<version>" UA.
+	// UserAgent overrides the upstream request's User-Agent header
+	// (type-dependent; mainly for "opencode-zen", whose free tier requires an
+	// "opencode/<version>" UA.
 	UserAgent string `yaml:"user_agent"`
 	// Capabilities forces capability flags (toolcall, temperature,
 	// reasoning, attachment, ...) onto EVERY model this provider serves, in

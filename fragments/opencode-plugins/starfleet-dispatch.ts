@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.4'
+const PLUGIN_VERSION = '2.5.5'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -689,10 +689,15 @@ const logPollTimer = setInterval(async () => {
     if (msgs.length === 0) return
     const injectable: any[] = []
     for (const msg of msgs) {
-      submitted.add(msg.id)
-      appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || 'ship'}: ${msg.text.slice(0, 80)}`)
+      appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${msg.text.slice(0, 80)}`)
       // handleMessage: type=command → execute, type=ship/user/control → false (inject)
-      if (await handleMessage(msg, client, currentSessionID)) continue
+      if (await handleMessage(msg, client, currentSessionID)) {
+        submitted.add(msg.id)
+        continue
+      }
+      // Not a command - mark as seen and prepare for injection
+      submitted.add(msg.id)
+      bus({ cmd: "seen_mark", id: msg.id })
       injectable.push(msg)
     }
     // Inject remaining directives mid-turn as synthetic prompt

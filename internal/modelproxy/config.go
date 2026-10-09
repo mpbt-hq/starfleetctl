@@ -109,6 +109,9 @@ type Provider struct {
 	MaxRetries    int
 	RetryDelayMS  int
 	HoldTimeoutMS int // SSE keepalive hold timeout (ms) after retry budget exhausted; 0 = disabled
+	// Timeout is the per-request HTTP timeout for upstream calls (streaming & non-streaming).
+	// If set, overrides the default (30s non-streaming, 15s for opencode-zen streaming).
+	Timeout time.Duration
 	// Type is the provider class, driving upstream-specific request
 	// handling. Empty = generic OpenAI-compatible. See
 	// Provider.applyUpstreamHeaders for the known types.
@@ -243,7 +246,7 @@ func Load(root string) (*Config, error) {
 			return nil, fmt.Errorf("model-proxy: provider %q has no base_url", prov.ID)
 		}
 		prov.MaxRetries = p.MaxRetries
-		if prov.MaxRetries <= 0 {
+		if prov.MaxRetries < 0 {
 			prov.MaxRetries = 3
 		}
 		prov.RetryDelayMS = p.RetryDelayMS
@@ -253,6 +256,14 @@ func Load(root string) (*Config, error) {
 		prov.HoldTimeoutMS = p.HoldTimeoutMS
 		if prov.HoldTimeoutMS < 0 {
 			prov.HoldTimeoutMS = 15000 // 15s default hold timeout
+		}
+		prov.Timeout = p.Timeout
+		if prov.Timeout <= 0 {
+			if prov.Type == "opencode-zen" {
+				prov.Timeout = 15 * time.Second
+			} else {
+				prov.Timeout = 30 * time.Second
+			}
 		}
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)
 		prov.Capabilities = append([]string(nil), p.Capabilities...) // copy, never alias the yaml slice
@@ -286,7 +297,7 @@ func Load(root string) (*Config, error) {
 			return nil, fmt.Errorf("model-proxy: direct provider %q has no base_url", prov.ID)
 		}
 		prov.MaxRetries = p.MaxRetries
-		if prov.MaxRetries <= 0 {
+		if prov.MaxRetries < 0 {
 			prov.MaxRetries = 3
 		}
 		prov.RetryDelayMS = p.RetryDelayMS
@@ -296,6 +307,14 @@ func Load(root string) (*Config, error) {
 		prov.HoldTimeoutMS = p.HoldTimeoutMS
 		if prov.HoldTimeoutMS < 0 {
 			prov.HoldTimeoutMS = 15000
+		}
+		prov.Timeout = p.Timeout
+		if prov.Timeout <= 0 {
+			if prov.Type == "opencode-zen" {
+				prov.Timeout = 15 * time.Second
+			} else {
+				prov.Timeout = 30 * time.Second
+			}
 		}
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)
 		prov.Capabilities = append([]string(nil), p.Capabilities...)

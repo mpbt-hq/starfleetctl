@@ -1263,7 +1263,16 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 // records the outcome in the per-ship tracker.
 func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string, effectiveLimit int) {
 	p.logf("route: ship=%s requested=%s model=%s provider=%s", ship, requestedModel, model, prov.ID)
-	client := &http.Client{Timeout: 0} // streaming needs no client-side deadline; server read deadline governs
+	// Streaming client timeout: use provider timeout (from Config) with sensible defaults
+	streamTimeout := time.Duration(prov.Timeout)
+	if streamTimeout <= 0 {
+		if prov.Type == "opencode-zen" {
+			streamTimeout = 15 * time.Second
+		} else {
+			streamTimeout = 30 * time.Second
+		}
+	}
+	client := &http.Client{Timeout: streamTimeout}
 	attempts := prov.MaxRetries + 1
 
 	buildReq := func() (*http.Request, io.Reader, error) {
