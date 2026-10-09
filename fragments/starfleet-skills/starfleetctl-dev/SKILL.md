@@ -312,3 +312,245 @@ im Source.
 Report mit `starfleetctl reports submit ... --task-ref <slug>`, Body mit den Messwerten
 statt Behauptungen. Antwort auf comms an den Absender **und** an McKinley (die
 web-console), wenn die Web-Oberfläche betroffen ist.
+test
+test append
+
+### ABSCHNITT 5 (starfleetctl-dev) — aus ee3a6b7271
+## 5. Modell-Proxy niemals direkt killen — immer starfleetctl model-proxy restart
+
+Der **model-proxy** ist ein eigener Daemon (Port 8443), der vom starfleetctl verwaltet wird.
+Er läuft unabhängig vom Web-Daemon und dem Timer-Daemon.
+
+**Niemals den model-proxy-Prozess direkt mit `kill`, `pkill` oder `systemctl stop` beenden.**
+Immer den offiziellen Befehl verwenden:
+
+```sh
+./.starfleet-ai/bin/starfleetctl model-proxy restart   # Neustart
+./.starfleet-ai/bin/starfleetctl model-proxy stop      # Stop
+./.starfleet-ai/bin/starfleetctl model-proxy start     # Start
+```
+
+**Warum:**
+- Der model-proxy wird vom starfleetctl System verwaltet (gleiche Mechanik wie web/timer Daemons)
+- Direktes Killen kann zu inkonsistenten Zuständen führen (verbliebene Sockets, nicht freigegebene Ressourcen, hängende Verbindungen)
+- Der offizielle restart Befehl stellt sicher, dass alle Ressourcen korrekt freigegeben und neu initialisiert werden
+- Er lädt die aktuelle Config (`.starfleet-ai/conf/model-proxy.yaml`) und wendet sie sauber an
+
+**Wann model-proxy restart nötig ist:**
+- Nach Änderungen an `.starfleet-ai/conf/model-proxy.yaml` (Timeouts, Provider, Strategies, etc.)
+- Nach Änderungen am model-proxy Go-Code, die einen Neustart erfordern
+- Wenn der Proxy unansprechbar wird (selten, aber möglich)
+
+**Reihenfolge bei Änderungen am model-proxy:**
+```sh
+cd _WORK_/starfleetctl/sources/starfleetctl
+make all                    # baut Binary neu
+./starfleet-bootstrap       # deployed Binary + installiert Fragmente
+./.starfleet-ai/bin/starfleetctl model-proxy restart  # startet Proxy mit neuer Config/Code neu
+```
+
+**Wichtig:** Ein reines `model-proxy restart` ohne `make all` + `bootstrap` reicht **nur** für reine Config-Änderungen (yaml). Bei Go-Code-Änderungen muss das Binary neu gebaut und deployed werden.
+
+**Falsch:** `kill -9 <pid>`, `pkill -f model-proxy`, `systemctl stop model-proxy` — diese Umgehungen führen zu inkonsistenten Zuständen und werden vom System nicht als ordentlicher Restart registriert.
+
+**Verifikation nach model-proxy restart:**
+```sh
+# 1. Läuft der Daemon mit dem neuen Binary?
+ps -eo pid,etimes,cmd | grep 'model-proxy' | grep -v grep
+
+# 2. Ist die Config geladen?
+curl -s http://127.0.0.1:8443/v1/health
+
+# 3. Sind die Modelle verfügbar?
+./.starfleet-ai/bin/starfleetctl model-proxy check
+```
+
+Die Ausgabe muss `served: true` und `status: ok` für alle Provider zeigen.
+
+### ABSCHNITT 6 (starfleetctl-dev) — aus d2e1a5d92d
+## 6. Workflow für Entwicklung und Deployment (zwei Clones korrekt handhaben)
+
+Beim Arbeiten am starfleetctl-Source muss man stets zwischen zwei verschiedenen Clones unterscheiden:
+
+### Die beiden Clone erklärt
+
+**1. Entwicklungs-Clone (mpbt-managed)**
+- Pfad: `_WORK_/starfleetctl/sources/starfleetctl`
+- Branch: `master` (mit gesetztem `make-pr`-Config)
+- Zweck: **Entwicklung** - hier wird aktiv entwickelt, gebrancht, getestet und committet
+- Upstream: `mpbt-hq/starfleetctl`
+- Wer hier arbeitet: Aktiver Entwickler
+- Wichtig: Alles, was hier editiert wird, bleibt beim nächsten Bootstrap erhalten
+
+**2. Deployment-Clone (Bootstrap-Clone)**
+- Pfad: `.starfleet-ai/src/starfleetctl`
+- Branch: `master` (gemergt aus origin/master via Bootstrap)
+- Zweck: **Produktiv-Deployment** - hier wird **nicht** entwickelt
+- Upstream: `mpbt-hq/starfleetctl` (via Bootstrap)
+- Wer hier arbeitet: Niemand direkt - nur der Bootstrap-Prozess
+- Wichtig: Alles, was hier editiert wird, geht beim nächsten Bootstrap verloren!
+
+### Der korrekte Entwicklungs-Workflow
+
+**Schritt 0: Vor Beginn der Arbeit**
+```bash
+# Prüfen, wer den Source belegt hat (nur ein Schiff gleichzeitig!)
+./.starfleet-ai/bin/starfleetctl comms board
+./.starfleet-ai/bin/starfleetctl comms msgs --json | tail -20
+
+# Vorher per comms ankündigen, welchen Bereich du anfasst
+./.starfleet-ai/bin/starfleetctl comms tell <other-ship> "Ich arbeite jetzt an starfleetctl-Source"
+```
+
+**Schritt 1: Entwicklung im mpbt-Clone**
+```bash
+# Entwickeln im mpbt-Clone (dies ist die Richtige Stelle!)
+cd _WORK_/starfleetctl/sources/starfleetctl
+
+# Entwickeln, testen, commits machen
+# ... deine Änderungen hier ...
+
+# Regelmäßig commits machen (lokal im mpbt-Clone)
+git add <geänderte-dateien>
+git commit -m "deine aussagekräftige commit-nachricht"
+
+# Regelmäßig pushen zu origin/master (sobald ein logischer Arbeitsschritt fertig ist)
+git push origin master
+```
+
+**Schritt 2: Vor jedem Bootstrap: Alles committed und gepusht**
+```bash
+# Bevor du den Bootstrap ausführst, MUSST du alles committed und gepusht haben!
+cd _WORK_/starfleetctl/sources/starfleetctl
+git status --short          # muss leer sein (keine unstaged changes)
+git diff --cached --name-only # darf nur deine committed changes zeigen
+git log --oneline -1        # sollte deine letzte commit-nachricht zeigen
+git rev-list --count origin/master..HEAD  # muss 0 sein (keine unpushed commits)
+```
+
+**Schritt 3: Deployment via Bootstrap**
+```bash
+# Jetzt den Bootstrap ausführen - dieser kopiert den korrekten Stand
+cd /home/nekrad/src/xorg/mpbt-workspace
+./starfleet-bootstrap
+```
+
+**Schritt 4: Daemons neu starten (in korrekter Reihenfolge)**
+```sh
+# Nach jedem Binary-Wechsel laufen die Daemons mit dem alten Binary!
+./.starfleet-ai/bin/starfleetctl web restart        # Port 8080
+./.starfleet-ai/bin/starfleetctl timer worker restart
+./.starfleet-ai/bin/starfleetctl model-proxy restart   # nur bei reinen Go-Änderungen
+```
+
+**Schritt 5: Verifizieren - nie „fertig" melden ohne Messung**
+```bash
+# 1. Ist das neue Binary wirklich das deployte?
+stat -c '%y %n' .starfleet-ai/bin/starfleetctl
+stat -c '%y %n' _WORK_/starfleetctl/sources/starfleetctl/starfleetctl
+#    Binary-Zeitstempel muss >= Quell-Zeitstempel sein.
+
+# 2. Läuft der Daemon mit dem neuen Binary?
+ps -eo pid,etimes,cmd | grep 'starfleetctl web start' | grep -v grep
+
+# 3. Funktioniert die Änderung am laufenden System?
+curl -s -D- -o /dev/null http://127.0.0.1:8080/ | head -20
+#    Bei einem Frontend-Fix: die ausgelieferte Datei prüfen, nicht nur den Source.
+curl -s http://127.0.0.1:8080/ | grep -c '<die neue zeile>'
+
+# 4. Ist alles committed und gepusht?
+cd _WORK_/starfleetctl/sources/starfleetctl
+git status --short          # muss leer sein
+git log --oneline -1
+git log -1 --format='%(trailers:key=Signed-off-by,valueonly)'
+git rev-parse HEAD origin/master   # muss identisch sein
+```
+
+Erst wenn **alle fünf** Schritte erfolgreich abgeschlossen sind, darf „fertig" gemeldet werden.
+
+### Häufige Fehler die zu vermeiden sind
+
+**❌ FALSCH: Direkt im Bootstrap-Clone entwickeln**
+```bash
+# NIEMALS das tun!
+cd .starfleet-ai/src/starfleetctl
+# ... editieren hier ...
+# Diese Änderungen gehen beim nächsten Bootstrap verloren!
+```
+
+**❌ FALSCH: Ohne commit/push bootstrappen**
+```bash
+# NIEMALS das tun!
+cd _WORK_/starfleetctl/sources/starfleetctl
+# ... entwickeln hier ...
+# Änderungen gemacht, aber nicht committed/pushed!
+cd /home/nekrad/src/xorg/mpbt-workspace
+./starfleet-bootstrap   # Bootstrap nimmt nur den alten Stand von origin/master!
+```
+
+**❌ FALSCH: Ohne Daemons neu zu starten bootstrappen**
+```bash
+# NIEMALS das tun!
+./starfleet-bootstrap   # Bootstrap deployed neues Binary...
+# ... aber Daemons laufen noch mit altem Binary!
+# Bis du die Daemons nicht neu startest, läuft das alte Binary weiter!
+```
+
+**❌ FALSCH: Ohne Verifizierung fertig melden**
+```bash
+# NIEMALS das tun!
+./starfleet-bootstrap
+echo "fertig"   # Vielleicht läuft noch das alte Binary!
+# Oder vielleicht hat der Bootstrap nicht funktioniert!
+```
+
+### Der korrekte Ablauf zusammengefasst
+
+```bash
+# 0. Vorbereitung & Claim
+./.starfleet-ai/bin/starfleetctl comms board
+./.starfleet-ai/bin/starfleetctl comms tell <other-ship> "Ich arbeite jetzt an starfleetctl-Source"
+
+# 1. Entwicklung im mpbt-Clone (richtige Stelle!)
+cd _WORK_/starfleetctl/sources/starfleetctl
+# ... entwickeln, testen, commits machen ...
+git add <geänderte-dateien>
+git commit -m "deine aussagekräftige commit-nachricht"
+git push origin master   # regemäßig pushen sobald fertig
+
+# 2. Vor Bootstrap: Alles committed und gepusht prüfen
+cd _WORK_/starfleetctl/sources/starfleetctl
+git status --short          # muss leer sein
+git log --oneline -1        # sollte deine letzte commit zeigen
+git rev-list --count origin/master..HEAD  # muss 0 sein
+
+# 3. Deployment via Bootstrap
+cd /home/nekrad/src/xorg/mpbt-workspace
+./starfleet-bootstrap       # deployed Binary + installiert Fragmente/Skills/Plugins
+
+# 4. Daemons neu starten (in korrekter Reihenfolge)
+./.starfleet-ai/bin/starfleetctl web restart        # Port 8080
+./.starfleet-ai/bin/starfleetctl timer worker restart
+./.starfleet-ai/bin/starfleetctl model-proxy restart   # nur bei reinen Go-Änderungen
+
+# 5. Verifizieren
+#    a) Binary-Zeitstempel korrekt?
+#    b) Daemon läuft mit neuem Binary?
+#    c) Funktioniert die Änderung?
+#    d) Alles committed und gepusht?
+#    e) Alles gut? Dann „fertig" melden!
+```
+
+### Warum dieser Workflow notwendig ist
+
+Der starfleetctl-source existiert in zwei verschiedenen Clones mit unterschiedlichem Zweck:
+- Der **mpbt-Clone** ist dein Entwicklungs-Arbeitsbereich - hier kannst du frei experimentieren, branchen, commiten und pushen
+- Der **Bootstrap-Clone** ist das Produktionsziel - hier wird nur das hineinkopiert, was im mpbt-Clone committed und gepusht ist
+
+Wenn du im falschen Clone entwickelst (Bootstrap-Clone), gehen deine Änderungen verloren.
+Wenn du nicht commitst/pushst beforen du bootstrappst, nimmt der Bootstrap nur den alten Stand.
+Wenn du die Daemons nicht neu startest, läuft das alte Binary weiter trotz neu deployedem Binary.
+Wenn du nicht verifizierst, kannst du fälschlicherweise denken alles würde funktionieren, obwohl es das alte Binary ausführt.
+
+Dieser Workflow stellt sicher, dass deine Änderungen korrekt an die Flotte gelangen und dass du immer weißt, welcher Stand gerade aktiv ist.
+

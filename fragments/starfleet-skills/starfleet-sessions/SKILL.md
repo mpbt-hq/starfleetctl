@@ -96,3 +96,27 @@ starfleetctl genesis-init .
 ```
 
 Everything under `.starfleet-ai/` is gitignored. Re-run `./starfleet-bootstrap` anytime to update.
+
+### starfleet-sessions-Regel — aus 36380eff06
+## Wichtige Erinnerung: Modell-Proxy niemals direkt killen
+
+Bei Arbeiten am starfleetctl model-proxy NIEMALS den Prozess direkt mit `kill`, `pkill` oder `systemctl stop` beenden.
+STETS den offiziellen Befehl verwenden: `./.starfleet-ai/bin/starfleetctl model-proxy restart`
+
+**Warum:** Direktes Killen kann zu inkonsistenten Zuständen führen, Ressourcen nicht korrekt freigeben und zu Problemen führen.
+Der offizielle restart Befehl stellt sicher, dass alle Ressourcen korrekt behandelt werden.
+
+Dies gilt besonders im Zusammenhang mit `session stop` - selbst wenn du eine ship session beenden möchtest,
+sollte der model-proxy nie direkt gekillt werden, sondern immer über den offiziellen restart Befehl neu gestartet
+werden, falls eine Änderung an der model-proxy Config oder am Code nötig ist.
+
+Die korrekte Vorgehensweise bei model-proxy Änderungen:
+```sh
+cd _WORK_/starfleetctl/sources/starfleetctl
+make all                    # baut Binary neu
+./starfleet-bootstrap       # deployed Binary + installiert Fragmente
+./.starfleet-ai/bin/starfleetctl model-proxy restart  # startet Proxy mit neuer Config/Code neu
+```
+
+Für reine Config-Änderungen (yaml) reicht `model-proxy restart` aus.
+Für Go-Code-Änderungen muss das Binary neu gebaut und deployed werden.
