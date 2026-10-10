@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.5'
+const PLUGIN_VERSION = '2.5.6'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -680,47 +680,66 @@ const logPollTimer = setInterval(async () => {
     return ''
   }
 
+  let pollRunning = false
   const poll = async () => {
     if (!tuiReady) return
-    if (!currentSessionID) tickLog(`poll: no session yet (will retry)`)
-    await resolveSessionId()
-    const r = bus({ cmd: 'inbox' })
-    const msgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
-    if (msgs.length === 0) return
-    const injectable: any[] = []
-    for (const msg of msgs) {
-      appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${msg.text.slice(0, 80)}`)
-      // handleMessage: type=command → execute, type=ship/user/control → false (inject)
-      if (await handleMessage(msg, client, currentSessionID)) {
-        submitted.add(msg.id)
-        continue
+    // Reentrancy guard: poll() is async and runs on a short interval. Without
+    // this, a slow injection could overlap the next tick and inject the same
+    // (unclaimed) directives twice.
+    if (pollRunning) return
+    pollRunning = true
+    try {
+      if (!currentSessionID) tickLog(`poll: no session yet (will retry)`)
+      await resolveSessionId()
+      const r = bus({ cmd: 'inbox' })
+      const msgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
+      if (msgs.length === 0) return
+      const injectable: any[] = []
+      for (const msg of msgs) {
+        appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${msg.text.slice(0, 80)}`)
+        // handleMessage: type=command → execute, type=ship/user/control → false (inject)
+        if (await handleMessage(msg, client, currentSessionID)) {
+          submitted.add(msg.id)
+          continue
+        }
+        // Not a command: do NOT claim it yet (see below). Claiming
+        // (submitted + seen_mark) before the injection actually succeeded
+        // would strand the directive if promptAsync is rejected — the
+        // turn-start hook skips anything already in `submitted`, so the
+        // message would be marked seen but never delivered.
+        injectable.push(msg)
       }
-      // Not a command - mark as seen and prepare for injection
-      submitted.add(msg.id)
-      bus({ cmd: "seen_mark", id: msg.id })
-      injectable.push(msg)
-    }
-    // Inject remaining directives mid-turn as synthetic prompt
-    if (injectable.length > 0) {
-      const lines = injectable.map((m: any) =>
-        `Directive ${m.id} from ${m.from}:\n${m.text}`)
-      try {
-        await client.session.promptAsync({
-          path: { id: currentSessionID },
-          body: {
-            parts: [{
-              type: 'text', synthetic: true,
-              text: [
-                '--- fleet directives (from other ships via comms) ---',
-                'Process each directive and carry out the requested action.',
-                '',
-                ...lines,
-                '--- end fleet directives ---',
-              ].join('\n'),
-            }],
-          },
-        })
-      } catch { /* ignore */ }
+      // Inject remaining directives mid-turn as synthetic prompt.
+      // Claim only AFTER a successful injection; on failure the message
+      // stays unclaimed and is retried next poll and, at the latest,
+      // delivered by the turn-start hook (experimental.chat.system.transform).
+      if (injectable.length > 0) {
+        const lines = injectable.map((m: any) =>
+          `Directive ${m.id} from ${m.from}:\n${m.text}`)
+        try {
+          await client.session.promptAsync({
+            path: { id: currentSessionID },
+            body: {
+              parts: [{
+                type: 'text', synthetic: true,
+                text: [
+                  '--- fleet directives (from other ships via comms) ---',
+                  'Process each directive and carry out the requested action.',
+                  '',
+                  ...lines,
+                  '--- end fleet directives ---',
+                ].join('\n'),
+              }],
+            },
+          })
+          for (const m of injectable) {
+            submitted.add(m.id)
+            bus({ cmd: "seen_mark", id: m.id })
+          }
+        } catch { /* not claimed → retried next poll / injected by transform hook */ }
+      }
+    } finally {
+      pollRunning = false
     }
   }
 
