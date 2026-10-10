@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.7-dbg'
+const PLUGIN_VERSION = '2.5.7'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -15,16 +15,9 @@ const PLUGIN_VERSION = '2.5.7-dbg'
 const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
-import { appendFileSync } from 'node:fs'
 
 const ROOT = process.cwd()
 
-// TEMP DIAGNOSTIC (remove after the injection bug is settled): append a line
-// to .starfleet-ai/var/plugin-debug.log so the real promptAsync result is
-// visible even when it is swallowed. Never throws.
-function dbg(msg: string): void {
-  try { appendFileSync(ROOT + '/.starfleet-ai/var/plugin-debug.log', `${new Date().toISOString()} ${msg}\n`) } catch { /* ignore */ }
-}
 
 // Generic JSON-RPC to starfleetctl comms dispatch.
 // JSON in via stdin → JSON out. No shell escaping, no text parsing.
@@ -702,7 +695,6 @@ const logPollTimer = setInterval(async () => {
       const r = bus({ cmd: 'inbox' })
       const msgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
       if (msgs.length === 0) return
-      dbg(`poll inbox ids=${msgs.map((m: any) => m.id).join(',')} tuiReady=${tuiReady} sid=${currentSessionID}`)
       const injectable: any[] = []
       for (const msg of msgs) {
         appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${msg.text.slice(0, 80)}`)
@@ -741,16 +733,13 @@ const logPollTimer = setInterval(async () => {
               }],
             },
           })
-          dbg(`poll inject sid=${currentSessionID} ids=${injectable.map((m: any) => m.id).join(',')} res=${JSON.stringify(res)}`)
           if (res && !(res as any).error) {
             for (const m of injectable) {
               submitted.add(m.id)
               bus({ cmd: "seen_mark", id: m.id })
             }
           }
-        } catch (e) {
-          dbg(`poll inject sid=${currentSessionID} THREW ${String(e).slice(0, 300)}`)
-        }
+        } catch { /* not claimed → retried next poll / injected by transform hook */ }
       }
     } finally {
       pollRunning = false
@@ -810,7 +799,6 @@ const logPollTimer = setInterval(async () => {
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
       }
       if (lines.length > 0) {
-        dbg(`transform inject ids=${lines.join(' | ').slice(0, 200)}`)
         output.system.push(
           '', '--- fleet directives (from other ships via comms) ---',
           'These are directives received from other ships in the fleet.',
