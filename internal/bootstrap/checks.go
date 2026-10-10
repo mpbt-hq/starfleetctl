@@ -1265,23 +1265,24 @@ const webYamlTemplate = `# starfleetctl web server configuration
 # This file is managed by starfleetctl bootstrap --fix
 # Only created once on first bootstrap --fix; user edits are preserved.
 
-# Web server listen address (host:port)
-# Default: 0.0.0.0:8080
-# Alternative: 0.0.0.0:8090
-listen_addr: "0.0.0.0:8080"
+web:
+  # Web server listen address (host:port)
+  # Default: 0.0.0.0:8080
+  # Alternative: 0.0.0.0:8090
+  listen_addr: "0.0.0.0:8080"
 
-# Web server autostart (cron/systemd integration)
-# When enabled, starfleetctl web autostart will ensure the server is running
-# Default: false
-autostart_enabled: false
+  # Web server autostart (cron/systemd integration)
+  # When enabled, starfleetctl web autostart will ensure the server is running
+  # Default: false
+  autostart_enabled: false
 
-# PID file location for daemon management
-# Default: .starfleet-ai/var/web.pid
-pid_file: ".starfleet-ai/var/web.pid"
+  # PID file location for daemon management
+  # Default: .starfleet-ai/var/web.pid
+  pid_file: ".starfleet-ai/var/web.pid"
 
-# Log file for web server daemon
-# Default: .starfleet-ai/var/log/web.log
-log_file: ".starfleet-ai/var/log/web.log"
+  # Log file for web server daemon
+  # Default: .starfleet-ai/var/log/web.log
+  log_file: ".starfleet-ai/var/log/web.log"
 `
 
 func verifyWebConf(b *Bootstrap) (bool, string) {

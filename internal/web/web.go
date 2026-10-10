@@ -117,6 +117,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/task", s.apiTask)
 	s.mux.HandleFunc("/api/topic/", s.apiTopicDispatch)
 	s.mux.HandleFunc("/api/identity", s.apiIdentity)
+	s.mux.HandleFunc("/api/fleet-info", s.apiFleetInfo)
 	s.mux.HandleFunc("/api/models", s.apiModels)
 	s.mux.HandleFunc("/api/models/check", s.apiModelCheck)
 	s.mux.HandleFunc("/api/timers", s.apiTimers)
@@ -857,6 +858,32 @@ func (s *Server) apiIdentity(w http.ResponseWriter, r *http.Request) {
 		"ship_id": s.bus.ShipID,
 		"handle":  s.bus.Handle,
 		"project": s.bus.Project,
+	})
+}
+
+// apiFleetInfo returns fleet-wide identity (name, description) for the web header.
+func (s *Server) apiFleetInfo(w http.ResponseWriter, r *http.Request) {
+	// Get fleet config from the loaded config
+	cfg, err := config.Load(s.Root)
+	var name, description string
+	if err == nil && cfg != nil {
+		name = cfg.Fleet.Name
+		description = cfg.Fleet.Description
+	}
+	// Fallbacks
+	if name == "" {
+		name = "Fleet console"
+	}
+	// Allow env override
+	if env := os.Getenv("STARFLEET_FLEET_NAME"); env != "" {
+		name = env
+	}
+	if env := os.Getenv("STARFLEET_FLEET_DESCRIPTION"); env != "" {
+		description = env
+	}
+	writeJSON(w, map[string]any{
+		"name":        name,
+		"description": description,
 	})
 }
 

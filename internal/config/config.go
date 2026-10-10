@@ -207,6 +207,11 @@ type ShipConfig struct {
 
 // FleetConfig holds fleet-wide identity settings.
 type FleetConfig struct {
+	// Name is the display name of this fleet instance (e.g. "Production", "Testbed").
+	// Appears in the web frontend header. Defaults to "Fleet console" when unset.
+	Name string `yaml:"name"`
+	// Description is an optional human-readable description of this fleet instance.
+	Description string `yaml:"description"`
 	// Flagship is the canonical name of the flagship/control session.
 	// Defaults to "Enterprise" when unset.
 	Flagship string `yaml:"flagship"`

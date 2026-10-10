@@ -243,8 +243,8 @@ func Autostart(root string) (bool, error) {
 	addr := cfg.Web.ListenAddr
 	ac := DefaultAutostartConfig(root)
 
-	// Clean up any starfleetctl web processes on WRONG ports (always run)
-	if err := cleanupWrongPortProcesses(addr); err != nil {
+	// Clean up any starfleetctl web processes from SAME ROOT on WRONG ports
+	if err := cleanupWrongPortProcesses(addr, root); err != nil {
 		return false, err
 	}
 
@@ -291,21 +291,42 @@ func Autostart(root string) (bool, error) {
 }
 
 // cleanupWrongPortProcesses finds and kills any starfleetctl web processes
-// that are listening on ports other than the configured address.
-func cleanupWrongPortProcesses(expectedAddr string) error {
+// from the SAME ROOT that are listening on ports other than the configured address.
+func cleanupWrongPortProcesses(expectedAddr string, root string) error {
 	// Parse expected port
 	_, expectedPort, err := net.SplitHostPort(expectedAddr)
 	if err != nil {
 		return nil // not our problem
 	}
 
+	// Get our root's absolute path for comparison
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		rootAbs = root
+	}
+
 	for _, p := range webStartProcs() {
-		if p.Port != "" && p.Port != expectedPort {
-			// Kill process on wrong port
-			process, err := os.FindProcess(p.PID)
-			if err == nil {
-				process.Kill()
-			}
+		if p.Port == "" || p.Port == expectedPort {
+			continue
+		}
+		// Check if this process belongs to our root by comparing cwd
+		cwdPath := filepath.Join("/proc", strconv.Itoa(p.PID), "cwd")
+		target, err := os.Readlink(cwdPath)
+		if err != nil {
+			continue // cannot determine cwd, skip
+		}
+		targetAbs, err := filepath.Abs(target)
+		if err != nil {
+			continue
+		}
+		// Only kill if the process cwd is under our root
+		if !strings.HasPrefix(targetAbs, rootAbs+string(filepath.Separator)) && targetAbs != rootAbs {
+			continue // different root, don't touch
+		}
+		// Kill process on wrong port from same root
+		process, err := os.FindProcess(p.PID)
+		if err == nil {
+			process.Kill()
 		}
 	}
 	return nil
