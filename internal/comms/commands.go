@@ -223,6 +223,7 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 		LaunchType:      prev.LaunchType,
 		Parent:          prev.Parent,
 		Provider:        prev.Provider,
+		PluginVersion:   prev.PluginVersion,
 		Class:           prev.Class,
 		Updated:         prev.Updated,
 		// Auto-set Unattached: working/building without task or note

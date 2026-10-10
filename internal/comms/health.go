@@ -296,7 +296,7 @@ Launch metadata (set on ship startup):
 `
 
 func (b *Bus) DoHealthUpdate(args []string) error {
-	var state, pluginTS, modelTS, model, server, errorTag string
+	var state, pluginTS, modelTS, model, server, errorTag, pluginVersion string
 	var task, blocker, eta, branch, note, launchType, parent, provider, updated string
 	progress := -1
 	pid := 0
@@ -339,6 +339,11 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		case "--error-tag":
 			if i+1 < len(args) {
 				errorTag = args[i+1]
+				i++
+			}
+		case "--plugin-version":
+			if i+1 < len(args) {
+				pluginVersion = args[i+1]
 				i++
 			}
 		case "--task":
@@ -448,6 +453,7 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		LaunchType:      coalesce(launchType, prev.LaunchType),
 		Parent:          coalesce(parent, prev.Parent),
 		Provider:        coalesce(provider, prev.Provider),
+		PluginVersion:   coalesce(pluginVersion, prev.PluginVersion),
 		Updated:         coalesce(updated, prev.Updated, nowTs),
 		// Auto-set Unattached: working/building without task or note
 		Unattached: (state == "working" || state == "building") && task == "" && note == "",

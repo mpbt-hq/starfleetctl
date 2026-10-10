@@ -25,6 +25,7 @@ type dispatchRequest struct {
 	Model           string `json:"model,omitempty"`
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
+	PluginVersion   string `json:"plugin_version,omitempty"`
 	Delete          bool   `json:"delete,omitempty"`
 	Reset           bool   `json:"reset,omitempty"`
 	Touch           bool   `json:"touch,omitempty"`
@@ -218,6 +219,9 @@ func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
 		}
 		if req.ErrorTag != "" {
 			args = append(args, "--error-tag", req.ErrorTag)
+		}
+		if req.PluginVersion != "" {
+			args = append(args, "--plugin-version", req.PluginVersion)
 		}
 		if req.Task != "" {
 			args = append(args, "--task", req.Task)
