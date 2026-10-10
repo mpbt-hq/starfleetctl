@@ -1394,6 +1394,19 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
 				continue
 			}
+			// Stream interrupted (failed=true) — treat as retryable to try next model in strategy
+			if failed && attempt < attempts {
+				p.logf("%s/%s: stream interrupted (attempt %d/%d) — retrying with next model", ship, prov.ID, attempt, attempts)
+				// Record the failure and check circuit breaker before retrying
+				p.tracker.record(ship, prov.ID, requestedModel, usage, retries, true)
+				if strat := p.getStrategyForModel(requestedModel); strat != nil {
+					p.checkCircuitBreaker(strat, model)
+				}
+				retries++
+				writeHeaders = false
+				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
+				continue
+			}
 			p.tracker.record(ship, prov.ID, requestedModel, usage, retries, failed)
 			if strat := p.getStrategyForModel(requestedModel); strat != nil {
 				tokens := 0
