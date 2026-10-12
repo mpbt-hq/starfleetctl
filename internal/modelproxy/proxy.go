@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -1263,16 +1264,45 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 // records the outcome in the per-ship tracker.
 func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string, effectiveLimit int) {
 	p.logf("route: ship=%s requested=%s model=%s provider=%s", ship, requestedModel, model, prov.ID)
-	// Streaming client timeout: use provider timeout (from Config) with sensible defaults
-	streamTimeout := time.Duration(prov.Timeout)
-	if streamTimeout <= 0 {
+	// Timeouts: streaming and non-streaming need different strategies.
+	// Non-streaming: overall deadline is fine (use provider timeout).
+	// Streaming: NO overall timeout on the client (would cut off long streams).
+	//   Use connect timeout + response header timeout; rely on r.Context() for
+	//   client disconnect, and per-read idle watchdog for hung streams.
+	// Provider.Timeout is used for non-streaming overall deadline.
+	nonStreamTimeout := time.Duration(prov.Timeout)
+	if nonStreamTimeout <= 0 {
 		if prov.Type == "opencode-zen" {
-			streamTimeout = 15 * time.Second
+			nonStreamTimeout = 15 * time.Second
 		} else {
-			streamTimeout = 30 * time.Second
+			nonStreamTimeout = 30 * time.Second
 		}
 	}
-	client := &http.Client{Timeout: streamTimeout}
+	// Connect timeout (time to establish TCP connection)
+	connectTimeout := 10 * time.Second
+	// Response header timeout (time from connect to first byte of response headers)
+	responseHeaderTimeout := 30 * time.Second
+
+	// Non-streaming client with overall timeout
+	nonStreamClient := &http.Client{
+		Timeout: nonStreamTimeout,
+	}
+	// Streaming client with NO overall timeout - uses Transport with
+	// connect timeout and response header timeout only
+	streamTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   connectTimeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+		ExpectContinueTimeout: 1 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+	}
+	streamClient := &http.Client{
+		Transport: streamTransport,
+		// No Timeout - for streaming we rely on r.Context() and idle watchdog
+	}
 	attempts := prov.MaxRetries + 1
 
 	buildReq := func() (*http.Request, io.Reader, error) {
@@ -1324,26 +1354,33 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		}
 		skipSaturationWait = false // reset for next iteration
 
-		upstreamReq, _, err := buildReq()
-		if err != nil {
-			writeErr(w, 400, "build upstream request: "+err.Error())
+		upstreamReq, _, buildErr := buildReq()
+		if buildErr != nil {
+			writeErr(w, 400, "build upstream request: "+buildErr.Error())
 			return
 		}
-		resp, err := client.Do(upstreamReq)
-		if err != nil {
-			lastErr = err
-			if attempt < attempts && retryableError(err) {
-				p.logf("%s/%s: transport error (attempt %d/%d): %v — retrying", ship, prov.ID, attempt, attempts, err)
+		// Use appropriate client for streaming vs non-streaming
+		var resp *http.Response
+		var respErr error
+		if streaming {
+			resp, respErr = streamClient.Do(upstreamReq)
+		} else {
+			resp, respErr = nonStreamClient.Do(upstreamReq)
+		}
+		if respErr != nil {
+			lastErr = respErr
+			if attempt < attempts && retryableError(respErr) {
+				p.logf("%s/%s: transport error (attempt %d/%d): %v — retrying", ship, prov.ID, attempt, attempts, respErr)
 				retries++
 				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
 				continue
 			}
 			p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 			if strat := p.getStrategyForModel(requestedModel); strat != nil {
-				p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, err)
+				p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, respErr)
 				p.checkCircuitBreaker(strat, model)
 			}
-			writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, err))
+			writeErr(w, 502, fmt.Sprintf("upstream %s: %v", prov.ID, respErr))
 			return
 		}
 
@@ -1424,7 +1461,7 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			if err != nil {
 				p.tracker.record(ship, prov.ID, requestedModel, nil, retries, true)
 				if strat := p.getStrategyForModel(requestedModel); strat != nil {
-					p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, err)
+					p.recordStrategyMetrics(strat, model, time.Since(startTime), 0, respErr)
 					p.checkCircuitBreaker(strat, model)
 				}
 				writeErr(w, 502, fmt.Sprintf("upstream %s: read response: %v", prov.ID, err))
