@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.10'
+const PLUGIN_VERSION = '2.5.11'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -760,8 +760,12 @@ const logPollTimer = setInterval(async () => {
               submitted.add(m.id)
               bus({ cmd: "seen_mark", id: m.id })
             }
+          } else {
+            // Stale/foreign session id — drop the cache so the next poll
+            // re-resolves (e.g. after the user switched to another session).
+            currentSessionID = ''
           }
-        } catch { /* not claimed → retried next poll / injected by transform hook */ }
+        } catch { currentSessionID = '' }
       }
     } finally {
       pollRunning = false
