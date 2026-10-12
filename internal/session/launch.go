@@ -622,12 +622,26 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		// Clean up any stale socket file
 		os.Remove(socketPath)
 
+		// Look up previous session to resume, unless --new is specified
+		sessionID := ""
+		if !o.ForceNew {
+			var err error
+			sessionID, err = findLastSessionForShip(root, name)
+			if err != nil {
+				// Log but don't fail - treat as no previous session
+				fmt.Fprintf(os.Stderr, "LaunchShip: warning: session lookup failed: %v\n", err)
+			}
+		}
+
 		inner := "cd " + shellQuote(root) + "; "
 		inner += "export OPENCODE_CONFIG=" + shellQuote(opencode.SocketPath(root, name)) + "; "
 		inner += "exec " + shellQuote(resolveClientPath("opencode"))
 		inner += " serve --socket " + shellQuote(opencode.SocketPath(root, name))
 		if effectiveModel != "" {
 			inner += " --model " + shellQuote(effectiveModel)
+		}
+		if sessionID != "" {
+			inner += " --session " + shellQuote(sessionID)
 		}
 
 		vars := &LaunchVars{
