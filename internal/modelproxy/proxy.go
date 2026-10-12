@@ -1292,11 +1292,11 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 	streamTransport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   connectTimeout,
-			KeepAlive: 5 * time.Minute, // long keepalive for long-running streams
+			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
-		IdleConnTimeout:       0, // 0 = no idle timeout (infinite)
+		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 	}
 	streamClient := &http.Client{
@@ -1624,27 +1624,19 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 	inKeepalive := false
 	keepaliveStart := time.Time{}
 
-	// Keepalive ticker for normal streams (not just saturation hold)
-	// Sends SSE comment lines every 15s to keep upstream connection alive
-	keepaliveTicker := time.NewTicker(15 * time.Second)
-	stopKeepalive := make(chan struct{})
-	var stopOnce sync.Once
-	go func() {
-		for {
-			select {
-			case <-keepaliveTicker.C:
-				if sawDone || sawError {
-					return
-				}
-				_, _ = io.WriteString(w, ": keepalive\n\n")
-				if flusher != nil {
-					flusher.Flush()
-				}
-			case <-stopKeepalive:
-				return
-			}
+	// Keepalive ticker for the saturation hold below. It is driven from the
+	// main select loop (never a separate goroutine) because http.ResponseWriter
+	// is not safe for concurrent use.
+	var keepaliveTicker *time.Ticker
+	var keepaliveC <-chan time.Time
+	stopKeepaliveTicker := func() {
+		if keepaliveTicker != nil {
+			keepaliveTicker.Stop()
+			keepaliveTicker = nil
+			keepaliveC = nil
 		}
-	}()
+		inKeepalive = false
+	}
 
 	// Channel for scanner results
 	type scanResult struct {
@@ -1659,10 +1651,6 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 		scanCh <- scanResult{line: "", err: sc.Err()}
 		close(scanCh)
 	}()
-
-	// Keepalive ticker (for saturation hold) - using the same ticker
-	_ = keepaliveTicker // already declared above
-	_ = stopKeepalive   // already declared above
 
 	for {
 		select {
@@ -1681,10 +1669,7 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 					if flusher != nil {
 						flusher.Flush()
 					}
-					if keepaliveTicker != nil {
-						keepaliveTicker.Stop()
-					}
-					stopOnce.Do(func() { close(stopKeepalive) })
+					stopKeepaliveTicker()
 					return usage, true, false
 				}
 				if !sawDone && !sawError {
@@ -1704,16 +1689,10 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 					if flusher != nil {
 						flusher.Flush()
 					}
-					if keepaliveTicker != nil {
-						keepaliveTicker.Stop()
-					}
-					stopOnce.Do(func() { close(stopKeepalive) })
+					stopKeepaliveTicker()
 					return usage, true, false
 				}
-				if keepaliveTicker != nil {
-					keepaliveTicker.Stop()
-				}
-				stopOnce.Do(func() { close(stopKeepalive) })
+				stopKeepaliveTicker()
 				return usage, false, false
 			}
 
@@ -1723,20 +1702,14 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 				if payload == "[DONE]" {
 					sawDone = true
-					// Stop keepalive if running
-					if keepaliveTicker != nil {
-						keepaliveTicker.Stop()
-					}
-					stopOnce.Do(func() { close(stopKeepalive) })
+					stopKeepaliveTicker()
 				} else if strings.HasPrefix(payload, "{") && strings.Contains(payload, "\"error\"") {
 					// A streamed error event. Before any content chunk a retryable
 					// overload/rate-limit error is aborted for a clean retry;
 					// everything else is passed through and remembered so we don't
 					// append our own error on EOF.
 					if !sawContent && canRetry && retryableErrorText(payload) {
-						if keepaliveTicker != nil {
-							keepaliveTicker.Stop()
-						}
+						stopKeepaliveTicker()
 						return nil, true, true
 					}
 					// Saturation error after retry budget exhausted: enter keepalive hold
@@ -1744,48 +1717,10 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 						saturationErrorPayload = payload
 						inKeepalive = true
 						keepaliveStart = time.Now()
-						// Start keepalive ticker
 						keepaliveTicker = time.NewTicker(3 * time.Second)
-						go func() {
-							for {
-								select {
-								case <-keepaliveTicker.C:
-									if !inKeepalive {
-										return
-									}
-									elapsed := time.Since(keepaliveStart)
-									if elapsed >= time.Duration(prov.HoldTimeoutMS)*time.Millisecond {
-										// Keepalive timeout reached — emit the buffered saturation error
-										p.logf("%s/%s: keepalive hold timeout (%dms) reached, relaying saturation error", ship, prov.ID, prov.HoldTimeoutMS)
-										evt := map[string]any{"error": map[string]any{
-											"message": saturationErrorPayload,
-											"code":    "rate_limit_exceeded",
-										}}
-										raw, _ := json.Marshal(evt)
-										_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
-										_, _ = io.WriteString(w, "data: [DONE]\n\n")
-										if flusher != nil {
-											flusher.Flush()
-										}
-										inKeepalive = false
-										sawDone = true
-										sawError = true
-										keepaliveTicker.Stop()
-										stopOnce.Do(func() { close(stopKeepalive) })
-										return
-									}
-									// Send keepalive comment
-									_, _ = io.WriteString(w, ": keepalive\n\n")
-									if flusher != nil {
-										flusher.Flush()
-									}
-								case <-stopKeepalive:
-									keepaliveTicker.Stop()
-									return
-								}
-							}
-						}()
-						// Don't write the error yet; start keepalive
+						keepaliveC = keepaliveTicker.C
+						// Don't write the error yet; keep the stream open until the
+						// hold timeout or EOF (driven by the <-keepaliveC case below).
 						continue
 					}
 					sawError = true
@@ -1812,12 +1747,34 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 					flusher.Flush()
 				}
 			}
-		case <-stopKeepalive:
-			if keepaliveTicker != nil {
-				keepaliveTicker.Stop()
+		case <-keepaliveC:
+			// Saturation hold tick (see the keepaliveTicker setup above).
+			if !inKeepalive {
+				continue
 			}
-			// Continue to drain scanner if needed
-			continue
+			if time.Since(keepaliveStart) >= time.Duration(prov.HoldTimeoutMS)*time.Millisecond {
+				// Keepalive timeout reached — emit the buffered saturation error
+				p.logf("%s/%s: keepalive hold timeout (%dms) reached, relaying saturation error", ship, prov.ID, prov.HoldTimeoutMS)
+				evt := map[string]any{"error": map[string]any{
+					"message": saturationErrorPayload,
+					"code":    "rate_limit_exceeded",
+				}}
+				raw, _ := json.Marshal(evt)
+				_, _ = io.WriteString(w, "\ndata: "+string(raw)+"\n\n")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+				if flusher != nil {
+					flusher.Flush()
+				}
+				sawDone = true
+				sawError = true
+				stopKeepaliveTicker()
+				return usage, true, false
+			}
+			// Send keepalive comment
+			_, _ = io.WriteString(w, ": keepalive\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
 		}
 	}
 }
