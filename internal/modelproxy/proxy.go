@@ -1292,11 +1292,11 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 	streamTransport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   connectTimeout,
-			KeepAlive: 30 * time.Second,
+			KeepAlive: 5 * time.Minute, // long keepalive for long-running streams
 		}).DialContext,
 		ResponseHeaderTimeout: responseHeaderTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
+		IdleConnTimeout:       0, // 0 = no idle timeout (infinite)
 		TLSHandshakeTimeout:   10 * time.Second,
 	}
 	streamClient := &http.Client{
@@ -1624,6 +1624,28 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 	inKeepalive := false
 	keepaliveStart := time.Time{}
 
+	// Keepalive ticker for normal streams (not just saturation hold)
+	// Sends SSE comment lines every 15s to keep upstream connection alive
+	keepaliveTicker := time.NewTicker(15 * time.Second)
+	stopKeepalive := make(chan struct{})
+	var stopOnce sync.Once
+	go func() {
+		for {
+			select {
+			case <-keepaliveTicker.C:
+				if sawDone || sawError {
+					return
+				}
+				_, _ = io.WriteString(w, ": keepalive\n\n")
+				if flusher != nil {
+					flusher.Flush()
+				}
+			case <-stopKeepalive:
+				return
+			}
+		}
+	}()
+
 	// Channel for scanner results
 	type scanResult struct {
 		line string
@@ -1638,9 +1660,9 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 		close(scanCh)
 	}()
 
-	// Keepalive ticker
-	var keepaliveTicker *time.Ticker
-	stopKeepalive := make(chan struct{})
+	// Keepalive ticker (for saturation hold) - using the same ticker
+	_ = keepaliveTicker // already declared above
+	_ = stopKeepalive   // already declared above
 
 	for {
 		select {
@@ -1662,6 +1684,7 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 					if keepaliveTicker != nil {
 						keepaliveTicker.Stop()
 					}
+					stopOnce.Do(func() { close(stopKeepalive) })
 					return usage, true, false
 				}
 				if !sawDone && !sawError {
@@ -1684,11 +1707,13 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 					if keepaliveTicker != nil {
 						keepaliveTicker.Stop()
 					}
+					stopOnce.Do(func() { close(stopKeepalive) })
 					return usage, true, false
 				}
 				if keepaliveTicker != nil {
 					keepaliveTicker.Stop()
 				}
+				stopOnce.Do(func() { close(stopKeepalive) })
 				return usage, false, false
 			}
 
@@ -1702,7 +1727,7 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 					if keepaliveTicker != nil {
 						keepaliveTicker.Stop()
 					}
-					close(stopKeepalive)
+					stopOnce.Do(func() { close(stopKeepalive) })
 				} else if strings.HasPrefix(payload, "{") && strings.Contains(payload, "\"error\"") {
 					// A streamed error event. Before any content chunk a retryable
 					// overload/rate-limit error is aborted for a clean retry;
@@ -1746,7 +1771,7 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 										sawDone = true
 										sawError = true
 										keepaliveTicker.Stop()
-										close(stopKeepalive)
+										stopOnce.Do(func() { close(stopKeepalive) })
 										return
 									}
 									// Send keepalive comment
