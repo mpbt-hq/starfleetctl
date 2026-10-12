@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.7'
+const PLUGIN_VERSION = '2.5.8'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -762,11 +762,22 @@ const logPollTimer = setInterval(async () => {
   })
 
   return {
+    // Authoritative session id for the current turn — opencode passes it to
+    // every chat hook. session.status() (used by resolveSessionId) can return
+    // stale/foreign ids, so prefer this whenever it is available.
+    'chat.params': async (input: any) => {
+      if (input?.sessionID && input.sessionID !== currentSessionID) {
+        currentSessionID = input.sessionID
+      }
+    },
     'experimental.chat.system.transform': async (
-      _input: any,
+      input: any,
       output: { system: string[] },
     ) => {
       turnCount++
+      if (input?.sessionID && input.sessionID !== currentSessionID) {
+        currentSessionID = input.sessionID
+      }
       bus({
         cmd: 'health',
         plugin_last_run: new Date().toISOString(),
