@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.9'
+const PLUGIN_VERSION = '2.5.10'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -148,6 +148,7 @@ export const plugin = async ({ client, $ }: any) => {
   let tuiReady = false
   let sessionNeedsIdentity = true
   let submitted = new Set<string>()
+  const bootBacklog: any[] = [] // directives pending at start (acked by init) — must be delivered, not dropped
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
@@ -644,6 +645,12 @@ const logPollTimer = setInterval(async () => {
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
   for (const id of (init.seen || [])) { submitted.add(id) }
+  // DoInit acks the whole unread inbox and returns it in `messages`; it must
+  // still be DELIVERED (the agent never saw it), otherwise every directive
+  // that arrived while the ship was down is silently lost.
+  for (const m of (init.messages || [])) {
+    if (m && m.id && !submitted.has(m.id)) bootBacklog.push({ id: m.id, from: m.from, text: m.text, type: 'ship' })
+  }
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -707,7 +714,8 @@ const logPollTimer = setInterval(async () => {
       if (!currentSessionID) tickLog(`poll: no session yet (will retry)`)
       await resolveSessionId()
       const r = bus({ cmd: 'inbox' })
-      const msgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
+      const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
+      const msgs = [...boot, ...(r.messages || []).filter((m: any) => !submitted.has(m.id))]
       if (msgs.length === 0) return
       const injectable: any[] = []
       for (const msg of msgs) {
@@ -815,7 +823,8 @@ const logPollTimer = setInterval(async () => {
       // Fetch inbox and inject new directives (skip commands — handled in poll).
       const lines: string[] = []
       const r = bus({ cmd: 'inbox' })
-      for (const msg of (r.messages || [])) {
+      const pendingMsgs = [...bootBacklog, ...(r.messages || [])]
+      for (const msg of pendingMsgs) {
         if (submitted.has(msg.id)) continue
         bus({ cmd: 'seen_mark', id: msg.id })
         submitted.add(msg.id)
