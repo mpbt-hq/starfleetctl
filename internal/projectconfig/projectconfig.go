@@ -26,6 +26,9 @@ type ProjectConfig struct {
 	// PathRemapping describes path transformations between branches
 	PathRemapping PathRemapping `yaml:"path_remapping"`
 
+	// Fleet holds fleet behavior configuration
+	Fleet FleetConfig `yaml:"fleet"`
+
 	// ReleaseLines are the maintained release lines for backporting
 	ReleaseLines []string `yaml:"release_lines"`
 
@@ -35,6 +38,14 @@ type ProjectConfig struct {
 	// FragmentsDir is the project-local SOP fragments directory name.
 	// Defaults to "sop.d" when unset.
 	FragmentsDir string `yaml:"sop_dir"`
+}
+
+// FleetConfig holds fleet behavior configuration
+type FleetConfig struct {
+	// NotifyFlagshipOnShipError controls whether the flagship (Enterprise)
+	// is notified on ship timeouts/non-transient errors.
+	// Default: false (disabled per McKinley directive m2899)
+	NotifyFlagshipOnShipError bool `yaml:"notify_flagship_on_ship_error"`
 }
 
 // WorktreeLayout describes the directory structure for release worktrees
@@ -90,6 +101,9 @@ func DefaultProjectConfig() *ProjectConfig {
 			Enabled: false,
 			Renames: map[string]string{},
 		},
+		Fleet: FleetConfig{
+			NotifyFlagshipOnShipError: false,
+		},
 		ReleaseLines: []string{},
 		Solutions:    map[string]SolutionConfig{},
 		FragmentsDir: "sop.d",
@@ -134,6 +148,9 @@ func Load(root string) (*ProjectConfig, error) {
 	}
 	if cfg.FragmentsDir == "" {
 		cfg.FragmentsDir = def.FragmentsDir
+	}
+	if !cfg.Fleet.NotifyFlagshipOnShipError && !def.Fleet.NotifyFlagshipOnShipError {
+		cfg.Fleet.NotifyFlagshipOnShipError = def.Fleet.NotifyFlagshipOnShipError
 	}
 
 	return &cfg, nil

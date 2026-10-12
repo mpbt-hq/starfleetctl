@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/metux/starfleetctl/internal/projectconfig"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
 
@@ -231,16 +232,27 @@ func (b *Bus) DoErrorHandle(args []string) error {
 	}
 
 	if notifyFlagship {
+		// Check project config for fleet notification setting
+		projCfg, err := projectconfig.Load(b.Root)
+		notifyFlagshipOnError := false
+		if err == nil {
+			notifyFlagshipOnError = projCfg.Fleet.NotifyFlagshipOnShipError
+		}
+		// Only notify if config allows it (default false per McKinley directive m2899)
+		notifyFlagship = notifyFlagshipOnError
+
 		// Tell the CONTROL agent (flagship) only, never broadcast — a broadcast
 		// would land in the errored ship's own inbox and restart the self-loop.
 		// Don't notify flagship if we ARE the flagship — prevents self-loop
 		flagship := shipnames.FlagshipName(b.Root)
-		if shipID != flagship {
+		if notifyFlagship && shipID != flagship {
 			_ = b.DoPost(flagship, []string{
 				fmt.Sprintf("⚠️ %s session.error%s: %s", shipID, label, detail),
 			}, false, "", "", "control")
-		} else {
+		} else if shipID == flagship {
 			b.LogEvent("plugin", fmt.Sprintf("error: flagship %s suppressed self-notify [%s]", shipID, tag))
+		} else {
+			b.LogEvent("plugin", fmt.Sprintf("error: flagship notification disabled by fleet config for %s [%s]", shipID, tag))
 		}
 	}
 
