@@ -29,12 +29,13 @@ run-claude.ship with a single Go codepath.
 Flags:
   --client <claude|opencode>   client to run (default: opencode)
   --flagship                   start as flagship (Enterprise) — mutually
-                               exclusive with --name
+                                exclusive with --name
   --name <id>                  ship name (default: auto-assign from pool)
   --model <model>              model to use (e.g. nvidia/nemotron-3-8b)
   --exec                       exec client directly (no termctl terminal)
-                               default is termctl (detached, attachable)
+                                default is termctl (detached, attachable)
   --prompt <text>              override the default prompt
+  --new                        start a fresh session (do not resume previous session for this ship name)
   -h, --help                   show this help
 
 Args after -- are passed verbatim to the client.
@@ -43,6 +44,7 @@ Examples:
   starfleetctl run --flagship --client opencode
   starfleetctl run --client claude --name Voyager -- --permission-mode dontAsk
   starfleetctl run --flagship --exec -- client flags here
+  starfleetctl run --flagship --new
 `
 
 // RunCmd implements the top-level `starfleetctl run` command.
@@ -58,6 +60,7 @@ func RunCmd(root string, args []string) int {
 	model := ""
 	useExec := false
 	customPrompt := ""
+	forceNew := false
 	var clientArgs []string
 
 	for len(args) > 0 {
@@ -96,6 +99,9 @@ func RunCmd(root string, args []string) int {
 			}
 			customPrompt = args[1]
 			args = args[2:]
+		case "--new":
+			forceNew = true
+			args = args[1:]
 		case "-h", "--help":
 			fmt.Print(runUsage)
 			return 0
@@ -143,6 +149,17 @@ func RunCmd(root string, args []string) int {
 		if err := reg.Reserve(shipID); err != nil {
 			fmt.Fprintln(os.Stderr, "run: failed to reserve name:", err)
 			return 1
+		}
+	}
+
+	// Look up previous session to resume, unless --new is specified
+	sessionID := ""
+	if client == "opencode" && !forceNew {
+		var err error
+		sessionID, err = findLastSessionForShip(root, shipID)
+		if err != nil {
+			// Log but don't fail - treat as no previous session
+			fmt.Fprintf(os.Stderr, "run: warning: session lookup failed: %v\n", err)
 		}
 	}
 
@@ -221,10 +238,10 @@ func RunCmd(root string, args []string) int {
 	env := runClientEnv(shipID, role, root)
 
 	if useExec {
-		return execClientDirect(root, client, shipID, systemPrompt, prompt, model, env, clientArgs)
+		return execClientDirect(root, client, shipID, systemPrompt, prompt, model, env, clientArgs, sessionID)
 	}
 
-	return execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model, env, clientArgs)
+	return execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model, env, clientArgs, sessionID)
 }
 
 // runClientEnv assembles the environment passed to a `run`-launched client.
@@ -265,7 +282,7 @@ func defaultPrompt(root, client, shipID, role, model string) string {
 }
 
 // execClientDirect execs the client directly (no termctl), replacing the process.
-func execClientDirect(root, client, shipID, systemPrompt, prompt, model string, env []string, args []string) int {
+func execClientDirect(root, client, shipID, systemPrompt, prompt, model string, env []string, args []string, sessionID string) int {
 	var cmd *exec.Cmd
 
 	switch client {
@@ -276,6 +293,9 @@ func execClientDirect(root, client, shipID, systemPrompt, prompt, model string, 
 		}
 		if prompt != "" {
 			cmdArgs = append(cmdArgs, "--prompt", prompt)
+		}
+		if sessionID != "" {
+			cmdArgs = append(cmdArgs, "--session", sessionID)
 		}
 		cmdArgs = append(cmdArgs, args...)
 		cmd = exec.Command("opencode", cmdArgs...)
@@ -320,9 +340,9 @@ func execClientDirect(root, client, shipID, systemPrompt, prompt, model string, 
 }
 
 // execClientTermctl launches the client in a termctl terminal (detached, attachable).
-func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model string, env []string, args []string) int {
+func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model string, env []string, args []string, sessionID string) int {
 	// Build inner command for termctl
-	inner := buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model, args)
+	inner := buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model, args, sessionID)
 
 	// Compute launch vars
 	pipePath := PipePath(root, shipID)
@@ -352,7 +372,7 @@ func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model s
 }
 
 // buildInnerCommand constructs the shell command string for termctl to execute.
-func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model string, args []string) string {
+func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model string, args []string, sessionID string) string {
 	var parts []string
 
 	// Set env vars
@@ -381,6 +401,9 @@ func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model s
 		}
 		if prompt != "" {
 			cmdParts = append(cmdParts, "--prompt", shellQuote(prompt))
+		}
+		if sessionID != "" {
+			cmdParts = append(cmdParts, "--session", shellQuote(sessionID))
 		}
 		for _, a := range args {
 			cmdParts = append(cmdParts, shellQuote(a))

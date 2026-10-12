@@ -1378,7 +1378,7 @@ func webRestart(root string) error {
 }
 
 // apiShipLaunch POSTs a new ship (the web console's "new ship" action).
-// Body: {"name":"", "model":"provider/model", "parent":"", "unrestricted":false}.
+// Body: {"name":"", "model":"provider/model", "parent":"", "unrestricted":false, "force_new":false}.
 //
 //	name         — optional; empty => next free ship name
 //	model        — REQUIRED opencode model id (provider derived from it)
@@ -1386,6 +1386,8 @@ func webRestart(root string) error {
 //	               since a web-GUI launch is treated as an auto-launch under the
 //	               flagship. The launch_type is always "auto" for web launches.
 //	unrestricted — optional; unrestricted permissions (allow all, bypass ask/deny)
+//	force_new    — optional; if true, start a fresh session (do not resume previous
+//	               session for this ship name)
 //
 // Delegates to session.LaunchShip — the same code path as `session ship-run`,
 // so the detached termctl terminal, registry, and heartbeat are identical.
@@ -1401,6 +1403,7 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		Parent       string `json:"parent"`
 		Unrestricted bool   `json:"unrestricted"`
 		Template     string `json:"template"`
+		ForceNew     bool   `json:"force_new"`
 	}
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -1460,6 +1463,7 @@ func (s *Server) apiShipLaunch(w http.ResponseWriter, r *http.Request) {
 		LaunchType:   launchType,
 		Unrestricted: p.Unrestricted,
 		Class:        class,
+		ForceNew:     p.ForceNew,
 	})
 	if err != nil {
 		writeErr(w, 409, err.Error())

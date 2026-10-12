@@ -19,6 +19,7 @@ import (
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/modelproxy"
+	"github.com/metux/starfleetctl/internal/ocsessions"
 	"github.com/metux/starfleetctl/internal/opencode"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
@@ -360,7 +361,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 // .starfleet-ai/var/ships/.
 func runShipRun(root string, args []string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		fmt.Print(`session ship-run [--name <id>] [--model <model>] [--template <name>]
+		fmt.Print(`session ship-run [--name <id>] [--model <model>] [--template <name>] [--new]
 
 Start an opencode control-agent session in ship role, detached in the
 background (like run-opencode.ship, but as a detachable termctl terminal).
@@ -384,6 +385,7 @@ Flags:
   --class <class>     ship class/role (e.g. scout, worker, flagship).
                        Set automatically from template if --template used.
   --unrestricted      unrestricted permissions (allow all, bypass ask/deny)
+  --new               start a fresh session (do not resume previous session for this ship name)
 
 Task assignment:
   Ships receive tasks via the comms bus, NOT via extra arguments.
@@ -394,6 +396,7 @@ Task assignment:
 Example:
   starfleetctl session ship-run --name Voyager --model nvidia/nemotron-3-ultra-550b-a55b
   starfleetctl session ship-run --template cruiser --name Cruiser-1
+  starfleetctl session ship-run --name Voyager --model nvidia/nemotron-3-ultra-550b-a55b --new
 `)
 		return 0
 	}
@@ -405,6 +408,7 @@ Example:
 	class := ""
 	template := ""
 	unrestricted := false
+	forceNew := false
 	var oaArgs []string
 	for len(args) > 0 {
 		switch args[0] {
@@ -452,6 +456,9 @@ Example:
 			args = args[2:]
 		case "--unrestricted":
 			unrestricted = true
+			args = args[1:]
+		case "--new":
+			forceNew = true
 			args = args[1:]
 		case "--":
 			oaArgs = args[1:]
@@ -507,6 +514,7 @@ Example:
 		ExtraArgs:    oaArgs,
 		Class:        class,
 		Unrestricted: unrestricted,
+		ForceNew:     forceNew,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "session ship-run:", err)
@@ -531,6 +539,7 @@ type LaunchShipOpts struct {
 	Unrestricted bool     // unrestricted permissions (allow all)
 	ExtraArgs    []string // extra args passed to opencode after --prompt
 	Mode         string   // "pty" | "api"; empty => "pty"
+	ForceNew     bool     // if true, start a fresh session instead of resuming the last one
 }
 
 // LaunchShip starts a detached opencode control-agent ship and returns its
@@ -647,9 +656,23 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("generate opencode config: %w", err)
 	}
+
+	// Look up previous session to resume, unless --new is specified
+	sessionID := ""
+	if !o.ForceNew {
+		sessionID, err = findLastSessionForShip(root, name)
+		if err != nil {
+			// Log but don't fail - treat as no previous session
+			fmt.Fprintf(os.Stderr, "LaunchShip: warning: session lookup failed: %v\n", err)
+		}
+	}
+
 	inner = "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
 	inner += "exec " + shellQuote(resolveClientPath("opencode"))
 	inner += " --model " + shellQuote(effectiveModel)
+	if sessionID != "" {
+		inner += " --session " + shellQuote(sessionID)
+	}
 	shipPrompt := "You are fleet ship " + name + ", report to flagship " + flagship + "."
 	if launchType == "background" || launchType == "auto" {
 		shipPrompt += " You were launched in " + launchType + " mode (detached, no human at your " +
@@ -1251,4 +1274,21 @@ func validateModelAvailable(root, model string) error {
 		}
 	}
 	return fmt.Errorf("model %q not found in provider %q (available: %d models) — opencode will fall back to default", model, provider, len(available))
+}
+
+// findLastSessionForShip looks up the most recent opencode session for the given
+// ship name (by title). Returns the session ID if found, empty string otherwise.
+func findLastSessionForShip(root, shipName string) (string, error) {
+	sessions, err := ocsessions.List(ocsessions.ListOpts{
+		Title: shipName,
+		Limit: 1,
+	})
+	if err != nil {
+		// If the opencode DB doesn't exist or is inaccessible, treat as no session.
+		return "", nil
+	}
+	if len(sessions) > 0 && sessions[0].ID != "" {
+		return sessions[0].ID, nil
+	}
+	return "", nil
 }
