@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.8'
+const PLUGIN_VERSION = '2.5.9'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -657,9 +657,23 @@ const logPollTimer = setInterval(async () => {
     }
   }, 3000)
 
-  // Resolve session ID: cache or discover from status
+  // Resolve session ID: cache, then the session list (match this ship's
+  // session by title — works without a first turn, unlike session.status()),
+  // then the legacy session.status() fallback.
   const resolveSessionId = async (): Promise<string> => {
     if (currentSessionID) return currentSessionID
+    const ship = process.env.STARFLEET_SHIP_ID || ''
+    try {
+      const lr: any = await client.session.list()
+      const arr: any[] = Array.isArray(lr) ? lr : ((lr as any)?.data ?? (lr as any)?.body ?? [])
+      if (ship && Array.isArray(arr)) {
+        const mine = arr
+          .filter((s: any) => s && typeof s.title === 'string' &&
+            (s.title === ship || s.title.includes(ship)))
+          .sort((a: any, b: any) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))[0]
+        if (mine?.id) { currentSessionID = mine.id; return currentSessionID }
+      }
+    } catch { /* fall through to status() */ }
     try {
       const st = await client.session.status()
       const stBody = st?.body ?? st
