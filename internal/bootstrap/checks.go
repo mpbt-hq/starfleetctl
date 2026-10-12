@@ -1189,7 +1189,7 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 
 # Runtime state files
 /DASHBOARD.md
--/var/DASHBOARD.md
+/var/DASHBOARD.md
 
 # Built binary (built from src/starfleetctl/)
 /bin/starfleetctl
@@ -1215,24 +1215,72 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 /src/bin/
 `
 
+// gitignoreRequiredEntries returns the non-comment, non-blank lines of the
+// starfleetAIGitignore template — every one must be present in the installed
+// .starfleet-ai/.gitignore.
+func gitignoreRequiredEntries() []string {
+	var out []string
+	for _, l := range strings.Split(starfleetAIGitignoreContent, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+func missingGitignoreEntries(content string) []string {
+	present := map[string]bool{}
+	for _, l := range strings.Split(content, "\n") {
+		present[strings.TrimSpace(l)] = true
+	}
+	var missing []string
+	for _, e := range gitignoreRequiredEntries() {
+		if !present[e] {
+			missing = append(missing, e)
+		}
+	}
+	return missing
+}
+
 func verifyStarfleetAIGitignore(b *Bootstrap) (bool, string) {
 	path := filepath.Join(b.Root, ".starfleet-ai", ".gitignore")
-	_, err := os.Stat(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, "missing .starfleet-ai/.gitignore"
 	}
-	return true, "present"
+	if missing := missingGitignoreEntries(string(data)); len(missing) > 0 {
+		return false, fmt.Sprintf(".starfleet-ai/.gitignore misses %d entries (e.g. %s)", len(missing), missing[0])
+	}
+	return true, "present, up to date"
 }
 
 func fixStarfleetAIGitignore(b *Bootstrap) error {
 	path := filepath.Join(b.Root, ".starfleet-ai", ".gitignore")
-	_, err := os.Stat(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		// File doesn't exist, create it from template
 		return os.WriteFile(path, []byte(starfleetAIGitignoreContent), 0o644)
 	}
-	// File exists, leave it alone
-	return nil
+	// Append the entries the template has but the installed file lacks.
+	// Idempotent — keeps any local additions intact.
+	missing := missingGitignoreEntries(string(data))
+	if len(missing) == 0 {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if !strings.HasSuffix(string(data), "\n") {
+		if _, err := f.WriteString("\n"); err != nil {
+			return err
+		}
+	}
+	_, err = f.WriteString(strings.Join(missing, "\n") + "\n")
+	return err
 }
 
 func verifyGitignoreClaudeHooks(b *Bootstrap) (bool, string) {
