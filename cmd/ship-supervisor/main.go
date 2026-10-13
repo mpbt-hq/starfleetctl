@@ -6,7 +6,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -88,6 +90,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start HTTP API for ship management
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/launch", handleLaunchRequest)
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		})
+		addr := "127.0.0.1:8444"
+		fmt.Fprintf(os.Stderr, "ship-supervisor: HTTP API listening on %s\n", addr)
+		if err := http.ListenAndServe(addr, mux); err != nil {
+			fmt.Fprintf(os.Stderr, "ship-supervisor: HTTP API error: %v\n", err)
+		}
+	}()
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
@@ -98,6 +115,137 @@ func main() {
 	}()
 
 	select {}
+}
+
+func handleLaunchRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var p struct {
+		Name         string `json:"name"`
+		Model        string `json:"model"`
+		Provider     string `json:"provider"`
+		Parent       string `json:"parent"`
+		Unrestricted bool   `json:"unrestricted"`
+		Template     string `json:"template"`
+		ForceNew     bool   `json:"force_new"`
+		LaunchType   string `json:"launch_type"`
+		Class        string `json:"class"`
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	if err := json.Unmarshal(body, &p); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+
+	// Load template if specified
+	var templateModel, templateLaunchType, templateClass string
+	if p.Template != "" {
+		tplCfg, err := config.LoadShipTemplates(root)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("load templates: %v", err), http.StatusInternalServerError)
+			return
+		}
+		tpl, err := tplCfg.GetTemplate(p.Template)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%v (available: %v)", err, tplCfg.ListTemplateNames()), http.StatusBadRequest)
+			return
+		}
+		templateModel = tpl.Model
+		templateLaunchType = tpl.SessionType
+		templateClass = tpl.Name
+	}
+
+	model := p.Model
+	if model == "" {
+		model = templateModel
+	}
+	launchType := p.LaunchType
+	if launchType == "" {
+		launchType = "auto"
+	}
+	if launchType == "auto" && templateLaunchType != "" {
+		launchType = templateLaunchType
+	}
+	class := p.Class
+	if class == "" && templateClass != "" {
+		class = templateClass
+	}
+
+	if model == "" {
+		http.Error(w, "model is required (or use template)", http.StatusBadRequest)
+		return
+	}
+
+	config := ShipConfig{
+		Root:         root,
+		Name:         p.Name,
+		Model:        model,
+		Provider:     p.Provider,
+		Parent:       p.Parent,
+		LaunchType:   launchType,
+		Unrestricted: p.Unrestricted,
+		Class:        class,
+		ForceNew:     p.ForceNew,
+	}
+
+	shipID, err := launchShipViaSupervisor(config)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "ship_id": shipID})
+}
+
+func launchShipViaSupervisor(config ShipConfig) (string, error) {
+	ship := getOrCreateShip(config.Name)
+	ship.Config = config
+
+	if err := os.MkdirAll(filepath.Dir(ship.SocketPath), 0o755); err != nil {
+		return "", fmt.Errorf("mkdir socket dir: %w", err)
+	}
+
+	os.Remove(ship.SocketPath)
+
+	listener, err := net.Listen("unix", ship.SocketPath)
+	if err != nil {
+		return "", fmt.Errorf("listen on %s: %w", ship.SocketPath, err)
+	}
+	ship.Listener = listener
+
+	fmt.Fprintf(os.Stderr, "ship-supervisor: Ship %s listener on %s\n", config.Name, ship.SocketPath)
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				select {
+				case <-ship.Done():
+					return
+				default:
+					fmt.Fprintf(os.Stderr, "ship-supervisor: accept failed for %s: %v\n", config.Name, err)
+					continue
+				}
+			}
+			go handleControlConn(ship, conn)
+		}
+	}()
+
+	if err := startChild(ship, config.Model); err != nil {
+		return "", err
+	}
+
+	return config.Name, nil
 }
 
 func stopAllShips() {

@@ -890,11 +890,6 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		return "", err
 	}
 
-	// Start the initial child process
-	if err := startChild(""); err != nil {
-		return "", err
-	}
-
 	fmt.Fprintf(os.Stderr, "LaunchShip: Supervisor started for %s, returning (listener goroutine manages lifecycle)\n", name)
 	return name, nil
 }
