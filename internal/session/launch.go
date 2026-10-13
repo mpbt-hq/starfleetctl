@@ -6,6 +6,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -23,6 +24,11 @@ import (
 	"github.com/metux/starfleetctl/internal/opencode"
 	"github.com/metux/starfleetctl/internal/shipnames"
 )
+
+// SocketPath returns the path to the Unix domain socket for controlling the ship.
+func SocketPath(root, shipID string) string {
+	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".soc")
+}
 
 // isShipRunning checks if a ship is actually running by reading its PID file
 // and verifying the process exists. Returns true if the ship is running.
@@ -71,9 +77,6 @@ type LaunchVars struct {
 	Mode       string // "pty" | "api"; empty => "pty"
 }
 
-// runLaunch implements `session run <release> [flags...] [-- <args...>]`.
-// By default it launches a detached termctl terminal; pass --print
-// to emit shell-evaluable launch variables instead (legacy mode).
 func runLaunch(root string, args []string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Print(`session run <release> [flags...] [-- <args...>]
@@ -666,6 +669,74 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		return name, nil
 	}
 
+	// Control socket for auto-restart feature
+	controlSocketPath := SocketPath(root, name)
+	os.Remove(controlSocketPath)
+
+	// Channels for process lifecycle management
+	restartCh := make(chan string, 1) // new model for restart
+	shutdownCh := make(chan struct{}) // graceful shutdown signal
+
+	// Start control socket listener for RESTART/STOP/STATUS commands
+	go func() {
+		listener, err := net.Listen("unix", controlSocketPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to listen on control socket %s: %v\n", controlSocketPath, err)
+			return
+		}
+		defer listener.Close()
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				select {
+				case <-shutdownCh:
+					return
+				default:
+					fmt.Fprintf(os.Stderr, "Failed to accept control connection: %v\n", err)
+					continue
+				}
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 1024)
+				n, err := c.Read(buf)
+				if err != nil {
+					return
+				}
+				command := strings.TrimSpace(string(buf[:n]))
+				fmt.Fprintf(os.Stderr, "Control command received: %s\n", command)
+
+				parts := strings.SplitN(command, " ", 2)
+				cmd := strings.ToUpper(strings.TrimSpace(strings.Split(parts[0], "\n")[0]))
+				args := ""
+				if len(parts) > 1 {
+					args = strings.TrimSpace(parts[1])
+				}
+
+				switch cmd {
+				case "RESTART":
+					newModel := ""
+					if strings.HasPrefix(args, "model=") {
+						newModel = strings.TrimPrefix(args, "model=")
+					}
+					select {
+					case restartCh <- newModel:
+						c.Write([]byte("OK\n"))
+					default:
+						c.Write([]byte("BUSY\n"))
+					}
+				case "STOP":
+					close(shutdownCh)
+					c.Write([]byte("OK\n"))
+				case "STATUS":
+					c.Write([]byte("OK\n"))
+				default:
+					c.Write([]byte("UNKNOWN COMMAND\n"))
+				}
+			}(conn)
+		}
+	}()
+
 	opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel, o.Class)
 	if err != nil {
 		return "", fmt.Errorf("generate opencode config: %w", err)
@@ -716,7 +787,19 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if err := spawnSessionAt(root, vars, logPath); err != nil {
 		return "", err
 	}
-	return name, nil
+
+	// Wait for shutdown or restart signal
+	select {
+	case <-shutdownCh:
+		fmt.Fprintf(os.Stderr, "Shutdown signal received for %s\n", name)
+		return name, nil
+	case newModel := <-restartCh:
+		fmt.Fprintf(os.Stderr, "Restart requested for %s with model: %s\n", name, newModel)
+		if newModel != "" {
+			o.Model = newModel
+		}
+		return name, nil
+	}
 }
 
 // StopShip stops a running ship by ID, cleans up its termctl pipe, comms
