@@ -66,21 +66,38 @@ func RunBackportCommit(root string, args []string) int {
 	repoSlug := parseGitHubRepoSlug(originURL)
 	upRemote := gitConfigGet(dest, "make-pr.upstream-remote")
 
-	// 2. resolve a PR number to its merge commit; otherwise use the arg verbatim
+	// 2. resolve a PR number to its merge commit; if none, use the PR's head commit; otherwise use the arg verbatim
 	var sha string
+	var prNum string
+	var isOpenPR bool
 	if prNumberRE.MatchString(what) {
-		prNum := strings.TrimPrefix(what, "#")
-		out, err := runGH("pr", "view", prNum, "-R", repoSlug, "--json", "mergeCommit", "--jq", ".mergeCommit.oid")
+		prNum = strings.TrimPrefix(what, "#")
+		// Try to get the merge commit first
+		mergeOut, err := runGH("pr", "view", prNum, "-R", repoSlug, "--json", "mergeCommit", "--jq", ".mergeCommit.oid")
 		if err != nil {
 			fprintErr("backport-commit", err)
 			return 1
 		}
-		sha = trimTrailingNewline(string(out))
-		if sha == "" || sha == "null" {
-			fmt.Fprintf(os.Stderr, "backport-commit: PR #%s is not merged / has no merge commit\n", prNum)
-			return 1
+		mergeSHA := trimTrailingNewline(string(mergeOut))
+		if mergeSHA != "" && mergeSHA != "null" {
+			sha = mergeSHA
+			fmt.Printf("backport-commit: PR #%s -> merge commit %s\n", prNum, sha)
+		} else {
+			// Fallback to the PR's head commit
+			headOut, err := runGH("pr", "view", prNum, "-R", repoSlug, "--json", "headRefOid", "--jq", ".headRefOid")
+			if err != nil {
+				fprintErr("backport-commit", err)
+				return 1
+			}
+			headSHA := trimTrailingNewline(string(headOut))
+			if headSHA == "" || headSHA == "null" {
+				fmt.Fprintf(os.Stderr, "backport-commit: PR #%s has no head commit\n", prNum)
+				return 1
+			}
+			sha = headSHA
+			isOpenPR = true
+			fmt.Printf("backport-commit: PR #%s (open) -> head commit %s\n", prNum, sha)
 		}
-		fmt.Printf("backport-commit: PR #%s -> merge commit %s\n", prNum, sha)
 	} else {
 		sha = what
 	}
@@ -103,11 +120,38 @@ func RunBackportCommit(root string, args []string) int {
 		_ = gitRunSilent(dest, "cherry-pick", "--abort")
 		fmt.Fprintln(os.Stderr, "backport-commit: cherry-pick failed; trying path-remapped apply (dir reorg)...")
 
-		rc := applyViaPathRemap(dest, sha, projCfg)
+		rc := applyViaPathRemap(dest, sha, projCfg, prNum, isOpenPR)
 		if rc != 0 {
 			return rc
 		}
 		fmt.Fprintln(os.Stderr, "backport-commit: applied via path remap.")
+	} else {
+		// If this was an open PR, amend the commit message to add a note.
+		if isOpenPR {
+			// Amend the commit to add a note.
+			msg, err := gitCapture(dest, "log", "-1", "--format=%B", "HEAD")
+			if err != nil {
+				fprintErr("backport-commit", err)
+				return 1
+			}
+			author, err := gitCapture(dest, "log", "-1", "--format=%an <%ae>", "HEAD")
+			if err != nil {
+				fprintErr("backport-commit", err)
+				return 1
+			}
+			tmp, err := os.CreateTemp("", "backport-commit-msg-*")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "backport-commit:", err)
+				return 1
+			}
+			defer os.Remove(tmp.Name())
+			fmt.Fprintf(tmp, "%s\n\nNote: This commit was backported from an open PR (%s).\n", msg, prNum)
+			tmp.Close()
+			if err := gitRunErr(dest, "commit", "--amend", "--quiet", "--author="+author, "-F", tmp.Name()); err != nil {
+				fprintErr("backport-commit", err)
+				return 1
+			}
+		}
 	}
 
 	newSHA, err := gitCapture(dest, "rev-parse", "HEAD")
@@ -131,7 +175,7 @@ func RunBackportCommit(root string, args []string) int {
 // cherry-picked-from provenance). Returns 0 on success, or the exit code
 // backport-commit should return (3 for the documented "do it manually"
 // cases, matching the bash original's exit codes).
-func applyViaPathRemap(dest, sha string, projCfg *projectconfig.ProjectConfig) int {
+func applyViaPathRemap(dest, sha string, projCfg *projectconfig.ProjectConfig, prNum string, isOpenPR bool) int {
 	namesOut, err := gitCapture(dest, "show", "--format=", "--name-only", sha)
 	if err != nil {
 		fprintErr("backport-commit", err)
@@ -140,7 +184,7 @@ func applyViaPathRemap(dest, sha string, projCfg *projectconfig.ProjectConfig) i
 
 	type remap struct{ from, to string }
 	var remaps []remap
-	remapped := false
+	var remapped bool
 
 	for _, mp := range strings.Split(namesOut, "\n") {
 		if mp == "" {
@@ -218,7 +262,11 @@ func applyViaPathRemap(dest, sha string, projCfg *projectconfig.ProjectConfig) i
 		return 1
 	}
 	defer os.Remove(tmp.Name())
-	fmt.Fprintf(tmp, "%s\n(cherry picked from commit %s)\n", msg, sha)
+	var note string
+	if isOpenPR {
+		note = fmt.Sprintf("\nNote: This commit was backported from an open PR (%s).\n", prNum)
+	}
+	fmt.Fprintf(tmp, "%s\n(cherry picked from commit %s)%s\n", msg, sha, note)
 	tmp.Close()
 
 	if err := gitRunErr(dest, "commit", "--quiet", "--author="+author, "-F", tmp.Name()); err != nil {

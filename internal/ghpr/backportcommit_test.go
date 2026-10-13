@@ -127,7 +127,7 @@ func TestApplyViaPathRemap(t *testing.T) {
 	run("add", "-A")
 	run("commit", "-q", "-m", "reorg: move dpms.c")
 
-	rc := applyViaPathRemap(dir, sha, projectconfig.DefaultProjectConfig())
+	rc := applyViaPathRemap(dir, sha, projectconfig.DefaultProjectConfig(), "", false)
 	if rc != 0 {
 		t.Fatalf("applyViaPathRemap returned %d, want 0", rc)
 	}
@@ -190,7 +190,7 @@ func TestApplyViaPathRemap_NotAReorg(t *testing.T) {
 	// path, so applyViaPathRemap must NOT treat this as a remap case.
 	run("reset", "-q", "--hard", "HEAD~1")
 
-	rc := applyViaPathRemap(dir, sha, projectconfig.DefaultProjectConfig())
+	rc := applyViaPathRemap(dir, sha, projectconfig.DefaultProjectConfig(), "", false)
 	if rc != 3 {
 		t.Fatalf("applyViaPathRemap returned %d, want 3 (not a reorg)", rc)
 	}
