@@ -1609,6 +1609,8 @@ func (s *Server) apiShipDispatch(w http.ResponseWriter, r *http.Request) {
 		s.apiShipScreen(w, r, id)
 	case "stop":
 		s.apiShipStop(w, r, id)
+	case "restart":
+		s.apiShipRestart(w, r, id)
 	case "dimensions":
 		s.apiShipDimensions(w, r)
 	case "x11term":
@@ -1625,6 +1627,29 @@ func (s *Server) apiShipStop(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 	if err := session.StopShip(s.Root, id); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "ship_id": id})
+}
+
+// apiShipRestart restarts a ship by sending a RESTART command via the ship's control socket.
+// If model is provided in the JSON body, it restarts with that model; otherwise restarts with the current model.
+func (s *Server) apiShipRestart(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method not allowed")
+		return
+	}
+	var p struct {
+		Model string `json:"model"`
+	}
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeErr(w, 400, "bad json")
+			return
+		}
+	}
+	if err := session.RestartShip(s.Root, id, p.Model); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}

@@ -40,6 +40,9 @@ Commands:
   stop <id|session>
       Kill a terminal, clear its comms heartbeat, and release its
       ship name (used by scripts/agent-run --stop).
+  restart <id> [--model <model>]
+      Restart a ship by sending a RESTART command via its control socket.
+      If --model is provided, restart with the new model.
   transcript <id> [options]
       Dump an opencode session transcript (SQLite) to stdout or a file.
       See 'session transcript --help'.
@@ -66,6 +69,8 @@ func Run(root string, args []string) int {
 		return runShipRun(root, args[1:])
 	case "stop":
 		return runStop(root, args[1:])
+	case "restart":
+		return runRestart(root, args[1:])
 	case "transcript":
 		return runTranscript(root, args[1:])
 	default:
@@ -203,4 +208,45 @@ func resolvePipe(root, id string) (string, bool) {
 // ResolvePipe is the exported version of resolvePipe for use by other packages.
 func ResolvePipe(root, id string) (string, bool) {
 	return resolvePipe(root, id)
+}
+
+// runRestart implements `session restart <id> [--model <model>]`.
+func runRestart(root string, args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "session restart: need <id>")
+		return 2
+	}
+	if args[0] == "-h" || args[0] == "--help" {
+		fmt.Print(`session restart <id> [--model <model>]
+
+Restart a ship by sending a RESTART command via its control socket.
+If --model is provided, restart with the new model.
+`)
+		return 0
+	}
+	id := args[0]
+	args = args[1:]
+
+	model := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--model" {
+			if i+1 < len(args) {
+				model = args[i+1]
+				// Remove --model and its value from args
+				args = append(args[:i], args[i+2:]...)
+				i--
+			} else {
+				fmt.Fprintln(os.Stderr, "session restart: --model needs a value")
+				return 2
+			}
+		}
+	}
+
+	if err := RestartShip(root, id, model); err != nil {
+		fmt.Fprintf(os.Stderr, "session restart: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("session restart: restarted ship '%s'\n", id)
+	return 0
 }

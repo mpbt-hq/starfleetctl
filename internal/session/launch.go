@@ -858,6 +858,42 @@ func StopShip(root string, id string) error {
 	return nil
 }
 
+// RestartShip sends a RESTART command to the ship's control socket to request a restart.
+// If model is not empty, it sends "RESTART model=<model>", otherwise just "RESTART".
+func RestartShip(root, shipID, model string) error {
+	socketPath := SocketPath(root, shipID)
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("failed to connect to control socket %s: %v", socketPath, err)
+	}
+	defer conn.Close()
+
+	var cmd string
+	if model != "" {
+		cmd = fmt.Sprintf("RESTART model=%s", model)
+	} else {
+		cmd = "RESTART"
+	}
+
+	_, err = conn.Write([]byte(cmd))
+	if err != nil {
+		return fmt.Errorf("failed to write to control socket: %v", err)
+	}
+
+	// Read response (optional, but good to verify)
+	response := make([]byte, 128)
+	n, err := conn.Read(response)
+	if err != nil {
+		// Ignore read errors; we assume the command was sent
+		return nil
+	}
+	resp := strings.TrimSpace(string(response[:n]))
+	if resp != "OK" {
+		return fmt.Errorf("unexpected response from control socket: %s", resp)
+	}
+	return nil
+}
+
 // stopRequestedMarkerPath returns the path to the stop-requested marker file.
 func stopRequestedMarkerPath(root, shipID string) string {
 	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".stop-requested")
