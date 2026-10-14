@@ -211,7 +211,7 @@ func Stop(root string) error {
 	if err := os.Remove(cfg.PIDFile); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	_ = killProcOnAddr(cfg.ListenAddr)
+	_ = killProcsForRoot(root)
 	return nil
 }
 
@@ -313,14 +313,58 @@ func proxyStartProcs() []int {
 	return pids
 }
 
-// killProcOnAddr kills a running proxy daemon by matching its listen address.
-// The daemon's cmdline does not carry the address, so we match the PID file
-// first and only fall back to /proc when the PID file is stale/missing.
-func killProcOnAddr(addr string) error {
+// killProcsForRoot is the /proc fallback used when the PID file is stale or
+// missing: it finds `starfleetctl model-proxy start` processes and kills those
+// belonging to OUR workspace root. The daemon's cmdline carries no listen
+// address, and killing every proxy process on the machine would take down an
+// unrelated instance — e.g. an isolated testbed under _WORK_/, which has its
+// own .starfleet-ai/ marker. So scope by the process's own workspace root
+// (the nearest ancestor carrying a .starfleet-ai/ marker) instead.
+func killProcsForRoot(root string) error {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		rootAbs = root
+	}
 	for _, pid := range proxyStartProcs() {
+		cwd, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "cwd"))
+		if err != nil {
+			continue // cannot determine cwd, skip
+		}
+		if !samePath(procWorkspaceRoot(cwd), rootAbs) {
+			continue // different (or undeterminable) workspace root, don't touch
+		}
 		if process, err := os.FindProcess(pid); err == nil {
 			_ = process.Kill()
 		}
 	}
 	return nil
+}
+
+// procWorkspaceRoot returns the mpbt-workspace root that a process working in
+// cwd belongs to: the nearest ancestor directory carrying a .starfleet-ai/
+// marker. Returns "" when none is found, so callers never treat an unrelated
+// process as their own. (Mirrors the helper in internal/web.)
+func procWorkspaceRoot(cwd string) string {
+	dir := cwd
+	for {
+		if fi, err := os.Stat(filepath.Join(dir, ".starfleet-ai")); err == nil && fi.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// samePath reports whether a and b denote the same filesystem location after
+// resolving to absolute, cleaned paths.
+func samePath(a, b string) bool {
+	aa, err1 := filepath.Abs(a)
+	bb, err2 := filepath.Abs(b)
+	if err1 != nil || err2 != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(aa) == filepath.Clean(bb)
 }
