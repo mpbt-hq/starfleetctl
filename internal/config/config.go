@@ -146,12 +146,21 @@ type ModelProxyProvider struct {
 	// request handling (headers, body tweaks, ...). Empty = generic
 	// OpenAI-compatible. Known types:
 	//   - "opencode-zen": OpenCode Zen — gates anonymous/free capacity by
-	//     validating the User-Agent, so the proxy stamps an opencode UA.
+	//     validating both the User-Agent and a real, account-registered
+	//     session id, so the proxy stamps an opencode UA and forwards the
+	//     client's session (see SessionID for the no-client-session case).
 	Type string `yaml:"type"`
 	// UserAgent, when set, is sent as the upstream request's User-Agent
 	// header (overrides the type's default). Mainly relevant for
 	// "opencode-zen", whose free tier requires an "opencode/<version>" UA.
 	UserAgent string `yaml:"user_agent"`
+	// SessionID, when set, is used as the upstream x-opencode-session value
+	// for requests that carry no client session (health probes, non-opencode
+	// callers). OpenCode Zen's free tier rejects a fabricated id, so without
+	// a real value (either forwarded from the client or configured here) the
+	// request is sent without a session rather than with a random one. Only
+	// relevant for "opencode-zen".
+	SessionID string `yaml:"session_id"`
 	// Capabilities forces capability flags (toolcall, temperature,
 	// reasoning, attachment, ...) onto EVERY model this provider serves, in
 	// the generated per-ship opencode.json model entries — for upstreams

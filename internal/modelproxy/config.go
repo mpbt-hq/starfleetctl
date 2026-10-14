@@ -114,6 +114,11 @@ type Provider struct {
 	// UserAgent overrides the upstream request's User-Agent header
 	// (type-dependent; mainly for "opencode-zen").
 	UserAgent string
+	// SessionID is the upstream x-opencode-session value to use when a request
+	// carries no client session (health probes, non-opencode callers). Zen's
+	// free tier rejects fabricated ids, so when this is empty no session
+	// header is sent at all rather than a random one.
+	SessionID string
 	// Capabilities forces capability flags (toolcall, temperature, ...) onto
 	// every model this provider serves in the generated opencode config, for
 	// upstreams whose catalog does not advertise them. See
@@ -195,6 +200,7 @@ func Load(root string) (*Config, error) {
 			prov.HoldTimeoutMS = 15000 // 15s default hold timeout
 		}
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)
+		prov.SessionID = strings.TrimSpace(p.SessionID)
 		prov.Capabilities = append([]string(nil), p.Capabilities...) // copy, never alias the yaml slice
 		out.Providers = append(out.Providers, prov)
 		for r := range refs {
@@ -238,6 +244,7 @@ func Load(root string) (*Config, error) {
 			prov.HoldTimeoutMS = 15000
 		}
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)
+		prov.SessionID = strings.TrimSpace(p.SessionID)
 		prov.Capabilities = append([]string(nil), p.Capabilities...)
 		out.Providers = append(out.Providers, prov)
 		for r := range refs {
@@ -360,14 +367,16 @@ func (p *Provider) applyUpstreamHeaders(up *http.Request, from *http.Request) {
 	} else {
 		up.Header.Set("User-Agent", defaultOpenCodeZenUserAgent)
 	}
-	// x-opencode-session: prefer the client's own session id (real one, keeps
-	// the prefix cache warm), in either spelling it may arrive with.
+	// x-opencode-session: prefer the client's own session id (a real one keeps
+	// Zen's prefix cache warm and passes its account check). When the caller
+	// sends none, fall back to a configured SessionID if present. Zen rejects
+	// a fabricated id with HTTP 403, so we must never invent one.
 	if v := headerFrom(from, "x-opencode-session"); v != "" {
 		up.Header.Set("x-opencode-session", v)
 	} else if v := headerFrom(from, "X-Session-Id"); v != "" {
 		up.Header.Set("x-opencode-session", v)
-	} else {
-		up.Header.Set("x-opencode-session", "ses_"+randHex(16))
+	} else if p.SessionID != "" {
+		up.Header.Set("x-opencode-session", p.SessionID)
 	}
 	if v := headerFrom(from, "x-opencode-client"); v != "" {
 		up.Header.Set("x-opencode-client", v)
