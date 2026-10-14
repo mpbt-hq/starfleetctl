@@ -16,7 +16,7 @@ sub-skills: **`starfleet-tasks`** (task+reports), **`starfleet-github`**
 | Subcommand | Purpose |
 |---|---|
 | `comms <cmd>` | Status board + directive bus (status/board/tell/broadcast/ack/inbox) |
-| `dashboard <cmd>` | DASHBOARD.md read/write/commit cycle |
+| `dashboard topic <cmd>` | Per-topic dashboard files (read/write/commit) |
 | `ws-commit -m <msg> <paths>` | Atomic commit+push under clone lock |
 | `ship-names <cmd>` | Ship name registry (assign/release/list/gc/shell-env) |
 | `with-clone-lock [cmd...]` | Serialize mutating work in a git working tree |

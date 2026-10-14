@@ -207,17 +207,6 @@ func runCapture(root string, args []string) int {
 		return 1
 	}
 
-	// Reindex so the new task shows up in DASHBOARD.md's "Active Topics"
-	// table, then commit the regenerated index (sanctioned path — never
-	// hand-edit it). Best-effort: a malformed sibling topic can break reindex
-	// fleet-wide; the task itself is already captured + committed, so don't
-	// fail the whole command on a reindex/commit problem — just warn.
-	if err := d.DoReindex(); err != nil {
-		fmt.Fprintf(os.Stderr, "task capture: dashboard reindex failed (%v) — task %s is captured but not yet in DASHBOARD.md index\n", err, fullSlug)
-	} else if err := d.DoCommit("reindex: add task "+fullSlug, push); err != nil {
-		fmt.Fprintf(os.Stderr, "task capture: dashboard reindex commit failed (%v) — task %s is captured but DASHBOARD.md index not updated\n", err, fullSlug)
-	}
-
 	// Commission the ship (after the dashboard state is durable).
 	if assignMode != "" && assign != "" {
 		if cerr := commissionShip(root, fullSlug, title, assign, false); cerr != nil {
@@ -399,20 +388,12 @@ Exit codes:
   3  no such task (slug not found)
 `
 
-// commitAndReindex commits the single topic file (and, best-effort, the
-// regenerated DASHBOARD.md index) the same way runCapture does — shared so the
-// assign/unassign/status paths keep identical fleet-visibility behaviour.
+// commitAndReindex commits the single topic file the same way runCapture does —
+// shared so the assign/unassign/status paths keep identical fleet-visibility
+// behaviour.
 func commitAndReindex(d *dashboard.Dashboard, slug, msg string, push bool) {
 	if err := d.DoTopicCommit(slug, msg, push); err != nil {
 		fmt.Fprintf(os.Stderr, "task: topic commit failed: %v\n", err)
-		return
-	}
-	if err := d.DoReindex(); err != nil {
-		fmt.Fprintf(os.Stderr, "task: dashboard reindex failed (%v) — task %s updated but not yet in DASHBOARD.md index\n", err, slug)
-		return
-	}
-	if err := d.DoCommit("reindex: update task "+slug, push); err != nil {
-		fmt.Fprintf(os.Stderr, "task: dashboard reindex commit failed (%v) — task %s updated but DASHBOARD.md index not updated\n", err, slug)
 	}
 }
 
@@ -618,7 +599,7 @@ func runStatus(root string, args []string) int {
 const rmUsage = `task rm <slug>
 
 Delete a task topic from the dashboard. Removes the topic file under
-dashboard/topics/ and reindexes DASHBOARD.md.
+dashboard/topics/.
 
 Exit codes:
   0  task removed
@@ -628,8 +609,8 @@ Exit codes:
 
 const purgeUsage = `task purge [--no-push]
 
-Delete ALL tasks with status "done" from the dashboard. Removes topic files
-and reindexes DASHBOARD.md. Shows which tasks were deleted.
+Delete ALL tasks with status "done" from the dashboard. Removes topic files.
+Shows which tasks were deleted.
 
 Exit codes:
   0  purge completed (may be zero tasks deleted)
@@ -737,10 +718,6 @@ func runPurge(root string, args []string) int {
 	msg := fmt.Sprintf("task: purge %d done tasks", len(toDelete))
 	if err := d.DoTopicCommitAll(msg, push); err != nil {
 		fmt.Fprintf(os.Stderr, "task purge: commit failed: %v\n", err)
-		return 1
-	}
-	if err := d.DoReindex(); err != nil {
-		fmt.Fprintf(os.Stderr, "task purge: reindex failed: %v\n", err)
 		return 1
 	}
 
@@ -1468,11 +1445,6 @@ func runSweepStale(root string, args []string) int {
 	if err := d.DoTopicCommitAll("task: sweep-stale — interrupted tasks of dead ships", !noPush); err != nil {
 		fmt.Fprintln(os.Stderr, "task sweep-stale:", err)
 		return 1
-	}
-	if err := d.DoReindex(); err != nil {
-		fmt.Fprintf(os.Stderr, "task: dashboard reindex failed (%v)\n", err)
-	} else if err := d.DoCommit("reindex: sweep-stale", !noPush); err != nil {
-		fmt.Fprintf(os.Stderr, "task: dashboard reindex commit failed (%v)\n", err)
 	}
 
 	fmt.Printf("task-sweep-stale: interrupted=%d ships=%d\n", interrupted, len(staleShips))

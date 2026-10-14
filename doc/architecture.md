@@ -34,7 +34,6 @@ workspace/
 │       ├── pr-3162.tsv
 │       └── pr-3163.tsv
 ├── .starfleet-ai/var/
-│   ├── DASHBOARD.md            # Project status index
 │   └── dashboard/topics/       # Per-topic status files
 ```
 

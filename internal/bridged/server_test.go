@@ -243,39 +243,32 @@ func TestPerRequestIdentityNoLeakage(t *testing.T) {
 }
 
 func TestDashboardRoundTrip(t *testing.T) {
-	sockPath, root, stop := startTestServer(t)
+	sockPath, _, stop := startTestServer(t)
 	defer stop()
 
-	// Test that "show" command no longer exists (was removed)
+	// `show` renders the dashboard directly from the topic files and must still
+	// work (also over the bridged socket).
 	resp, err := Call(sockPath, Request{Cmd: "dashboard", Args: []string{"show"}}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.ExitCode == 0 {
-		t.Fatalf("show command should not exist, but exited with 0")
-	}
-	if !strings.Contains(resp.Stderr, "unknown command: show") {
-		t.Errorf("expected 'unknown command: show' error, got: %q", resp.Stderr)
-	}
-
-	newFile := filepath.Join(t.TempDir(), "new.md")
-	if err := os.WriteFile(newFile, []byte("# DASHBOARD\n\nupdated via bridged\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	resp, err = Call(sockPath, Request{Cmd: "dashboard", Args: []string{"write", newFile}}, 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if resp.ExitCode != 0 {
-		t.Fatalf("write: exit %d, stderr=%q", resp.ExitCode, resp.Stderr)
+		t.Fatalf("dashboard show: exit %d, stderr=%q", resp.ExitCode, resp.Stderr)
 	}
 
-	got, err := os.ReadFile(filepath.Join(root, ".starfleet-ai", "var", "DASHBOARD.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(got), "updated via bridged") {
-		t.Errorf("DASHBOARD.md not updated: %q", got)
+	// The old DASHBOARD.md-file command group (write/pull/commit/reindex) is
+	// gone — none of these must be accepted anymore.
+	for _, gone := range []string{"write", "reindex", "pull", "commit"} {
+		resp, err := Call(sockPath, Request{Cmd: "dashboard", Args: []string{gone}}, 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.ExitCode == 0 {
+			t.Fatalf("dashboard %s should not exist, but exited 0", gone)
+		}
+		if !strings.Contains(resp.Stderr, "unknown command: "+gone) {
+			t.Errorf("dashboard %s: expected 'unknown command: %s', got %q", gone, gone, resp.Stderr)
+		}
 	}
 }
 

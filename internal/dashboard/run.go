@@ -6,14 +6,12 @@ package dashboard
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 const usage = `dashboard <command> [args…]
 
-  pull                          sync local DASHBOARD.md with origin
-  write <file|->                replace DASHBOARD.md's content (no commit)
-  commit -m "<msg>" [--no-push] stage + commit (+ pull --rebase + push)
-  reindex                       regenerate the thin index from dashboard/topics/*.md
+  show                          print the dashboard (rendered from the topic files)
 
   topic list [--json] [--category active|parked] [--status <substr>] [--tags <substr>]
                                               every topic's slug/title/status (with filters)
@@ -55,23 +53,8 @@ func Run(root string, args []string) int {
 	case "-h", "--help":
 		fmt.Print(usage)
 		return 0
-	case "pull":
-		cmdErr = d.DoPull()
-	case "write":
-		if len(args) != 2 {
-			fmt.Fprint(os.Stderr, usage)
-			return 2
-		}
-		cmdErr = d.DoWrite(args[1])
-	case "commit":
-		msg, push, perr := parseCommitArgs(args[1:])
-		if perr != nil {
-			fmt.Fprintln(os.Stderr, "dashboard:", perr)
-			return 2
-		}
-		cmdErr = d.DoCommit(msg, push)
-	case "reindex":
-		cmdErr = d.DoReindex()
+	case "show":
+		cmdErr = d.DoShow()
 	case "topic":
 		return runTopic(d, args[1:])
 	default:
@@ -83,6 +66,40 @@ func Run(root string, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// DoShow prints the dashboard as a rendered index, built directly from the
+// per-topic files (the source of truth). There is no DASHBOARD.md file — the
+// view is generated on the fly, so it can never go stale.
+func (d *Dashboard) DoShow() error {
+	metas, err := d.loadAllTopics(false)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString("# Dashboard\n\n## Active Topics\n\n| Topic | Status | File |\n|---|---|---|\n")
+	for _, m := range metas {
+		if m.Category != "active" {
+			continue
+		}
+		fmt.Fprintf(&b, "| %s | %s | `dashboard/topics/%s.md` |\n", dashField(m.Title), dashField(m.Status), m.Slug)
+	}
+	b.WriteString("\n## Parked\n\n| Topic | Noted by | Since | File |\n|---|---|---|---|\n")
+	for _, m := range metas {
+		if m.Category != "parked" {
+			continue
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | `dashboard/topics/%s.md` |\n", dashField(m.Title), dashField(m.NotedBy), dashField(m.Since), m.Slug)
+	}
+	fmt.Print(b.String())
+	return nil
+}
+
+// dashField makes a value safe to embed in a Markdown table cell.
+func dashField(s string) string {
+	s = strings.ReplaceAll(s, "|", "/")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.TrimSpace(s)
 }
 
 func runTopic(d *Dashboard, args []string) int {

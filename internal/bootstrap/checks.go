@@ -14,7 +14,6 @@ import (
 
 	starfleetctl "github.com/metux/starfleetctl"
 	"github.com/metux/starfleetctl/internal/config"
-	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/projectconfig"
 	"github.com/metux/starfleetctl/internal/sop"
 	"github.com/metux/starfleetctl/internal/templates"
@@ -143,12 +142,6 @@ func Checks() []Check {
 			Fix:    fixSopIndex,
 		},
 		{
-			Name:   "DASHBOARD.md",
-			Verify: verifyDashboardMD,
-			Fix:    fixDashboardMD,
-		},
-
-		{
 			Name:   "starfleet fragments (sop.d/starfleet-instructions/)",
 			Verify: verifyStarfleetFragments,
 			Fix:    fixStarfleetFragments,
@@ -230,29 +223,6 @@ func fixSopIndex(b *Bootstrap) error {
 	}
 	_, err = a.EnsureBootstrapped()
 	return err
-}
-
-// verifyDashboardMD/fixDashboardMD: same idea as CLAUDE.md above, but for
-// DASHBOARD.md's dashboard/topics/ + reindex system (internal/dashboard).
-// DASHBOARD.md is now a generated artifact under .starfleet-ai/var/ (not committed).
-func verifyDashboardMD(b *Bootstrap) (bool, string) {
-	path := filepath.Join(b.Root, ".starfleet-ai", "var", "DASHBOARD.md")
-	if _, err := os.Stat(path); err == nil {
-		return true, "present"
-	}
-	return false, "missing (no .starfleet-ai/var/DASHBOARD.md at all)"
-}
-
-func fixDashboardMD(b *Bootstrap) error {
-	d, err := dashboard.New(b.Root)
-	if err != nil {
-		return err
-	}
-	if _, err := d.EnsureBootstrapped(); err != nil {
-		return err
-	}
-	// Also run reindex to populate tables from topic files (idempotent)
-	return d.DoReindex()
 }
 
 func verifyDirs(b *Bootstrap) (bool, string) {
@@ -1186,10 +1156,6 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 /var/model-health.json
 /var/model-proxy.pid
 /var/web.pid
-
-# Runtime state files
-/DASHBOARD.md
-/var/DASHBOARD.md
 
 # Built binary (built from src/starfleetctl/)
 /bin/starfleetctl

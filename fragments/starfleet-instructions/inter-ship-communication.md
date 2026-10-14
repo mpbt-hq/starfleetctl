@@ -45,7 +45,7 @@ and responds. See the `starfleet` skill for the full command reference.
 
 The dashboard is the cross-session "what's in flight" index. All access via
 `starfleetctl dashboard` subcommands — **never** `Read`/`Edit`/`Write`/`Glob`/`Grep`
-on `DASHBOARD.md` or `dashboard/topics/*.md`.
+on `dashboard/topics/*.md`.
 
 - **Keep the dashboard current.** When you start, pause, or finish a topic,
   update its entry **in the same session**.

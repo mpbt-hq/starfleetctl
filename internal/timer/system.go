@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/comms"
-	"github.com/metux/starfleetctl/internal/dashboard"
 	"github.com/metux/starfleetctl/internal/modelproxy"
 	"github.com/metux/starfleetctl/internal/reports"
 	"github.com/metux/starfleetctl/internal/sop"
@@ -45,7 +44,7 @@ func runSystemCommand(root string, cmd []string) error {
 	}
 }
 
-// runReindex refreshes both the SOP instructions index and the dashboard index.
+// runReindex refreshes the SOP instructions index.
 func runReindex(root string) error {
 	a, err := sop.New(root)
 	if err != nil {
@@ -53,13 +52,6 @@ func runReindex(root string) error {
 	}
 	if err := a.DoReindex(); err != nil {
 		return fmt.Errorf("reindex sop: %w", err)
-	}
-	d, err := dashboard.New(root)
-	if err != nil {
-		return fmt.Errorf("reindex dashboard: %w", err)
-	}
-	if err := d.DoReindex(); err != nil {
-		return fmt.Errorf("reindex dashboard: %w", err)
 	}
 	return nil
 }

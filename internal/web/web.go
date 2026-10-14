@@ -111,7 +111,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/events", s.apiEvents)
 	s.mux.HandleFunc("/api/tasks", s.apiTasks)
 	s.mux.HandleFunc("/api/tasks/orphans", s.apiTasksOrphans)
-	s.mux.HandleFunc("/api/dashboard/reindex", s.apiDashboardReindex)
 	s.mux.HandleFunc("/api/tell", s.apiTell)
 	s.mux.HandleFunc("/api/cmd", s.apiCmd)
 	s.mux.HandleFunc("/api/task", s.apiTask)
@@ -411,17 +410,12 @@ func (s *Server) apiPurge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
-	// Try non-strict first (skip invalid files)
+	// Topics are read live from disk (source of truth); there is no separate
+	// index to refresh. Try non-strict first (skip invalid files).
 	metas, err := s.dash.LoadAllTopicsJSON(false)
 	if err != nil {
-		// If even non-strict fails, try auto-reindex and retry
-		if reindexErr := s.dash.DoReindex(); reindexErr == nil {
-			metas, err = s.dash.LoadAllTopicsJSON(false)
-		}
-		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
+		writeErr(w, 500, err.Error())
+		return
 	}
 	writeJSON(w, metas)
 }
@@ -554,24 +548,6 @@ func (s *Server) apiTopicUpdate(w http.ResponseWriter, r *http.Request, slug str
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "slug": newSlug})
-}
-
-// apiDashboardReindex handles POST /api/dashboard/reindex — regenerates the
-// thin index tables in DASHBOARD.md from every dashboard/topics/*.md file's
-// frontmatter. Needed after topics are added/edited directly in the
-// filesystem: the task list itself reads the topic files live, but the
-// index (which `dashboard topic list` / task dedup read) only updates when a
-// reindex runs.
-func (s *Server) apiDashboardReindex(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeErr(w, 405, "method not allowed")
-		return
-	}
-	if err := s.dash.DoReindex(); err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, map[string]any{"ok": true})
 }
 
 // apiSOPList handles GET /api/sop — returns all SOP fragments as JSON.

@@ -2,19 +2,21 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Package dashboard is the Go port of scripts/dashboard — the safe
-// read/write/commit/push cycle for DASHBOARD.md, the cross-session "what's
-// in flight / what got parked" index (see mpbt-workspace's CLAUDE.md
-// "Working practices"). It shells out to git exactly like the bash original
-// (pull --rebase --autostash, add, commit, push) and shares the SAME
-// per-worktree lock file as scripts/with-clone-lock / scripts/ws-commit
-// (<gitdir>/mpbt-clone.lock), so a Go and a bash actor mutating the same
-// clone at once still serialize against each other instead of racing the
-// index/HEAD.
+// read/write/commit/push cycle for the per-topic dashboard files
+// (.starfleet-ai/dashboard/topics/*.md), the cross-session "what's in flight /
+// what got parked" record (see mpbt-workspace's CLAUDE.md "Working practices").
+// The topic files are the source of truth; there is no central DASHBOARD.md
+// document (an earlier thin-index file was removed — nothing read it).
+//
+// It shells out to git exactly like the bash original (pull --rebase
+// --autostash, add, commit, push) and shares the SAME per-worktree lock file as
+// scripts/with-clone-lock / scripts/ws-commit (<gitdir>/mpbt-clone.lock), so a
+// Go and a bash actor mutating the same clone at once still serialize against
+// each other instead of racing the index/HEAD.
 package dashboard
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -22,7 +24,6 @@ import (
 type Dashboard struct {
 	Root   string // workspace root (toplevel of the git checkout)
 	GitDir string // absolute .git dir, for the shared clone lock file
-	File   string // absolute path to DASHBOARD.md
 }
 
 // New resolves a Dashboard rooted at the given workspace root.
@@ -34,7 +35,6 @@ func New(root string) (*Dashboard, error) {
 	return &Dashboard{
 		Root:   root,
 		GitDir: strings.TrimSpace(out),
-		File:   filepath.Join(root, ".starfleet-ai", "var", "DASHBOARD.md"),
 	}, nil
 }
 

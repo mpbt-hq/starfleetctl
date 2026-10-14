@@ -241,7 +241,6 @@
         <option value="created" data-i18n="sort.created">Erstellt</option>
       </select>
       <button class="sec" id="tf_dir" onclick="taskToggleDir()" style="width:auto;padding:6px 10px" data-i18n-title="task.toggle.dir.tooltip" title="Toggle task sort direction">↑</button>
-      <button class="sec" onclick="taskReindex()" data-i18n-title="reindex.title" title="DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)" data-i18n="reindex.btn" style="margin-left:auto;width:auto;padding:6px 12px">↻ Reindex</button>
       <button class="sec" id="btn_orphans" onclick="toggleOrphans()" style="width:auto;padding:6px 12px" data-i18n="orphans.btn" data-i18n-title="orphans.btn.tooltip" title="Toggle orphan tasks view">⚠ Waisen (Orphans)</button>
     </div>
     <div class="card" id="tasklist"></div>
@@ -660,8 +659,6 @@ const I18N = {
     'tf_cat.all': 'Kategorie: alle (inkl. toplevel)', 'sort.label': 'Sortieren:',
     'sort.status': 'Status', 'sort.ship': 'Schiff', 'sort.cat': 'Kategorie',
     'sort.title': 'Titel', 'sort.created': 'Erstellt',
-    'reindex.title': 'DASHBOARD.md-Index aus dashboard/topics/*.md neu erzeugen (nach manuellen Datei-Änderungen)',
-    'reindex.btn': '↻ Reindex',
     'bus.directives': 'Direktiven', 'bus.inbox': 'Inbox', 'bus.asks': 'Fragen',
     'view.label': 'Ansicht:', 'threads.off': '💬 Threads: aus', 'threads.on': '💬 Threads: an',
     'bus.purge': '🗑 Alte löschen', 'bus.purge.prompt': 'Nachrichten älter als (z.B. 7d, 30d, leer=alle):', 'bus.purge.confirm': 'Auch alle Nachrichten von toten Ships löschen? (OK=Ja, Abbrechen=Nein)', 'bus.purge.done': 'Alte Nachrichten gelöscht.',
@@ -675,7 +672,7 @@ const I18N = {
     'tf_target.ship': 'Eigenes Schiff', 'tf_target.system': 'System (direkt)',
     'tf_at.ph': 'z.B. 17:30 / morgen 17:30 / 2026-07-20 09:00', 'tf_tz.ph': 'Zeitzone (z.B. Europe/Berlin oder CEST)',
     'tf_every.ph': 'z.B. 10m / 1h / 30s', 'tf_cron.ph': 'z.B. 0 4 * * *',
-    'tf_cmd.reindex': 'reindex — Agent- und Dashboard-Indices aktualisieren',
+    'tf_cmd.reindex': 'reindex — Agent-/SOP-Index aktualisieren',
     'tf_cmd.web': 'web — Webserver starten (idempotent)',
     'tf_cmd.webrestart': 'web restart — Webserver neustarten (erzwungen)',
     'tf_msg.ph': 'Nachricht…', 'timer.create': 'Erstellen',
@@ -718,7 +715,6 @@ const I18N = {
     'ship.stopconfirm': ' stoppen?',
     'chat.empty': 'keine Nachrichten',
     'term.nocontent': 'kein Terminal-Inhalt verfügbar', 'term.lines': ' Zeilen',
-    'reindex.done': 'Dashboard reindexiert',
     'empty.tasks': 'keine Tasks', 'empty.tasksfilter': 'keine Tasks (Filter)',
     'task.titlemissing': 'Titel fehlt', 'task.status': 'Status → ', 'task.free': 'frei',
     'task.captured.auto': 'Task erfasst — an Flagschiff zur Delegation', 'task.captured': 'Task erfasst',
@@ -781,8 +777,6 @@ const I18N = {
     'tf_cat.all': 'Category: all (incl. toplevel)', 'sort.label': 'Sort:',
     'sort.status': 'Status', 'sort.ship': 'Ship', 'sort.cat': 'Category',
     'sort.title': 'Title', 'sort.created': 'Created',
-    'reindex.title': 'Regenerate DASHBOARD.md index from dashboard/topics/*.md (after manual file edits)',
-    'reindex.btn': '↻ Reindex',
     'bus.directives': 'Directives', 'bus.inbox': 'Inbox', 'bus.asks': 'Questions',
     'view.label': 'View:', 'threads.off': '💬 Threads: off', 'threads.on': '💬 Threads: on',
     'bus.purge': '🗑 Purge old', 'bus.purge.prompt': 'Older than (e.g. 7d, 30d, empty=all):', 'bus.purge.confirm': 'Also delete all messages from dead ships? (OK=Yes, Cancel=No)', 'bus.purge.done': 'Old messages purged.',
@@ -796,7 +790,7 @@ const I18N = {
     'tf_target.ship': 'Own ship', 'tf_target.system': 'System (direct)',
     'tf_at.ph': 'e.g. 17:30 / tomorrow 17:30 / 2026-07-20 09:00', 'tf_tz.ph': 'Timezone (e.g. Europe/Berlin or CEST)',
     'tf_every.ph': 'e.g. 10m / 1h / 30s', 'tf_cron.ph': 'e.g. 0 4 * * *',
-    'tf_cmd.reindex': 'reindex — refresh agent and dashboard indices',
+    'tf_cmd.reindex': 'reindex — refresh agent/SOP index',
     'tf_cmd.web': 'web — start webserver (idempotent)',
     'tf_cmd.webrestart': 'web restart — restart webserver (forced)',
     'tf_msg.ph': 'Message…', 'timer.create': 'Create',
@@ -839,7 +833,6 @@ const I18N = {
     'ship.stopconfirm': ' stop?',
     'chat.empty': 'no messages',
     'term.nocontent': 'no terminal content available', 'term.lines': ' lines',
-    'reindex.done': 'Dashboard reindexed',
     'empty.tasks': 'no tasks', 'empty.tasksfilter': 'no tasks (filter)',
     'task.titlemissing': 'Title missing', 'task.status': 'Status → ', 'task.free': 'freed',
     'task.captured.auto': 'Task captured — to flagship for delegation', 'task.captured': 'Task captured',
@@ -1618,16 +1611,6 @@ function taskToggleDir(){
   renderTasks();
 }
 
-// taskReindex regenerates DASHBOARD.md's index from the topic files — for
-// topics added/edited directly in the filesystem. The task list itself reads
-// the files live, so only the index (and downstream dedup/listing) needs this.
-async function taskReindex(){
-  try {
-    await api('/api/dashboard/reindex', {method:'POST'});
-    toast(t('reindex.done'));
-    loadTasks();
-  } catch(e){ toast(t('err.prefix')+esc(e.message), true); }
-}
 
 // --- Orphan tasks: assigned to ships that no longer exist on the board ---
 let orphansVisible = false;

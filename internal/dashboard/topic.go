@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Per-topic file support (DASHBOARD.md restructuring, directive m0048/m0073):
-// DASHBOARD.md itself is a thin, mechanically-regenerated index; the actual
-// content for each topic lives in its own file under dashboard/topics/,
+// Per-topic file support (directive m0048/m0073):
+// The content for each topic lives in its own file under dashboard/topics/,
 // Markdown body with a small YAML-ish frontmatter block (mirroring Claude
-// Code's own per-user memory-file format — see DASHBOARD-RESTRUCTURE.md for
-// the full design rationale). This keeps concurrent ships from colliding on
-// one shared file: two ships editing two different topics touch two
-// different files, and only reindex (regenerating the thin index) touches
-// DASHBOARD.md itself, which is a pure function of the current file set —
-// two racing reindexes converge to the same byte-identical output.
+// Code's own per-user memory-file format). This keeps concurrent ships from
+// colliding on one shared file: two ships editing two different topics touch
+// two different files. The topic files are the source of truth and are read
+// live — there is no central index file.
 //
 // Frontmatter parsing is hand-rolled (stdlib only, no YAML dependency) since
 // the schema is flat key: "quoted value" pairs, never nested structures —

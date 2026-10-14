@@ -11,7 +11,23 @@ starfleetctl dashboard topic <command> [args...]
 
 ## How It Works
 
-The dashboard is a thin index (`.starfleet-ai/var/DASHBOARD.md`) that links to per-topic files under `.starfleet-ai/dashboard/topics/`. Each topic tracks one initiative or topic. The index is regenerated from topic file frontmatter — two ships racing a `reindex` converge to the same output.
+The dashboard is a set of per-topic files under `.starfleet-ai/dashboard/topics/`. Each topic tracks one initiative. The topic files are the source of truth and are read live; there is no central `DASHBOARD.md` document.
+
+## Accessing the dashboard (read vs write)
+
+The dashboard is **always** accessed via `starfleetctl dashboard …` — never by editing files under `.starfleet-ai/dashboard/topics/` directly.
+
+**Read**
+- `starfleetctl dashboard show` — render the whole dashboard (Active + Parked) from the topic files.
+- `starfleetctl dashboard topic list [--json]` — list topics (use `--json` for filtering).
+- `starfleetctl dashboard topic show <slug>` — print one topic.
+
+**Write**
+- `starfleetctl dashboard topic write <slug> <file|->` — replace one topic's content.
+- `starfleetctl dashboard topic commit <slug> -m "<msg>"` — commit + push that one topic.
+- `starfleetctl dashboard topic new <slug> --title "<t>" [--parked]` — scaffold a new topic.
+
+(There is no `dashboard list`, no `dashboard show <file>`, `write`, `pull`, `commit` or `reindex` any more — those operated on the removed `DASHBOARD.md` file.)
 
 ## ⚠️ Common Mistake
 
@@ -22,24 +38,11 @@ The `dashboard` subcommand itself has no `list` — all topic operations are und
 
 ## Commands
 
-### Index Management
+### Render
 
 ```sh
-# Show current dashboard (pulls from remote first)
+# Print the whole dashboard (Active + Parked), rendered live from the topic files
 starfleetctl dashboard show
-
-# Pull latest from remote
-starfleetctl dashboard pull
-
-# Regenerate index from topic files
-starfleetctl dashboard reindex
-
-# Write new content (no commit)
-echo "new content" | starfleetctl dashboard write -
-
-# Commit and push
-starfleetctl dashboard commit -m "update: added new topic"
-starfleetctl dashboard commit -m "update" --no-push
 ```
 
 ### Topic Files
@@ -99,4 +102,4 @@ Description of what this topic tracks...
 
 ## Concurrency
 
-`topic commit` locks only the one topic file's `git add`, so two ships committing different topics never collide. The full `dashboard commit` locks the entire workspace commit path.
+`topic commit` locks only the one topic file's `git add`, so two ships committing different topics never collide.

@@ -179,13 +179,13 @@ func runGithubBackport(args []string) int {
 
 // runGithubIssue is a structural placeholder — the `github issue …` group does
 // not have a backend yet. It exists so the command tree matches the intended
-// shape (see DASHBOARD.md task); wiring it up is future work.
+// shape; wiring it up is future work.
 func runGithubIssue(args []string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Print(githubIssueHelp)
 		return 0
 	}
-	fmt.Fprintln(os.Stderr, "github issue: not yet wired — no implementation yet (tracked in DASHBOARD.md)")
+	fmt.Fprintln(os.Stderr, "github issue: not yet wired — no implementation yet")
 	return 2
 }
 
@@ -195,7 +195,7 @@ func runGithubRelease(args []string) int {
 		fmt.Print(githubReleaseHelp)
 		return 0
 	}
-	fmt.Fprintln(os.Stderr, "github release: not yet wired — no implementation yet (tracked in DASHBOARD.md)")
+	fmt.Fprintln(os.Stderr, "github release: not yet wired — no implementation yet")
 	return 2
 }
 
@@ -262,12 +262,12 @@ Verbs:
 
 const githubIssueHelp = `github issue — (not yet wired)
 
-No implementation yet. Tracked in DASHBOARD.md.
+No implementation yet.
 `
 
 const githubReleaseHelp = `github release — (not yet wired)
 
-No implementation yet. Tracked in DASHBOARD.md.
+No implementation yet.
 `
 
 func printGithubHelp()         { fmt.Print(githubHelp) }

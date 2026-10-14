@@ -131,7 +131,7 @@ Claims are **cooperative** — they don't block git at filesystem level, but all
 
 ### Dashboard — Project Status Tracking
 
-Markdown-based topic tracking in `.starfleet-ai/var/DASHBOARD.md` + `.starfleet-ai/dashboard/topics/*.md`. Managed via `starfleetctl dashboard topic <cmd>`.
+Markdown-based topic tracking in `.starfleet-ai/dashboard/topics/*.md`. Managed via `starfleetctl dashboard topic <cmd>`.
 
 **⚠️ Correct command:** `starfleetctl dashboard topic list` — NOT `starfleetctl dashboard list` (does not exist).
 

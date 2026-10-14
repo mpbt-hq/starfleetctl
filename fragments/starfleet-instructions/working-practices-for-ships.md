@@ -88,7 +88,7 @@ cleared:
   bzw. `github pr checkout`.
 - **Dashboard & topics: CLI only, never raw files.** All access to the dashboard and its
   topics goes through `starfleetctl dashboard`/`starfleetctl task` subcommands. **NEVER**
-  use `Read`/`Edit`/`Write`/`Glob`/`Grep` on `DASHBOARD.md` or `dashboard/topics/*.md` —
+  use `Read`/`Edit`/`Write`/`Glob`/`Grep` on `dashboard/topics/*.md` —
   not even "just to look".
 - **Ships do NOT act autonomously on startup.** After launch, a ship ONLY registers on the board
    (sets status `idle`) and waits for an explicit directive via comms. No autonomous task pickup,

@@ -11,7 +11,7 @@ reports. Commands/comms/concurrency core lives in the **`starfleet`** skill.
 ## Task capture
 
 Record a task in the dashboard, optionally commission a ship. **This only commands —
-never execute the task yourself.** No direct file access to `DASHBOARD.md` or
+never execute the task yourself.** No direct file access to
 `dashboard/topics/*.md`.
 
 ### The one-liner
@@ -87,7 +87,7 @@ The dashboard is the cross-session "what's in flight" index.
 
 > **⚠️ RULE — CLI only, never raw files.** All dashboard access goes through the
 > `starfleetctl dashboard` / `starfleetctl task` subcommands. **NEVER** use file tools
-> (`Read`/`Edit`/`Write`/`Glob`/`Grep`) on `DASHBOARD.md` or `dashboard/topics/*.md` —
+> (`Read`/`Edit`/`Write`/`Glob`/`Grep`) on `dashboard/topics/*.md` —
 > not even to "just look". Direct file access is a **rule violation** (a fleet agent
 > once read the dashboard files directly instead of using starfleetctl; it is how the
 > cross-session index gets clobbered). If you want to read a topic, use
@@ -119,13 +119,12 @@ returns `dashboard: unknown command: list`.
 
 | Command | Purpose |
 |---|---|
+| `dashboard show` | Render the whole dashboard (Active + Parked) from the topic files |
 | `dashboard topic list --json` | List all topics (JSON, for filtering) |
 | `dashboard topic list` | List all topics (human-readable) |
 | `dashboard topic new <slug>` | Create a topic |
 | `dashboard topic write <slug> <file>` | Write topic content |
 | `dashboard topic commit <slug>` | Commit + push topic |
-| `dashboard reindex` | Refresh DASHBOARD.md index |
-| `dashboard commit` | Commit + push index |
 
 ## Reports
 
