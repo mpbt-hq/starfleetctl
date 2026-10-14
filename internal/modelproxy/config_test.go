@@ -112,6 +112,10 @@ func TestLoadNoConfigFile(t *testing.T) {
 	}
 }
 
+// opencodeClientUA is the User-Agent the real opencode client sends (and that
+// the Zen free-tier gate accepts verbatim: opencode/ prefix plus ai-sdk token).
+const opencodeClientUA = "opencode/1.18.35 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+
 func TestApplyUpstreamHeaders(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -130,10 +134,10 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 			wantUA: "",
 		},
 		{
-			name:        "opencode-zen forwards client session id as x-opencode-session",
+			name:        "forwards full opencode UA and maps X-Session-Id to both session headers",
 			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
-			from:        map[string]string{"X-Session-Id": "ses_realid", "User-Agent": "opencode/1.18.30"},
-			wantUA:      "opencode/1.18.30",
+			from:        map[string]string{"X-Session-Id": "ses_realid", "User-Agent": opencodeClientUA},
+			wantUA:      opencodeClientUA,
 			wantSession: "ses_realid",
 			wantClient:  "cli",
 			wantProject: "global",
@@ -142,26 +146,44 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 			name:        "opencode-zen prefers explicit x-opencode-session over X-Session-Id",
 			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
 			from:        map[string]string{"x-opencode-session": "ses_explicit", "X-Session-Id": "ses_client"},
-			wantUA:      "opencode/1.18.30",
+			wantUA:      defaultOpenCodeZenUserAgent,
 			wantSession: "ses_explicit",
 			wantClient:  "cli",
 			wantProject: "global",
 		},
 		{
-			name:        "no client request synthesizes session and default UA",
+			name:        "opencode-zen prefers x-opencode-session-id over x-opencode-session",
 			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
-			from:        nil,
-			wantUA:      "opencode/1.18.30",
-			wantSession: "ses_",
+			from:        map[string]string{"x-opencode-session-id": "ses_idhdr", "x-opencode-session": "ses_sess"},
+			wantUA:      defaultOpenCodeZenUserAgent,
+			wantSession: "ses_idhdr",
 			wantClient:  "cli",
 			wantProject: "global",
 		},
 		{
-			name:        "non-opencode client UA falls back to zen UA",
+			name:        "no client request leaves session unset and uses default UA",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			from:        nil,
+			wantUA:      defaultOpenCodeZenUserAgent,
+			wantSession: "",
+			wantClient:  "cli",
+			wantProject: "global",
+		},
+		{
+			name:        "non-opencode client UA falls back to default zen UA",
 			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
 			from:        map[string]string{"User-Agent": "curl/8.0"},
-			wantUA:      "opencode/1.18.30",
-			wantSession: "ses_",
+			wantUA:      defaultOpenCodeZenUserAgent,
+			wantSession: "",
+			wantClient:  "cli",
+			wantProject: "global",
+		},
+		{
+			name:        "bare opencode UA without ai-sdk token falls back to default",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			from:        map[string]string{"User-Agent": "opencode/1.18.30"},
+			wantUA:      defaultOpenCodeZenUserAgent,
+			wantSession: "",
 			wantClient:  "cli",
 			wantProject: "global",
 		},
@@ -170,7 +192,7 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen", UserAgent: "opencode/9.9.9"},
 			from:        map[string]string{"User-Agent": "curl/8.0"},
 			wantUA:      "opencode/9.9.9",
-			wantSession: "ses_",
+			wantSession: "",
 			wantClient:  "cli",
 			wantProject: "global",
 		},
@@ -178,8 +200,8 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 			name:        "legacy zen- prefixed id still classified",
 			prov:        Provider{ID: "zen-proxy"},
 			from:        nil,
-			wantUA:      "opencode/1.18.30",
-			wantSession: "ses_",
+			wantUA:      defaultOpenCodeZenUserAgent,
+			wantSession: "",
 			wantClient:  "cli",
 			wantProject: "global",
 		},
@@ -206,13 +228,15 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 				return // generic providers must not touch zen headers
 			}
 
-			if tt.wantSession == "ses_" {
-				// synthesized session ids are random: only check the prefix
-				if got := up.Header.Get("x-opencode-session"); !strings.HasPrefix(got, "ses_") || len(got) < 5 {
-					t.Errorf("x-opencode-session = %q, want random ses_ id", got)
-				}
-			} else if got := up.Header.Get("x-opencode-session"); got != tt.wantSession {
-				t.Errorf("x-opencode-session = %q, want %q", got, tt.wantSession)
+			// Both session spellings must always carry the same value, and must
+			// be left unset entirely when the client provided no session.
+			gotSess := up.Header.Get("x-opencode-session")
+			gotSessID := up.Header.Get("x-opencode-session-id")
+			if gotSess != tt.wantSession {
+				t.Errorf("x-opencode-session = %q, want %q", gotSess, tt.wantSession)
+			}
+			if gotSessID != tt.wantSession {
+				t.Errorf("x-opencode-session-id = %q, want %q", gotSessID, tt.wantSession)
 			}
 			if got := up.Header.Get("x-opencode-client"); got != tt.wantClient {
 				t.Errorf("x-opencode-client = %q, want %q", got, tt.wantClient)

@@ -405,9 +405,12 @@ func (p *Provider) forcedModelCaps() []string {
 }
 
 // defaultOpenCodeZenUserAgent is the request User-Agent OpenCode Zen expects
-// of its official client ("opencode/<version>"). It satisfies the free-tier
-// gate while allowing a provider-level user_agent override.
-const defaultOpenCodeZenUserAgent = "opencode/1.18.30"
+// of its official client. The free-tier gate matches it against the official
+// pattern "opencode/<version> ... ai-sdk/provider-utils/<version>" - a bare
+// "opencode/<version>" (no ai-sdk token) is rejected, so keep the ai-sdk
+// token. It satisfies the gate while allowing a provider-level user_agent
+// override.
+const defaultOpenCodeZenUserAgent = "opencode/1.18.30 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
 
 // applyUpstreamHeaders sets any provider-class-specific headers on an
 // outgoing upstream request. from is the client's original request (may be
@@ -415,19 +418,22 @@ const defaultOpenCodeZenUserAgent = "opencode/1.18.30"
 //
 //	opencode-zen — OpenCode Zen. Its free tier only accepts requests that are
 //	indistinguishable from the official opencode client: it validates the
-//	User-Agent (must be "opencode/<version>") and requires the x-opencode-*
-//	identity headers the client always sends (session/client/project).
-//	Verified against the live gateway:
-//	- only the opencode UA            -> HTTP 400 MissingSessionID
-//	- identity headers, no opencode UA -> HTTP 429 FreeUsageLimitError
-//	- opencode UA + session/client/project -> HTTP 200
-//	The @ai-sdk/openai-compatible client that ships pointed at the proxy does
-//	not send x-opencode-* itself, but it DOES send its real, per-conversation
-//	session id as X-Session-Id — forward that verbatim as x-opencode-session
-//	so Zen's per-session prefix cache actually hits across turns. Everything
-//	the client doesn't provide is synthesized (fresh random request id per
-//	request; a sticky bad session id would route every retry to a broken
-//	upstream replica, see opencode issue #46011).
+//	User-Agent and requires the x-opencode-* identity headers the client
+//	sends. Verified against the live gateway:
+//	- UA must start with "opencode/" AND contain "ai-sdk/provider-utils/";
+//	  a bare "opencode/<version>" (no ai-sdk token) -> HTTP 403
+//	  FreeTierError, as does a non-opencode UA (e.g. "curl/8.0") or no UA.
+//	- BOTH x-opencode-session and x-opencode-session-id are required and must
+//	  carry the SAME value; either one alone -> HTTP 403. Extra identity
+//	  headers (client/project/request) are optional.
+//	The @ai-sdk/openai-compatible client ships its real, per-conversation
+//	session id in x-opencode-session / x-opencode-session-id (and as
+//	X-Session-Id) — forward the same value verbatim under BOTH spellings so
+//	Zen's per-session prefix cache hits across turns. A session the client
+//	did not provide is NOT synthesized here: Zen's free tier rejects
+//	fabricated session ids. The request id may be synthesized (fresh random
+//	per request); a sticky bad request id would route every retry to a broken
+//	upstream replica (see opencode issue #46011).
 //
 // Add new cases here as further per-provider requirements arise.
 func (p *Provider) applyUpstreamHeaders(up *http.Request, from *http.Request) {
@@ -435,23 +441,31 @@ func (p *Provider) applyUpstreamHeaders(up *http.Request, from *http.Request) {
 	if !zen {
 		return
 	}
-	// User-Agent: forward the client's opencode UA verbatim when it already
-	// looks like the official client, otherwise use the override/default.
-	if ua := headerFrom(from, "User-Agent"); ua != "" && strings.HasPrefix(ua, "opencode/") {
+	// User-Agent: forward the client's opencode UA verbatim when it is the
+	// full official-client UA (opencode/<version> plus the ai-sdk token the
+	// free-tier gate also matches on), otherwise use the override/default.
+	ua := headerFrom(from, "User-Agent")
+	switch {
+	case ua != "" && strings.HasPrefix(ua, "opencode/") && strings.Contains(ua, "ai-sdk/"):
 		up.Header.Set("User-Agent", ua)
-	} else if p.UserAgent != "" {
+	case p.UserAgent != "":
 		up.Header.Set("User-Agent", p.UserAgent)
-	} else {
+	default:
 		up.Header.Set("User-Agent", defaultOpenCodeZenUserAgent)
 	}
-	// x-opencode-session: prefer the client's own session id (real one, keeps
-	// the prefix cache warm), in either spelling it may arrive with.
-	if v := headerFrom(from, "x-opencode-session"); v != "" {
-		up.Header.Set("x-opencode-session", v)
-	} else if v := headerFrom(from, "X-Session-Id"); v != "" {
-		up.Header.Set("x-opencode-session", v)
-	} else {
-		up.Header.Set("x-opencode-session", "ses_"+randHex(16))
+	// Session: the gate requires x-opencode-session AND x-opencode-session-id
+	// to be present and equal. Take whichever spelling the client supplied
+	// (they carry the same value) and set both. Never fabricate one.
+	sess := headerFrom(from, "x-opencode-session-id")
+	if sess == "" {
+		sess = headerFrom(from, "x-opencode-session")
+	}
+	if sess == "" {
+		sess = headerFrom(from, "X-Session-Id")
+	}
+	if sess != "" {
+		up.Header.Set("x-opencode-session", sess)
+		up.Header.Set("x-opencode-session-id", sess)
 	}
 	if v := headerFrom(from, "x-opencode-client"); v != "" {
 		up.Header.Set("x-opencode-client", v)
