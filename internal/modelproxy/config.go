@@ -6,6 +6,7 @@ package modelproxy
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -503,4 +504,32 @@ func randHex(n int) string {
 		return strconv.FormatInt(time.Now().UnixNano(), 16)
 	}
 	return hex.EncodeToString(b)
+}
+
+// zenToolsRequired is the list of real opencode tool names that satisfy Zen's body gate.
+// Zen's free tier requires ≥4 real opencode tools in the request body.
+var zenToolsRequired = []map[string]any{
+	{"type": "function", "function": map[string]any{"name": "bash", "description": "Run bash commands", "parameters": map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"}}, "required": []string{"command"}}}},
+	{"type": "function", "function": map[string]any{"name": "read", "description": "Read file", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}}},
+	{"type": "function", "function": map[string]any{"name": "write", "description": "Write file", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}}}},
+	{"type": "function", "function": map[string]any{"name": "edit", "description": "Edit file", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "old_string": map[string]any{"type": "string"}, "new_string": map[string]any{"type": "string"}}, "required": []string{"path", "old_string", "new_string"}}}},
+	{"type": "function", "function": map[string]any{"name": "glob", "description": "Glob files", "parameters": map[string]any{"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string"}}, "required": []string{"pattern"}}}},
+}
+
+// ensureZenTools injects the required tools array for Zen's body gate if missing.
+// Zen's free tier requires ≥4 real opencode tools in the request body.
+func ensureZenTools(payload []byte) ([]byte, error) {
+	var m map[string]any
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return payload, err
+	}
+	// Only inject if tools array is missing or has fewer than 4 tools
+	if tools, ok := m["tools"]; ok {
+		if arr, ok := tools.([]any); ok && len(arr) >= 4 {
+			return payload, nil // Already has enough tools
+		}
+	}
+	m["tools"] = zenToolsRequired
+	m["tool_choice"] = "auto"
+	return json.Marshal(m)
 }

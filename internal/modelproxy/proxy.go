@@ -1321,6 +1321,10 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			}
 			payload = raw
 		}
+		// Inject zen tools for body gate if this is an opencode-zen provider and tools missing
+		if prov.Type == "opencode-zen" || strings.HasPrefix(prov.ID, "zen-") {
+			payload, _ = ensureZenTools(payload)
+		}
 		upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, prov.BaseURL+"/chat/completions", bytes.NewReader(payload))
 		if err != nil {
 			return nil, nil, err
