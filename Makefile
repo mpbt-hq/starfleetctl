@@ -17,9 +17,18 @@ PLUGIN_CHECK := scripts/check-opencode-plugin.sh
 
 all: clean build vet fmt test check-plugin
 
+# Go's embedded VCS info (buildvcs) recognises only a .git DIRECTORY, not the
+# .git FILE of a linked worktree. Building inside a worktree that sits under
+# another git repo (e.g. a starfleetctl worktree under the mpbt-workspace) makes
+# buildvcs walk up and stamp the WRONG repo. Pointing GIT_DIR at our own git dir
+# makes it stamp the correct commit for clones and worktrees alike, so
+# `go version -m <binary>` — including /proc/<pid>/exe of a running daemon —
+# reports the version that is actually running.
+GIT_DIR := $(shell git rev-parse --absolute-git-dir 2>/dev/null)
+
 build:
-	$(GO) build -o $(TOOL) ./cmd/starfleetctl
-	$(GO) build -o $(SUPERVISOR) ./cmd/ship-supervisor
+	GIT_DIR="$(GIT_DIR)" $(GO) build -o $(TOOL) ./cmd/starfleetctl
+	GIT_DIR="$(GIT_DIR)" $(GO) build -o $(SUPERVISOR) ./cmd/ship-supervisor
 
 test:
 	$(GO) test ./...
