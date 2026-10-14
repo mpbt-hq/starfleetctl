@@ -182,6 +182,10 @@ type Proxy struct {
 	strategyMu      sync.RWMutex
 	strategies      map[string]*StrategyState
 	sessionAffinity *SessionAffinity
+
+	// Pipeline architecture
+	pipeline         *Pipeline
+	providerRegistry *ProviderAdapterRegistry
 }
 
 // saturationState tracks the saturation cooldown for a single provider.
@@ -218,7 +222,14 @@ func New(cfg *Config) *Proxy {
 		sat:             map[string]*saturationState{},
 		strategies:      map[string]*StrategyState{},
 		sessionAffinity: &SessionAffinity{mapping: make(map[string]string)},
+		// Initialize the pipeline and provider registry.
+		pipeline:         NewPipeline(),
+		providerRegistry: GetGlobalProviderRegistry(),
 	}
+	// Add the provider selection stage to the pipeline.
+	p.pipeline.AddStage(NewProviderSelectionStage(p))
+	// Add the response assembly stage to the pipeline.
+	p.pipeline.AddStage(NewResponseAssemblyStage(p))
 	p.mux = http.NewServeMux()
 	p.mux.HandleFunc("/v1/models", p.handleModels)
 	p.mux.HandleFunc("/v1/chat/completions", p.handleChat)
@@ -1201,63 +1212,66 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get session ID for strategy affinity
-	sessionID := r.Header.Get("X-Session-Id")
-	if sessionID == "" {
-		sessionID = r.Header.Get("x-opencode-session")
+	// Create a turn from the request.
+	turn := NewTurn(r)
+	turn.Model = req.Model
+	turn.Stream = isStreamingRequest(body)
+	// Copy headers from the request.
+	for k, v := range r.Header {
+		for _, val := range v {
+			turn.Headers.Add(k, val)
+		}
 	}
 
-	// Check if the model is a strategy
-	strat := p.getStrategyForModel(req.Model)
-	var prov *Provider
-	var upstreamModel string
-	var effectiveLimit int
-	var actualModelContextWindow int
+	// Run the pipeline to select provider, prepare request, and assemble response.
+	if err := p.pipeline.Execute(r.Context(), turn); err != nil {
+		p.logf("pipeline error: %v", err)
+		writeErr(w, 503, err.Error())
+		return
+	}
 
-	if strat != nil {
-		// Route through strategy
-		chosenModel, chosenProv, err := p.routeStrategyModel(strat, sessionID, req.Model)
-		if err != nil {
-			writeErr(w, 503, err.Error())
-			return
+	// Write the response.
+	if turn.StreamChunks != nil {
+		// Streaming response
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turn.StatusCode != 0 {
+			w.WriteHeader(turn.StatusCode)
 		}
-		prov = chosenProv
-		upstreamModel = chosenModel
-		// Get the actual model's context window from the config strategy
-		var modelInfo *config.ModelProxyStrategyModel
-		for _, s := range p.cfg.Strategies {
-			if s.ID == strat.Name {
-				modelInfo = s.GetModelByID(chosenModel)
-				break
+		for k, vv := range turn.Headers {
+			for _, v := range vv {
+				w.Header().Add(k, v)
 			}
 		}
-		if modelInfo != nil {
-			actualModelContextWindow = modelInfo.ContextWindow
-		}
-		effectiveLimit = actualModelContextWindow
-		if effectiveLimit == 0 {
-			effectiveLimit = strat.EffectiveLimit
+		for chunk := range turn.StreamChunks {
+			if chunk.Type == ChunkDone {
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				break
+			}
+			if chunk.Type == ChunkError {
+				_, _ = w.Write([]byte("data: {\"error\":{\"message\":\"" + string(chunk.Data) + "\"}}\n\n"))
+				continue
+			}
+			_, _ = w.Write([]byte("data: "))
+			_, _ = w.Write(chunk.Data)
+			_, _ = w.Write([]byte("\n\n"))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
 		}
 	} else {
-		// Direct provider routing — real models are never intercepted by a
-		// strategy; their context limit comes from the upstream catalog.
-		prov, upstreamModel = p.routeModel(req.Model)
-		if prov == nil {
-			writeErr(w, 400, fmt.Sprintf("model %q not served by any configured model-proxy provider", req.Model))
-			return
+		// Non-streaming response
+		if turn.StatusCode != 0 {
+			w.WriteHeader(turn.StatusCode)
 		}
-		// For direct routing, get the model's context window from provider info
-		actualModelContextWindow = p.getModelContextWindow(upstreamModel)
-		effectiveLimit = actualModelContextWindow
+		for k, vv := range turn.Headers {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+		if turn.BodyReader != nil {
+			_, _ = io.Copy(w, turn.BodyReader)
+		}
 	}
-
-	// Set X-Context-Limit header for opencode (use actual model's context window)
-	if effectiveLimit > 0 {
-		w.Header().Set("X-Context-Limit", fmt.Sprintf("%d", effectiveLimit))
-	}
-
-	ship := shipFromRequest(r.Header.Get("Authorization"))
-	p.forwardChat(w, r, prov, upstreamModel, body, isStreamingRequest(body), ship, req.Model, effectiveLimit)
 }
 
 // forwardChat performs the (possibly retried) upstream chat request and

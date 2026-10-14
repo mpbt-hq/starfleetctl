@@ -1,0 +1,1167 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Enrico Weigelt, metux IT consult
+
+package session
+
+import (
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+
+	"github.com/X11Libre/go-x11proto/tk/term/termctl"
+	"github.com/metux/starfleetctl/internal/comms"
+	"github.com/metux/starfleetctl/internal/config"
+	"github.com/metux/starfleetctl/internal/modelproxy"
+	"github.com/metux/starfleetctl/internal/ocsessions"
+	"github.com/metux/starfleetctl/internal/opencode"
+	"github.com/metux/starfleetctl/internal/shipnames"
+)
+
+// SocketPath returns the path to the Unix domain socket for controlling the ship.
+func SocketPath(root, shipID string) string {
+	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".soc")
+}
+
+// isShipRunning checks if a ship is actually running by reading its PID file
+// and verifying the process exists. Returns true if the ship is running.
+func isShipRunning(root, shipID string) bool {
+	pidPath := PidPath(root, shipID)
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return false // No PID file = not running
+	}
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return false // Invalid PID file
+	}
+	// Check if process exists by sending signal 0
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Unix, FindProcess always succeeds, so we need to send signal 0
+	err = process.Signal(syscall.Signal(0))
+	if err != nil {
+		// Process is dead, clean up stale PID file
+		_ = os.Remove(pidPath)
+		return false
+	}
+	return true
+}
+
+// LaunchVars holds the computed values from a `session run` invocation.
+type LaunchVars struct {
+	ShipID      string
+	PipePath    string // termctl control pipe path
+	ReleaseFull string
+	Client      string
+	ShellCmd    string // the full shell command to run in the terminal
+	Tier        string
+	Supervisor  string
+	// Launch metadata recorded in the initial comms heartbeat so the
+	// board/web console can show the command hierarchy and provider/model.
+	LaunchType string // "terminal" | "background" | "auto"
+	Parent     string // ship this one was launched under ("" = flagship)
+	Provider   string // model provider (derived from Model when empty)
+	Model      string // model id (opencode --model value)
+	Class      string // ship class/role
+	Mode       string // "pty" | "api"; empty => "pty"
+}
+
+func runLaunch(root string, args []string) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Print(`session run <release> [flags...] [-- <args...>]
+
+Launch a detached terminal for an agent/CLI and post the initial
+heartbeat (replaces scripts/agent-run).  Pass --print to emit the
+shell-evaluable launch variables instead.
+
+Flags:
+  --client <claude|opencode|shell>   client to run (default: claude)
+  --name <id>                        explicit ship ID (default: auto-assign)
+  --permission-mode <mode>           claude permission mode (default: dontAsk for workers)
+  --tier <name>                      agent tier (e.g. worker)
+  --supervisor <id>                  supervisor ship ID
+  --print                            emit shell variables instead of launching
+
+Args after -- are passed to the client.
+`)
+		return 0
+	}
+
+	printVars := false
+	launchArgs := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--print" {
+			printVars = true
+			continue
+		}
+		launchArgs = append(launchArgs, a)
+	}
+
+	vars, err := computeLaunch(root, launchArgs)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	if vars == nil {
+		return 1
+	}
+
+	if printVars {
+		fmt.Printf("STARFLEET_SHIP_ID=%s\n", shellQuote(vars.ShipID))
+		fmt.Printf("PIPE_PATH=%s\n", shellQuote(vars.PipePath))
+		fmt.Printf("RELEASE_FULL=%s\n", shellQuote(vars.ReleaseFull))
+		fmt.Printf("CLIENT=%s\n", shellQuote(vars.Client))
+		return 0
+	}
+
+	if err := spawnSession(root, vars); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	rel := ""
+	if vars.ReleaseFull != "" {
+		rel = ", " + vars.ReleaseFull
+	}
+	fmt.Printf("agent-run: launched '%s' (%s%s) detached.\n", vars.ShipID, vars.Client, rel)
+	fmt.Printf("  pipe path    : %s\n", vars.PipePath)
+	fmt.Printf("  attach       : starfleetctl session attach %s\n", vars.ShipID)
+	fmt.Printf("  board        : starfleetctl comms board\n")
+	fmt.Printf("  stop         : starfleetctl session stop %s\n", vars.ShipID)
+	return 0
+}
+
+// computeLaunch parses arguments, validates, and returns the computed launch
+// vars without printing anything. Returns nil on "session already exists"
+// (runLaunch passes that as exit 1) and an error on arg/validation failures.
+// On success, the returned LaunchVars have all fields filled.
+func computeLaunch(root string, args []string) (*LaunchVars, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("session run: need <release> (or '' for cross-project)")
+	}
+
+	release := args[0]
+	args = args[1:]
+
+	client := "claude"
+	name := ""
+	permissionMode := ""
+	tier := ""
+	supervisor := ""
+	model := ""
+	parent := ""
+	launchType := "background"
+	class := ""
+	var clientArgs []string
+
+	for len(args) > 0 {
+		switch args[0] {
+		case "--client":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --client needs a value (claude|opencode|shell)")
+			}
+			client = args[1]
+			args = args[2:]
+		case "--name":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --name needs a value")
+			}
+			name = args[1]
+			args = args[2:]
+		case "--permission-mode":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --permission-mode needs a value")
+			}
+			permissionMode = args[1]
+			args = args[2:]
+		case "--tier":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --tier needs a value")
+			}
+			tier = args[1]
+			args = args[2:]
+		case "--supervisor":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --supervisor needs a value")
+			}
+			supervisor = args[1]
+			args = args[2:]
+		case "--model":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --model needs a value")
+			}
+			model = args[1]
+			args = args[2:]
+		case "--parent":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --parent needs a value")
+			}
+			parent = args[1]
+			args = args[2:]
+		case "--launch-type":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --launch-type needs a value")
+			}
+			launchType = args[1]
+		case "--class":
+			if len(args) < 2 {
+				return nil, fmt.Errorf("session run: --class needs a value")
+			}
+			class = args[1]
+			args = args[2:]
+			args = args[2:]
+		case "--":
+			args = args[1:]
+			clientArgs = args
+			args = nil
+		default:
+			clientArgs = args
+			args = nil
+		}
+	}
+
+	if permissionMode != "" && client != "claude" {
+		return nil, fmt.Errorf("session run: --permission-mode only applies to --client claude")
+	}
+
+	switch client {
+	case "claude", "opencode", "shell":
+	default:
+		return nil, fmt.Errorf("session run: unknown --client '%s' (claude|opencode|shell)", client)
+	}
+
+	var project string
+	if release != "" {
+		project = release
+		configPath := filepath.Join(root, "cf", project, "config.sh")
+		if _, err := os.Stat(configPath); err != nil {
+			return nil, fmt.Errorf("session run: no such release '%s' (missing cf/%s/config.sh)", release, project)
+		}
+	} else {
+		if client == "opencode" {
+			return nil, fmt.Errorf("session run: --client opencode needs a <release> (its wrapper sources cf/<release>/config.sh)")
+		}
+	}
+
+	shipID := name
+	if shipID == "" {
+		reg := shipnames.New(root)
+		assigned, err := reg.AssignName()
+		if err == nil && assigned != "" {
+			shipID = assigned
+		}
+	}
+	if shipID == "" {
+		if project != "" {
+			shipID = project + "-" + client
+		} else {
+			return nil, fmt.Errorf("session run: empty <release> needs an explicit --name (nothing to derive STARFLEET_SHIP_ID from)")
+		}
+	}
+
+	// Pipe path is deterministic (needed for LaunchVars)
+	pipePath := PipePath(root, shipID)
+
+	// Check if already running — check PID liveness, not just FIFO existence
+	if isShipRunning(root, shipID) {
+		fmt.Fprintf(os.Stderr, "session run: session '%s' already running — attach with: starfleetctl session attach %s (or use --name for a second one)\n", shipID, shipID)
+		return nil, nil
+	}
+
+	var clientPath string
+	switch client {
+	case "claude":
+		// Use shell to run claude with args
+		clientPath = "/bin/sh"
+	case "opencode":
+		clientPath = "./run-opencode." + project
+	case "shell":
+		clientPath = os.Getenv("SHELL")
+		if clientPath == "" {
+			clientPath = "bash"
+		}
+	}
+
+	// Build the shell command for termctl
+	// termctl runs: exec.Command(shell) with no args, then the shell runs InnerCmd via PTY
+	inner := "export STARFLEET_SHIP_ID=" + shellQuote(shipID) + "; "
+	if tier != "" {
+		inner += "export AGENT_TIER=" + shellQuote(tier) + "; "
+	}
+	if supervisor != "" {
+		inner += "export AGENT_SUPERVISOR=" + shellQuote(supervisor) + "; "
+	}
+	if project != "" {
+		inner += ". cf/" + shellQuote(project) + "/config.sh; export PROJECT; "
+	}
+	if client == "claude" {
+		inner += "exec " + shellQuote(resolveClientPath("claude"))
+		if permissionMode != "" {
+			inner += " --permission-mode " + shellQuote(permissionMode)
+		}
+		for _, a := range clientArgs {
+			inner += " " + shellQuote(a)
+		}
+	} else if client == "opencode" {
+		// Generate per-ship temp opencode config for local/terminal ships too.
+		// Local ships use "ask" as default (matching old terminal.json behavior),
+		// not "deny" like background ships.
+		opencodeConfigPath, err := generateOpencodeConfig(root, shipID, "terminal", false, model, "")
+		if err != nil {
+			return nil, fmt.Errorf("generate opencode config: %w", err)
+		}
+		inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
+		inner += "exec " + shellQuote(clientPath)
+		for _, a := range clientArgs {
+			inner += " " + shellQuote(a)
+		}
+	} else { // shell
+		// Run the user's command(s) directly. RunTermctl already wraps the
+		// inner command via /bin/sh -c, so we must not prepend another shell
+		// here (that would interpret the first clientArg as a script name).
+		inner += "exec"
+		for _, a := range clientArgs {
+			inner += " " + shellQuote(a)
+		}
+		if len(clientArgs) == 0 {
+			// No command given: fall back to an interactive login shell.
+			inner += " " + shellQuote(clientPath) + " -l"
+		}
+	}
+
+	return &LaunchVars{
+		ShipID:      shipID,
+		PipePath:    pipePath,
+		ReleaseFull: project,
+		Client:      client,
+		ShellCmd:    inner,
+		Tier:        tier,
+		Supervisor:  supervisor,
+		LaunchType:  launchType,
+		Parent:      parent,
+		Provider:    providerFromModel(model),
+		Model:       model,
+		Class:       class,
+	}, nil
+}
+
+// runShipRun implements `session ship-run [--name <id>] [--model <model>] [-- <args...>]`.
+// It starts an opencode control-agent session in ship role (mirroring
+// run-opencode.ship) as a detached termctl terminal and returns immediately.
+// The caller may pre-allocate the ship name; otherwise a free name is assigned
+// and reserved here. State files (control pipe, log) live under
+// .starfleet-ai/var/ships/.
+func runShipRun(root string, args []string) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Print(`session ship-run [--name <id>] [--model <model>] [--template <name>] [--new]
+
+Start an opencode control-agent session in ship role, detached in the
+background (like run-opencode.ship, but as a detachable termctl terminal).
+Returns immediately; the terminal keeps running until stopped via
+` + "`session stop <id>`" + `.
+
+Flags:
+  --name <id>         explicit ship ID (default: next free ship name). The caller
+                       may pre-allocate the name; if given, it is reserved here.
+  --model <model>     opencode model (e.g. nvidia/nemotron-3-ultra-550b-a55b).
+                       REQUIRED unless --template is used. The provider is derived
+                       from the model id (the part before the first '/');
+                       pass --provider to override.
+  --template <name>   ship class template to use (e.g. scout, cruiser, heavy).
+                       Sets model, launch-type, and class from template.
+  --parent <ship>     ship this one is launched under (default: flagship Enterprise).
+                       Auto-launches from the web GUI hang under the flagship; a ship
+                       spawned by another AI lists that ship as parent.
+  --launch-type <t>   how the ship was started: "terminal" (direct at a terminal),
+                       "background" (detached, the default here), or "auto" (web/timer).
+  --class <class>     ship class/role (e.g. scout, worker, flagship).
+                       Set automatically from template if --template used.
+  --unrestricted      unrestricted permissions (allow all, bypass ask/deny)
+  --new               start a fresh session (do not resume previous session for this ship name)
+
+Task assignment:
+  Ships receive tasks via the comms bus, NOT via extra arguments.
+  1. Capture a task:  starfleetctl task capture "Titel" --desc "..." --assign auto
+  2. Assign to ship:  starfleetctl task assign <slug> <ship>
+  3. Ship polls inbox and executes the directive.
+
+Example:
+  starfleetctl session ship-run --name Voyager --model nvidia/nemotron-3-ultra-550b-a55b
+  starfleetctl session ship-run --template cruiser --name Cruiser-1
+  starfleetctl session ship-run --name Voyager --model nvidia/nemotron-3-ultra-550b-a55b --new
+`)
+		return 0
+	}
+
+	name := ""
+	model := ""
+	parent := ""
+	launchType := "background"
+	class := ""
+	template := ""
+	unrestricted := false
+	forceNew := false
+	var oaArgs []string
+	for len(args) > 0 {
+		switch args[0] {
+		case "--name":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --name needs a value")
+				return 2
+			}
+			name = args[1]
+			args = args[2:]
+		case "--model":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --model needs a value")
+				return 2
+			}
+			model = args[1]
+			args = args[2:]
+		case "--template":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --template needs a value")
+				return 2
+			}
+			template = args[1]
+			args = args[2:]
+		case "--parent":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --parent needs a value")
+				return 2
+			}
+			parent = args[1]
+			args = args[2:]
+		case "--launch-type":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --launch-type needs a value")
+				return 2
+			}
+			launchType = args[1]
+			args = args[2:]
+		case "--class":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "session ship-run: --class needs a value")
+				return 2
+			}
+			class = args[1]
+			args = args[2:]
+		case "--unrestricted":
+			unrestricted = true
+			args = args[1:]
+		case "--new":
+			forceNew = true
+			args = args[1:]
+		case "--":
+			oaArgs = args[1:]
+			args = nil
+		default:
+			oaArgs = args
+			args = nil
+		}
+	}
+
+	if len(oaArgs) > 0 {
+		fmt.Fprintln(os.Stderr, "session ship-run: extra arguments after -- are not supported")
+		fmt.Fprintln(os.Stderr, "  Tasks are assigned via 'starfleetctl task assign <slug> <ship>' and delivered over comms.")
+		fmt.Fprintln(os.Stderr, "  Extra args would be passed as positional arguments to opencode, which interprets them as workspace paths.")
+		return 2
+	}
+
+	// Load template if specified
+	var templateModel, templateLaunchType, templateClass string
+	if template != "" {
+		tplCfg, err := config.LoadShipTemplates(root)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session ship-run: load templates: %v\n", err)
+			return 1
+		}
+		tpl, err := tplCfg.GetTemplate(template)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session ship-run: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  Available templates: %v\n", tplCfg.ListTemplateNames())
+			return 1
+		}
+		templateModel = tpl.Model
+		templateLaunchType = tpl.SessionType
+		templateClass = tpl.Name
+	}
+
+	// Template values are defaults; explicit flags override them
+	if model == "" {
+		model = templateModel
+	}
+	if launchType == "background" && templateLaunchType != "" {
+		launchType = templateLaunchType
+	}
+	if class == "" && templateClass != "" {
+		class = templateClass
+	}
+
+	shipID, err := LaunchShip(root, LaunchShipOpts{
+		Name:         name,
+		Model:        model,
+		Parent:       parent,
+		LaunchType:   launchType,
+		ExtraArgs:    oaArgs,
+		Class:        class,
+		Unrestricted: unrestricted,
+		ForceNew:     forceNew,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "session ship-run:", err)
+		return 1
+	}
+
+	fmt.Printf("agent-run: launched ship '%s' (opencode, role=ship) detached.\n", shipID)
+	fmt.Printf("  pipe path    : (see comms board / session attach %s)\n", shipID)
+	fmt.Printf("  attach       : starfleetctl session attach %s\n", shipID)
+	fmt.Printf("  stop         : starfleetctl session stop %s\n", shipID)
+	return 0
+}
+
+// LaunchShipOpts are the inputs to LaunchShip.
+type LaunchShipOpts struct {
+	Name         string   // explicit ship ID; empty => next free name
+	Model        string   // opencode --model value (provider derived from it)
+	Class        string   // ship class/role
+	Provider     string   // explicit provider override (when the model id has none)
+	Parent       string   // ship launched under; empty => flagship
+	LaunchType   string   // "terminal" | "background" | "auto"; empty => "background"
+	Unrestricted bool     // unrestricted permissions (allow all)
+	ExtraArgs    []string // extra args passed to opencode after --prompt
+	Mode         string   // "pty" | "api"; empty => "pty"
+	ForceNew     bool     // if true, start a fresh session instead of resuming the last one
+}
+
+// LaunchShip starts a detached opencode control-agent ship and returns its
+// assigned ship ID. It is the in-process core of `session ship-run`, also used
+// by the web console's "new ship" action. The terminal survives the caller's
+// return (it runs in a detached child process).
+			if r.Agent == id || r.Handle == id {
+				id = r.Agent
+				break
+			}
+		}
+	}
+
+	// Pipe path is deterministic
+	pipePath := PipePath(root, id)
+
+	// Create "stop requested" marker BEFORE attempting to stop the shell.
+	// This marker is read by the child's OnExit to distinguish intentional
+	// stop from crash. We create it regardless of whether pipe exists,
+	// because the pipe may have already been cleaned up by a fast-exiting shell.
+	_ = setStopRequestedMarker(root, id)
+
+	if _, err := os.Stat(pipePath); err == nil {
+		if rem, err := termctl.OpenPipe(pipePath); err == nil {
+			_ = rem.Stop()
+		}
+	}
+
+	// Clean up per-ship temp opencode config
+	_ = os.Remove(opencodeConfigPath(root, id))
+
+	// NOTE: Heartbeat cleanup (DoClear) and ship name release (DoRelease)
+	// are done by the child process's OnExit callback AFTER it reads the
+	// stop-requested marker. This avoids race where parent clears heartbeat
+	// before child checks the marker.
+
+	if _, err := os.Stat(pipePath); err != nil {
+		// Pipe already gone - ship may have exited already. Check if name
+		// is still reserved to distinguish "already stopped" from "never existed".
+		shipReg := shipnames.New(root)
+		_, nameReserved := shipReg.Lookup(id)
+		if !nameReserved {
+			return fmt.Errorf("no such session: %s", id)
+		}
+		// Name still reserved but pipe gone: ship crashed or already stopped.
+		// OnExit will handle heartbeat/name based on marker.
+	}
+	// Clean up stale PID file if process is dead
+	if !isShipRunning(root, id) {
+		_ = os.Remove(PidPath(root, id))
+	}
+	return nil
+}
+
+// RestartShip sends a RESTART command to the ship's control socket to request a restart.
+// If model is not empty, it sends "RESTART model=<model>", otherwise just "RESTART".
+func RestartShip(root, shipID, model string) error {
+	socketPath := SocketPath(root, shipID)
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("failed to connect to control socket %s: %v", socketPath, err)
+	}
+	defer conn.Close()
+
+	var cmd string
+	if model != "" {
+		cmd = fmt.Sprintf("RESTART model=%s", model)
+	} else {
+		cmd = "RESTART"
+	}
+
+	_, err = conn.Write([]byte(cmd))
+	if err != nil {
+		return fmt.Errorf("failed to write to control socket: %v", err)
+	}
+
+	// Read response (optional, but good to verify)
+	response := make([]byte, 128)
+	n, err := conn.Read(response)
+	if err != nil {
+		// Ignore read errors; we assume the command was sent
+		return nil
+	}
+	resp := strings.TrimSpace(string(response[:n]))
+	if resp != "OK" {
+		return fmt.Errorf("unexpected response from control socket: %s", resp)
+	}
+	return nil
+}
+
+// stopRequestedMarkerPath returns the path to the stop-requested marker file.
+func stopRequestedMarkerPath(root, shipID string) string {
+	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".stop-requested")
+}
+
+// setStopRequestedMarker creates the marker file for intentional stop request.
+func setStopRequestedMarker(root, shipID string) error {
+	path := stopRequestedMarkerPath(root, shipID)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	return os.WriteFile(path, []byte("stop-requested"), 0o644)
+}
+
+// clearStopRequestedMarker removes the marker file.
+func clearStopRequestedMarker(root, shipID string) error {
+	path := stopRequestedMarkerPath(root, shipID)
+	return os.Remove(path)
+}
+
+// isStopRequested checks if intentional stop was requested.
+func isStopRequested(root, shipID string) bool {
+	path := stopRequestedMarkerPath(root, shipID)
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// opencodeConfigPath returns the path to the per-ship temp opencode config file.
+func opencodeConfigPath(root, shipID string) string {
+	return filepath.Join(root, ".starfleet-ai", "var", "ships", shipID+".opencode.json")
+}
+
+// generateOpencodeConfig creates a per-ship temp opencode config by merging
+// the user's provider config with launch-type-specific permissions and
+// starfleet-specific settings (plugin, instructions, username).
+func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, model, class string) (string, error) {
+	// Load starfleetctl config for provider_mode setting
+	cfg, err := config.Load(root)
+	if err != nil {
+		// Config load failed, use defaults
+		cfg = config.DefaultConfig()
+	}
+
+	// Load user config for provider definitions (only if not model-proxy-only)
+	var userConfig map[string]any
+	if cfg.Fleet.ProviderMode != "model-proxy-only" {
+		userConfigPath := filepath.Join(os.Getenv("HOME"), ".config", "opencode", "opencode.json")
+		if data, err := os.ReadFile(userConfigPath); err == nil {
+			_ = json.Unmarshal(data, &userConfig)
+		}
+	}
+
+	// Inject the local model-proxy providers (nim-proxy, zen-proxy, ...) so
+	// ships prefer the resilient local endpoint in front of the flaky
+	// upstreams. Only applies when model-proxy.yaml exists with providers.
+	// The per-ship apiKey (ShipKey) lets the proxy attribute requests to
+	// this ship.
+	proxyProviders := modelproxy.ProviderConfigs(root, shipID)
+
+	// Resolve the model to include the correct provider prefix if served by
+	// a model-proxy provider. This ensures opencode can resolve the model
+	// without falling back to last-used-model.
+	effectiveModel := model
+	if proxyProviders != nil && model != "" {
+		mpCfg, err := modelproxy.Load(root)
+		if err == nil {
+			provider := mpCfg.FindProviderForModel(model)
+			if provider != "" {
+				// Check if model already has a provider prefix
+				if i := strings.IndexByte(model, '/'); i < 0 || model[:i] != provider {
+					effectiveModel = provider + "/" + model
+				}
+			}
+		}
+	}
+
+	// Build the ship config. username gives each ship its own identity
+	// (opencode falls back to the OS user when it's missing), matching the
+	// role prompt and the comms heartbeat.
+	shipConfig := map[string]any{
+		"$schema":  "https://opencode.ai/config.json",
+		"username": shipID,
+		"model":    effectiveModel,
+	}
+
+	if proxyProviders != nil {
+		provs, _ := shipConfig["provider"].(map[string]any)
+		if provs == nil {
+			provs = map[string]any{}
+		}
+		for id, entry := range proxyProviders {
+			provs[id] = entry
+		}
+		shipConfig["provider"] = provs
+
+		// In model-proxy-only mode, pin an allowlist of the proxy backends.
+		// opencode MERGES config files (global ~/.config/opencode/opencode.json,
+		// project opencode.json) instead of replacing them, so merely omitting
+		// the user's providers from this file does NOT remove them — they are
+		// merged back in and still show up in the /models picker. The
+		// `enabled_providers` allowlist is the only way to actively exclude
+		// them.
+		if cfg.Fleet.ProviderMode == "model-proxy-only" {
+			ids := make([]string, 0, len(proxyProviders))
+			for id := range proxyProviders {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			shipConfig["enabled_providers"] = ids
+		}
+	}
+
+	// Permission rules based on launch type and unrestricted flag.
+	// bash mirrors opencode's permissive default ("allow") for every launch
+	// type: the fleet ran without bash prompts before per-ship configs, and
+	// setting "ask" for terminal ships regressed that (the human at the
+	// console had to confirm every banal command, e.g. `ls .starfleet-ai/...`).
+	// Paths outside the workspace are gated by external_directory below, not
+	// by these rules. The starfleetctl rules are kept for back-compat even
+	// though the "**" catch-all already allows them.
+	bashRules := map[string]string{
+		"**":                                   "allow",
+		"**/.starfleet-ai/bin/starfleetctl **": "allow",
+		"starfleetctl **":                      "allow",
+	}
+
+	// Base permission rules
+	// (the workspace tools use a fixed allow, external_directory its own
+	// explicit rules — no shared defaultRule needed)
+
+	// Workspace file tools (read/write/edit/glob/grep/task) receive paths
+	// relative to the worktree (the tools convert absolute paths internally),
+	// so a single relative "**" rule matches every in-workspace path. They are
+	// allowed for ALL launch types: the workspace IS the working directory,
+	// and paths outside it are gated by external_directory below, not by these
+	// rules. A defaultRule-based catch-all here would prompt for every banal
+	// read (terminal) or lock background ships out of their own tree (deny).
+	permission := map[string]any{
+		"bash":  bashRules,
+		"read":  map[string]string{"**": "allow"},
+		"write": map[string]string{"**": "allow"},
+		"edit":  map[string]string{"**": "allow"},
+		"glob":  map[string]string{"**": "allow"},
+		"grep":  map[string]string{"**": "allow"},
+		"task":  map[string]string{"**": "allow"},
+	}
+
+	// external_directory defaults to "ask" in opencode and fires for ANY
+	// path outside the project working directory (e.g. a wrongly-rooted
+	// "/.starfleet-ai/..." read). On background/auto ships there is nobody
+	// to answer an ask, so the ship hangs forever and then aborts on deny.
+	// Pin it explicitly: allow for unrestricted, ask only for terminal
+	// launches (a human is present), and deny everything outside the
+	// workspace for background/auto ships so the tool call fails fast and
+	// the agent can recover (retry with a workspace-relative path).
+	// external_directory receives absolute glob patterns from the tool, so
+	// we use absolute patterns here (unlike read/write/edit which receive
+	// relative paths from the worktree).
+	absWorkspacePattern := root + "/**"
+	absLocalBinPattern := filepath.Join(os.Getenv("HOME"), ".local", "bin", "**")
+	externalDirRules := map[string]string{
+		absWorkspacePattern: "allow",
+		absLocalBinPattern:  "allow",
+	}
+	if unrestricted {
+		externalDirRules["**"] = "allow"
+	} else if launchType == "terminal" {
+		externalDirRules["**"] = "ask"
+	} else {
+		externalDirRules["**"] = "deny"
+	}
+	permission["external_directory"] = externalDirRules
+
+	// Background/auto ships have no human at the terminal, so the
+	// "question" tool (which prompts the user for a decision) would block
+	// forever. Deny it — the LLM gets a fast tool error and must proceed
+	// autonomously. Terminal ships keep the default ("ask") so the human
+	// can answer.
+	// Note: "question" only accepts a single action string per opencode schema,
+	// not a pattern map like other tools.
+	if launchType != "terminal" && !unrestricted {
+		permission["question"] = "deny"
+	}
+
+	shipConfig["permission"] = permission
+
+	// Starfleet-specific settings
+	shipConfig["instructions"] = []string{".starfleet-ai/var/sop.d/index.md"}
+	shipConfig["plugin"] = []string{"./.opencode/plugins/starfleet-dispatch.ts"}
+
+	// Write to temp file
+	configPath := opencodeConfigPath(root, shipID)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return "", err
+	}
+	data, err := json.MarshalIndent(shipConfig, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		return "", err
+	}
+	return configPath, nil
+}
+
+// spawnSession creates the termctl terminal for the given launch vars and posts
+// the initial comms heartbeat. It spawns a child process that runs the
+// terminal and blocks on h.Run(), so the terminal survives after this function
+// returns.
+func spawnSession(root string, vars *LaunchVars) error {
+	return spawnSessionAt(root, vars, "")
+}
+
+// spawnSessionAt is spawnSession with an explicit log path. An empty logPath
+// defaults to .starfleet-ai/var/ships/<shipID>.log (the canonical location).
+func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
+	// Ensure pipe directory exists
+	if err := os.MkdirAll(filepath.Dir(vars.PipePath), 0o755); err != nil {
+		return fmt.Errorf("mkdir pipe dir: %w", err)
+	}
+
+	// Spawn child process that runs termctl-run and blocks on h.Run()
+	// The child inherits the workspace root via MPBT_WORKSPACE_ROOT
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("os.Executable: %w", err)
+	}
+
+	// Build environment for child: include workspace root and ship ID
+	childEnv := append(os.Environ(),
+		"MPBT_WORKSPACE_ROOT="+root,
+		"STARFLEET_SHIP_ID="+vars.ShipID,
+		"STARFLEET_CLASS="+vars.Class,
+	)
+
+	// Open log file for child output (so it doesn't inherit parent's stdout/stderr
+	// which get closed when starfleetctl exits)
+	if logPath == "" {
+		logDir := filepath.Join(root, ".starfleet-ai", "logs")
+		_ = os.MkdirAll(logDir, 0o755)
+		logPath = filepath.Join(logDir, vars.ShipID+".log")
+	}
+	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	cmd := exec.Command(self, "termctl-run", vars.ShipID, vars.PipePath, vars.ShellCmd)
+	cmd.Env = childEnv
+	cmd.Stdin = nil // detach from parent's stdin (Go maps nil to /dev/null)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	// NOTE: do NOT set Setsid here — termctl's PTY spawn (term.Spawn) needs to
+	// be the session leader itself (Setsid+Setctty). A double setsid fails
+	// with EPERM. The child owns its own session via the PTY; we just detach
+	// stdio above and SIGHUP is ignored inside RunTermctl.
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return fmt.Errorf("spawn termctl-run: %w", err)
+	}
+
+	// Write PID file for liveness checking
+	pidPath := PidPath(root, vars.ShipID)
+	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0o644); err != nil {
+		logFile.Close()
+		return fmt.Errorf("write pid file: %w", err)
+	}
+
+	// Don't wait - the child process runs independently.
+	// The log file will be closed when the child exits (we don't close it here).
+
+	// Post initial heartbeat
+	os.Setenv("STARFLEET_SHIP_ID", vars.ShipID)
+	if vars.ReleaseFull != "" {
+		os.Setenv("PROJECT", vars.ReleaseFull)
+	}
+	if bus, err := comms.New(root); err == nil {
+		provider := vars.Provider
+		if provider == "" {
+			provider = providerFromModel(vars.Model)
+		}
+		launchType := vars.LaunchType
+		if launchType == "" {
+			launchType = "background"
+		}
+		parent := vars.Parent
+		if parent == "" {
+			parent = shipnames.FlagshipName(root)
+		}
+		_ = bus.DoStatus("starting", "launched via agent-run ("+vars.Client+")", comms.StatusPatch{
+			LaunchType: launchType,
+			Parent:     parent,
+			Provider:   provider,
+			Model:      vars.Model,
+		})
+	}
+	return nil
+}
+
+// doSpawn creates a termctl session and posts the initial heartbeat for the given
+// launch args. It calls computeLaunch internally, so it accepts the same args
+// as `session run`. Used by the autoscaler; `session run` calls spawnSession
+// directly after computing its own vars.
+func doSpawn(root string, args []string) error {
+	vars, err := computeLaunch(root, args)
+	if err != nil {
+		return err
+	}
+	if vars == nil {
+		return fmt.Errorf("session already exists")
+	}
+	return spawnSession(root, vars)
+}
+
+// runStop implements `session stop <id>`.
+func runStop(root string, args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "session stop: need <id|session>")
+		return 2
+	}
+	id := args[0]
+
+	if err := StopShip(root, id); err != nil {
+		fmt.Fprintf(os.Stderr, "agent-run: stop: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("agent-run: stopped session '%s'\n", id)
+	return 0
+}
+
+// RunTermctl runs a termctl terminal in the foreground (blocking on h.Run()).
+// This is meant to be spawned as a child process by `session run`.
+// Args: <ship-id> <pipe-path> <shell-command>
+func RunTermctl(root string, args []string) int {
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "termctl-run: need <ship-id> <pipe-path> <shell-cmd>")
+		return 2
+	}
+
+	// Load terminal config from web.yaml
+	cfg, cerr := config.Load(root)
+	if cerr != nil {
+		fmt.Fprintf(os.Stderr, "termctl-run: config load: %v\n", cerr)
+	}
+	termRows := 60
+	termCols := 120
+	termScrollback := 10000
+	if cfg != nil {
+		if cfg.Web.TerminalRows > 0 {
+			termRows = cfg.Web.TerminalRows
+		}
+		if cfg.Web.TerminalCols > 0 {
+			termCols = cfg.Web.TerminalCols
+		}
+		if cfg.Web.TerminalScrollback > 0 {
+			termScrollback = cfg.Web.TerminalScrollback
+		}
+	}
+
+	shipID := args[0]
+	pipePath := args[1]
+	shellCmd := args[2]
+
+	// Write PID file for liveness checking (this process's PID)
+	wroot := os.Getenv("MPBT_WORKSPACE_ROOT")
+	if wroot != "" {
+		pidPath := PidPath(wroot, shipID)
+		if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "termctl-run: write pid file: %v\n", err)
+		}
+	}
+
+	// Detached terminals must survive the parent's shell exiting. Ignore
+	// SIGHUP so a closing controlling terminal doesn't kill us.
+	signal.Ignore(syscall.SIGHUP)
+
+	fmt.Fprintf(os.Stderr, "termctl-run: shipID=%s pipePath=%s shellCmd=%s\n", shipID, pipePath, shellCmd)
+
+	// The shellCmd is a script like "export FOO=bar; exec bash -i"
+	// We run it via /bin/sh -c "shellCmd"
+	shellBin := "/bin/sh"
+	shellArgs := []string{"-c", shellCmd}
+
+	// Ensure pipe directory exists (termctl creates the FIFO but needs the dir)
+	if err := os.MkdirAll(filepath.Dir(pipePath), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "termctl-run: mkdir pipe dir: %v\n", err)
+		return 1
+	}
+
+	// Build termctl handle
+	h, err := termctl.New(
+		termctl.WithName(shipID),
+		termctl.WithTitle("starfleet: "+shipID),
+		termctl.WithControlPipe(pipePath),
+		termctl.WithShell(shellBin),
+		termctl.WithShellArgs(shellArgs),
+		termctl.WithExtraEnv([]string{
+			"STARFLEET_SHIP_ID=" + shipID,
+		}),
+		termctl.WithRows(termRows),
+		termctl.WithCols(termCols),
+		termctl.WithScrollbackCap(termScrollback),
+		termctl.WithOnExit(func() {
+			fmt.Fprintf(os.Stderr, "termctl-run: OnExit callback for %s — cleaning up\n", shipID)
+			wroot := os.Getenv("MPBT_WORKSPACE_ROOT")
+			if wroot != "" {
+				os.Setenv("STARFLEET_SHIP_ID", shipID)
+				// Check if stop was requested (intentional stop vs crash)
+				stopRequested := isStopRequested(wroot, shipID)
+				// Clear marker after reading (so repeated crashes don't look intentional)
+				_ = clearStopRequestedMarker(wroot, shipID)
+				if bus, err := comms.New(wroot); err == nil {
+					if stopRequested {
+						fmt.Fprintf(os.Stderr, "termctl-run: intentional stop for %s — clearing heartbeat\n", shipID)
+						_ = bus.DoClear()
+					} else {
+						fmt.Fprintf(os.Stderr, "termctl-run: CRASH for %s — setting crashed status\n", shipID)
+						logPath := LogPath(wroot, shipID)
+						_ = bus.DoStatus("crashed", fmt.Sprintf("ship exited unexpectedly — check log: %s", logPath), comms.StatusPatch{})
+						// TODO: trigger auto-restart with backoff
+					}
+				}
+				shipReg := shipnames.New(wroot)
+				if stopRequested {
+					_ = shipReg.DoRelease(shipID)
+				} else {
+					fmt.Fprintf(os.Stderr, "termctl-run: keeping ship name %s for crash investigation/restart\n", shipID)
+				}
+			}
+			_ = os.Remove(pipePath)
+			// Also remove PID file
+			if wroot != "" {
+				_ = os.Remove(PidPath(wroot, shipID))
+			}
+		}),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "termctl.New: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(os.Stderr, "termctl-run: starting Run()\n")
+	// Block until shell exits
+	if err := h.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "termctl.Run: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "termctl-run: Run() returned\n")
+	return 0
+}
+
+// validateModelAvailable checks if the requested model is available from the
+// configured model-proxy provider. Returns an error if the model is not found
+// in the provider's model list (which would cause opencode to silently fall
+// back to the default model). This is a hard stop — launch fails if model
+// is not available.
+func validateModelAvailable(root, model string) error {
+	if model == "" {
+		return nil // will use default
+	}
+	// Load model-proxy config
+	mpCfg, err := modelproxy.Load(root)
+	if err != nil {
+		return fmt.Errorf("model-proxy config: %w", err)
+	}
+	// Find which provider serves this model
+	provider := mpCfg.FindProviderForModel(model)
+	if provider == "" {
+		return fmt.Errorf("model %q not served by any configured model-proxy provider — opencode will fall back to default", model)
+	}
+	// Verify the model is actually available from that provider
+	cfg := modelproxy.Config{ListenAddr: mpCfg.ListenAddr, Providers: mpCfg.Providers, Strategies: mpCfg.Strategies}
+	if mpCfg.ListenAddr == "" {
+		cfg.ListenAddr = "127.0.0.1:8443"
+	}
+	// Find the provider struct
+	var prov *modelproxy.Provider
+	for i := range mpCfg.Providers {
+		if mpCfg.Providers[i].ID == provider {
+			prov = &mpCfg.Providers[i]
+			break
+		}
+	}
+	if prov == nil {
+		return fmt.Errorf("provider %q not found in model-proxy config", provider)
+	}
+	available := cfg.ModelListFor(*prov)
+	if available == nil {
+		return fmt.Errorf("could not query models from provider %q", provider)
+	}
+	// Check if model is in the list (model may have provider/ prefix)
+	baseModel := model
+	if i := strings.IndexByte(model, '/'); i >= 0 {
+		baseModel = model[i+1:]
+	}
+	for _, m := range available {
+		if m == model || m == baseModel {
+			return nil // model is available
+		}
+	}
+	// If model not found in available list, check if it's a meta-model strategy
+	// (virtual provider strategy IDs are valid model names even if not in the
+	// provider's upstream catalog)
+	// Check both by Type and by ID since the virtual provider has id="meta-model"
+	if prov.Type == "meta-model" || prov.ID == "meta-model" {
+		for _, s := range cfg.Strategies {
+			if s.ID == model || s.ID == baseModel {
+				return nil // meta-model strategy is valid
+			}
+		}
+	}
+	return fmt.Errorf("model %q not found in provider %q (available: %d models) — opencode will fall back to default", model, provider, len(available))
+}
+
+// findLastSessionForShip looks up the most recent opencode session for the given
+// ship name (by title). Returns the session ID if found, empty string otherwise.
+func findLastSessionForShip(root, shipName string) (string, error) {
+	sessions, err := ocsessions.List(ocsessions.ListOpts{
+		Title: shipName,
+		Limit: 1,
+	})
+	if err != nil {
+		// If the opencode DB doesn't exist or is inaccessible, treat as no session.
+		return "", nil
+	}
+	if len(sessions) > 0 && sessions[0].ID != "" {
+		return sessions[0].ID, nil
+	}
+	return "", nil
+}
