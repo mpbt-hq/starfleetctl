@@ -319,9 +319,15 @@ func cleanupWrongPortProcesses(expectedAddr string, root string) error {
 		if err != nil {
 			continue
 		}
-		// Only kill if the process cwd is under our root
-		if !strings.HasPrefix(targetAbs, rootAbs+string(filepath.Separator)) && targetAbs != rootAbs {
-			continue // different root, don't touch
+		// Only kill processes that belong to OUR workspace root. Compare the
+		// process's own workspace root (the nearest ancestor carrying a
+		// .starfleet-ai/ marker) for EXACT equality — not a path prefix: a
+		// nested workspace (e.g. an isolated testbed under _WORK_/) has its
+		// own .starfleet-ai/ and must not be treated as ours. A prefix check
+		// wrongly killed such nested instances on every autostart run.
+		procRoot := procWorkspaceRoot(targetAbs)
+		if procRoot == "" || !samePath(procRoot, rootAbs) {
+			continue // different (or undeterminable) workspace root, don't touch
 		}
 		// Kill process on wrong port from same root
 		process, err := os.FindProcess(p.PID)
@@ -330,6 +336,35 @@ func cleanupWrongPortProcesses(expectedAddr string, root string) error {
 		}
 	}
 	return nil
+}
+
+// procWorkspaceRoot returns the mpbt-workspace root that the process working in
+// cwd belongs to: the nearest ancestor directory carrying a .starfleet-ai/
+// marker (the defining per-workspace landmark). Returns "" when none is found
+// (unrelated process), so the caller must not treat it as its own.
+func procWorkspaceRoot(cwd string) string {
+	dir := cwd
+	for {
+		if fi, err := os.Stat(filepath.Join(dir, ".starfleet-ai")); err == nil && fi.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// samePath reports whether a and b denote the same filesystem location after
+// resolving to absolute, cleaned paths.
+func samePath(a, b string) bool {
+	aa, err1 := filepath.Abs(a)
+	bb, err2 := filepath.Abs(b)
+	if err1 != nil || err2 != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(aa) == filepath.Clean(bb)
 }
 
 // webProcInfo holds info about a starfleetctl web process
