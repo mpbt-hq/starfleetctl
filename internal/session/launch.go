@@ -215,12 +215,12 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 				return nil, fmt.Errorf("session run: --launch-type needs a value")
 			}
 			launchType = args[1]
+			args = args[2:]
 		case "--class":
 			if len(args) < 2 {
 				return nil, fmt.Errorf("session run: --class needs a value")
 			}
 			class = args[1]
-			args = args[2:]
 			args = args[2:]
 		case "--":
 			args = args[1:]

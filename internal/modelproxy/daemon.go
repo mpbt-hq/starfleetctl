@@ -262,7 +262,9 @@ func IsPIDAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return process.Signal(os.Signal(nil)) == nil
+	// signal 0 is the real liveness probe; os.Signal(nil) would be rejected
+	// with "os: unsupported signal type" and always report the process as dead.
+	return process.Signal(syscall.Signal(0)) == nil
 }
 
 func daemonPath() string {

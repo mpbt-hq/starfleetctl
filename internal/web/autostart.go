@@ -83,8 +83,11 @@ func IsPIDAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	// On Unix, FindProcess always succeeds, so send signal 0 to check
-	err = process.Signal(os.Signal(nil))
+	// On Unix, FindProcess always succeeds, so send signal 0 to check.
+	// NOTE: os.Signal(nil) is NOT a valid "probe" — Process.Signal rejects it
+	// with "os: unsupported signal type", so the check would always report the
+	// process as dead. Use syscall.Signal(0) (the real signal-0 probe).
+	err = process.Signal(syscall.Signal(0))
 	return err == nil
 }
 
