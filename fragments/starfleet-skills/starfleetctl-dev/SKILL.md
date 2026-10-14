@@ -74,6 +74,18 @@ Daraus folgt zwingend:
   **nichts** — der nächste `self-install` überschreibt sie aus dem Build.
 - Solange der Commit nicht auf `origin/master` ist, gibt es **nichts zum Ziehen**.
 
+**Letzte Stufe — eine LAUFENDE Session liest Skills nicht neu.** opencode scannt die
+Skills **einmal pro Prozess** (im Log `init count=N` bei jedem Prozessstart) und hält
+sie im Speicher; auch ein erneuter `skill`-Tool-Aufruf liefert den Stand vom
+Prozessstart. Ein geänderter Skill wirkt daher erst in einem **neuen opencode-Prozess**
+— d.h. Ship-Neustart (`session stop` + `ship-run`). Zwei Fallstricke:
+
+- `sop-reload` (in-place `session.clear` + re-prompt) läuft im **selben** Prozess und
+  lädt nur den SOP-Index neu — **nicht** die Skills.
+- Auch wenn beim Neustart **dieselbe Session wieder aufgenommen** wird (`--session
+  <id>`), ist der Skill-Registry trotzdem neu: der **Prozess** ist neu, die
+  Konversations-Historie bleibt. Skills sind also aktuell, sobald der Prozess neu ist.
+
 ## 0. Claim, bevor du anfasst
 
 Es darf **immer nur ein Schiff gleichzeitig** den starfleetctl-Source ändern. Vorher
