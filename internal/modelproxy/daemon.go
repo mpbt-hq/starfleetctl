@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/metux/starfleetctl/internal/envkeys"
+	"github.com/metux/starfleetctl/internal/util"
 )
 
 // IsRunning checks whether something is already listening on the proxy's
@@ -203,7 +204,9 @@ func Stop(root string) error {
 	if err != nil {
 		return err
 	}
-	if pid, err := ReadPID(cfg.PIDFile); err == nil && pid > 0 {
+	// Only kill the PID if it is really a starfleetctl process — a stale PID
+	// file plus PID reuse must not take down an unrelated process.
+	if pid, err := ReadPID(cfg.PIDFile); err == nil && pid > 0 && util.IsStarfleetctlPID(pid) {
 		if process, err := os.FindProcess(pid); err == nil {
 			_ = process.Kill()
 		}

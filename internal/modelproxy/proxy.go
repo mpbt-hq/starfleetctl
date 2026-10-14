@@ -1644,12 +1644,24 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 		err  error
 	}
 	scanCh := make(chan scanResult, 1)
+	// done lets the producer below stop when pipeSSE returns early (retryable
+	// error, keepalive timeout, …). Without it the goroutine could block forever
+	// on the buffered scanCh send and leak one goroutine per aborted stream.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
+		defer close(scanCh)
 		for sc.Scan() {
-			scanCh <- scanResult{line: sc.Text(), err: nil}
+			select {
+			case scanCh <- scanResult{line: sc.Text(), err: nil}:
+			case <-done:
+				return
+			}
 		}
-		scanCh <- scanResult{line: "", err: sc.Err()}
-		close(scanCh)
+		select {
+		case scanCh <- scanResult{line: "", err: sc.Err()}:
+		case <-done:
+		}
 	}()
 
 	for {

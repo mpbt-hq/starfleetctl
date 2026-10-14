@@ -640,7 +640,6 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		}
 
 		inner := "cd " + shellQuote(root) + "; "
-		inner += "export OPENCODE_CONFIG=" + shellQuote(opencode.SocketPath(root, name)) + "; "
 		inner += "exec " + shellQuote(resolveClientPath("opencode"))
 		inner += " serve --socket " + shellQuote(opencode.SocketPath(root, name))
 		if effectiveModel != "" {
@@ -779,9 +778,13 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 
 		fmt.Fprintf(os.Stderr, "Started termctl-run child for %s (pid=%d, model=%s)\n", name, childPid, effectiveModel)
 
-		// Post initial heartbeat
-		os.Setenv("STARFLEET_SHIP_ID", name)
+		// Post the initial heartbeat for THIS ship. Set the Bus identity
+		// explicitly instead of mutating the process-global STARFLEET_SHIP_ID
+		// env (which would race with concurrent readers and leak this ship's id
+		// into the caller's environment).
 		if bus, err := comms.New(root); err == nil {
+			bus.ShipID = name
+			bus.ShipIDSet = true
 			provider := o.Provider
 			if provider == "" {
 				provider = providerFromModel(model)

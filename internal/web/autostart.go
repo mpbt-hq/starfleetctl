@@ -21,6 +21,7 @@ import (
 
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/envkeys"
+	"github.com/metux/starfleetctl/internal/util"
 )
 
 const (
@@ -451,18 +452,33 @@ func daemonPath() string {
 	return strings.Join(parts, string(os.PathListSeparator))
 }
 
-// killWebProcOnPort kills any starfleetctl web process bound to the given
-// listen address (e.g. "0.0.0.0:8080").
-func killWebProcOnPort(addr string) error {
+// killWebProcOnPort kills a starfleetctl web process bound to the given listen
+// address (e.g. "0.0.0.0:8080") that belongs to OUR workspace root. Scoping by
+// root — not just port — matters because nested workspaces (e.g. the testbed)
+// share the port-matching space; killing by port alone could take down an
+// unrelated instance on the same port.
+func killWebProcOnPort(root, addr string) error {
 	_, expectedPort, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil
 	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		rootAbs = root
+	}
 	for _, p := range webStartProcs() {
-		if p.Port == expectedPort {
-			if process, err := os.FindProcess(p.PID); err == nil {
-				process.Kill()
-			}
+		if p.Port != expectedPort {
+			continue
+		}
+		cwd, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(p.PID), "cwd"))
+		if err != nil {
+			continue
+		}
+		if !samePath(procWorkspaceRoot(cwd), rootAbs) {
+			continue // different workspace root, don't touch
+		}
+		if process, err := os.FindProcess(p.PID); err == nil {
+			process.Kill()
 		}
 	}
 	return nil
@@ -475,7 +491,9 @@ func Stop(root string) error {
 	if err != nil {
 		return err
 	}
-	if pid > 0 {
+	// Only kill the PID if it is really a starfleetctl process — a stale PID
+	// file plus PID reuse must not take down an unrelated process.
+	if pid > 0 && util.IsStarfleetctlPID(pid) {
 		process, err := os.FindProcess(pid)
 		if err == nil {
 			process.Kill()
@@ -501,7 +519,7 @@ func Restart(root string) error {
 	// the configured address so Autostart actually replaces it instead of
 	// seeing the port as busy and returning early.
 	if IsWebServerRunning(addr) {
-		if err := killWebProcOnPort(addr); err != nil {
+		if err := killWebProcOnPort(root, addr); err != nil {
 			return err
 		}
 		time.Sleep(300 * time.Millisecond)
