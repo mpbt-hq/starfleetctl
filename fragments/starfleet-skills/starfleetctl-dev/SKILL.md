@@ -248,7 +248,7 @@ die Flotte.
 ## 7. NIEMALS `pkill -f starfleetctl` (Incident 2026-10-13)
 
 Für ein manuelles Deployment **niemals** einen breiten `pkill`-Befehl verwenden —
-weder `pkill -f starfleetctl`, `pkill -f ship-supervisor` noch `kill`/`systemctl`
+weder `pkill -f starfleetctl` noch `kill`/`systemctl`
 gegen die laufende Instanz. **Vor dem Kopieren das alte Binary löschen** (`rm -f`),
 das umgeht das text-file-busy und ist die einzige zulässige Methode:
 

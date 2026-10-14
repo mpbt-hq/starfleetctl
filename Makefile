@@ -3,7 +3,6 @@
 
 GO ?= go
 TOOL := starfleetctl
-SUPERVISOR := ship-supervisor
 
 # Static build-test for the opencode plugin TypeScript
 # (fragments/opencode-plugins/), which the bootstrap deploys as raw,
@@ -28,7 +27,6 @@ GIT_DIR := $(shell git rev-parse --absolute-git-dir 2>/dev/null)
 
 build:
 	GIT_DIR="$(GIT_DIR)" $(GO) build -o $(TOOL) ./cmd/starfleetctl
-	GIT_DIR="$(GIT_DIR)" $(GO) build -o $(SUPERVISOR) ./cmd/ship-supervisor
 
 test:
 	$(GO) test ./...
@@ -40,7 +38,7 @@ vet:
 	$(GO) vet ./...
 
 clean:
-	rm -f $(TOOL) $(SUPERVISOR)
+	rm -f $(TOOL)
 
 check-plugin:
 	@$(PLUGIN_CHECK)

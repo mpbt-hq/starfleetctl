@@ -5,6 +5,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/X11Libre/go-x11proto/tk/term/termctl"
 	"github.com/metux/starfleetctl/internal/comms"
@@ -803,27 +805,43 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		return "", fmt.Errorf("control socket listen failed: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "LaunchShip: Control socket listener started on %s\n", controlSocketPath)
-	defer func() {
-		listener.Close()
-		os.Remove(controlSocketPath)
+
+	// Graceful shutdown. The listener is intentionally NOT closed when
+	// LaunchShip returns: the accept-loop goroutine owns it for the lifetime of
+	// the process (a long-lived web daemon keeps serving RESTART/STOP/STATUS; a
+	// short-lived CLI closes it implicitly on exit, and the next launch removes
+	// the stale socket). It is closed exactly ONCE, on STOP — a stray
+	// double-STOP must not panic on a double channel close.
+	shutdownCh := make(chan struct{})
+	var shutdownOnce sync.Once
+	signalShutdown := func() { shutdownOnce.Do(func() { close(shutdownCh) }) }
+
+	// Tear the listener + socket file down when shutdown is signalled.
+	go func() {
+		<-shutdownCh
+		_ = listener.Close()
+		_ = os.Remove(controlSocketPath)
 		fmt.Fprintf(os.Stderr, "LaunchShip: Control socket listener stopped on %s\n", controlSocketPath)
 	}()
-
-	// Channel for graceful shutdown
-	shutdownCh := make(chan struct{})
 
 	go func() {
 		fmt.Fprintf(os.Stderr, "LaunchShip: Control socket accept loop starting\n")
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
+				// The listener is closed only on shutdown, so a closed error is a
+				// clean exit. Anything else is unexpected: log it but do NOT spin
+				// on it — a tight accept-error loop burns 100% CPU.
+				if errors.Is(err, net.ErrClosed) {
+					fmt.Fprintf(os.Stderr, "LaunchShip: Accept loop exiting (listener closed)\n")
+					return
+				}
 				select {
 				case <-shutdownCh:
-					fmt.Fprintf(os.Stderr, "LaunchShip: Accept loop exiting due to shutdown\n")
 					return
 				default:
 					fmt.Fprintf(os.Stderr, "LaunchShip: Failed to accept control connection: %v\n", err)
-					continue
+					time.Sleep(50 * time.Millisecond)
 				}
 			}
 			fmt.Fprintf(os.Stderr, "LaunchShip: Accepted control connection from %v\n", conn.RemoteAddr())
@@ -867,7 +885,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 						childCmd.Wait()
 					}
 					childMu.Unlock()
-					close(shutdownCh)
+					signalShutdown()
 					c.Write([]byte("OK\n"))
 				case "STATUS":
 					childMu.Lock()
@@ -885,8 +903,10 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		}
 	}()
 
-	// Start the initial child process
+	// Start the initial child process. If it fails, tear the listener down again
+	// (otherwise the socket + accept goroutine would leak).
 	if err := startChild(""); err != nil {
+		signalShutdown()
 		return "", err
 	}
 
