@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -87,6 +88,7 @@ func (s *Store) Path(id string) string {
 }
 
 // Create persists a new report record. Returns an error if the ID exists.
+// Uses atomic write (temp file + rename) to avoid race conditions.
 func (s *Store) Create(r *ReportRecord) (string, error) {
 	if r.MessageID == "" {
 		return "", fmt.Errorf("reports store: MessageID is required")
@@ -103,8 +105,14 @@ func (s *Store) Create(r *ReportRecord) (string, error) {
 	}
 	// Write in RFC2822 format
 	data := r.toRFC2822String()
-	if err := os.WriteFile(s.Path(r.MessageID), []byte(data), 0o644); err != nil {
-		return "", fmt.Errorf("reports store: write %s: %w", id, err)
+	// Atomic write: temp file + rename (avoids partial writes and races)
+	tmpPath := filepath.Join(s.dir, id+".tmp."+strconv.FormatInt(time.Now().UnixNano(), 10))
+	if err := os.WriteFile(tmpPath, []byte(data), 0o644); err != nil {
+		return "", fmt.Errorf("reports store: write temp %s: %w", id, err)
+	}
+	if err := os.Rename(tmpPath, s.Path(id)); err != nil {
+		os.Remove(tmpPath) // best effort cleanup
+		return "", fmt.Errorf("reports store: rename %s: %w", id, err)
 	}
 	return id, nil
 }
