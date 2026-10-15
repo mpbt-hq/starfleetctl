@@ -557,9 +557,14 @@ func exists(path string) bool {
 // ackMessage marks a message as seen by this ship by moving the copy in my
 // own unseen/ dir (or the legacy flat path) to my seen/ dir. Broadcasts are
 // fanned out to per-ship copies at post time, so they are moved just like
-// targeted messages — there is no shared "all" copy anymore. Returns usageErr
-// "no such directive" when the message exists in the records but has no
-// source file at any known location.
+// targeted messages — there is no shared "all" copy anymore.
+//
+// Idempotent: if the message is already in my seen/ dir (e.g. the poller
+// marked it seen when it delivered it, or a repeated ack), that is a
+// successful no-op — NOT an error. Otherwise a ship following the SOP
+// ("ack each directive") would get "no such directive" for exactly the
+// messages it did process, indistinguishable from a genuinely unknown id.
+// Only an id present at none of the known locations is an error.
 func (b *Bus) ackMessage(id string) error {
 	seenPath, err := b.mfileSeen(b.ShipID, id)
 	if err != nil {
@@ -571,6 +576,9 @@ func (b *Bus) ackMessage(id string) error {
 	switch {
 	case exists(myUnseen):
 		return os.Rename(myUnseen, seenPath)
+	case exists(seenPath):
+		// Already seen/acked by this ship — idempotent no-op.
+		return nil
 	case exists(legacy):
 		return os.Rename(legacy, seenPath)
 	default:
