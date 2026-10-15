@@ -594,6 +594,9 @@ func exists(path string) bool {
 // ("ack each directive") would get "no such directive" for exactly the
 // messages it did process, indistinguishable from a genuinely unknown id.
 // Only an id present at none of the known locations is an error.
+//
+// This function uses atomic rename operations to avoid TOCTOU races between
+// existence checks and the actual move.
 func (b *Bus) ackMessage(id string) error {
 	seenPath, err := b.mfileSeen(b.ShipID, id)
 	if err != nil {
@@ -602,17 +605,26 @@ func (b *Bus) ackMessage(id string) error {
 	myUnseen := filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen", fsafe(id)+".json")
 	legacy := filepath.Join(b.MsgDir, fsafe(id)+".json")
 
-	switch {
-	case exists(myUnseen):
-		return os.Rename(myUnseen, seenPath)
-	case exists(seenPath):
-		// Already seen/acked by this ship — idempotent no-op.
-		return nil
-	case exists(legacy):
-		return os.Rename(legacy, seenPath)
-	default:
-		return usageErr(fmt.Sprintf("comms: no such directive '%s'", id))
+	// Try each possible source location atomically: attempt the rename
+	// directly and handle "file not found" errors gracefully. This avoids
+	// TOCTOU races between existence checks and the rename.
+	for _, src := range []string{myUnseen, legacy} {
+		err := os.Rename(src, seenPath)
+		if err == nil {
+			return nil // successfully moved
+		}
+		if !os.IsNotExist(err) {
+			return err // some other error (permission, cross-device, etc.)
+		}
+		// File not found at this location — try next source
 	}
+
+	// Check if already in seen/ (idempotent no-op)
+	if exists(seenPath) {
+		return nil
+	}
+
+	return usageErr(fmt.Sprintf("comms: no such directive '%s'", id))
 }
 
 // DoAck implements `comms ack <id> [note]`.
