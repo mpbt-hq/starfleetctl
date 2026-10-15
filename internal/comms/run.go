@@ -67,6 +67,16 @@ func hasJSON(args []string) bool {
 	return false
 }
 
+// hasHelp reports whether -h/--help is present anywhere in args.
+func hasHelp(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
 // Run dispatches a `comms` invocation exactly like the bash script's
 // final case statement, given the resolved workspace root. Returns the
 // process exit code.
@@ -87,10 +97,34 @@ func Run(root string, args []string) int {
 	case "-h", "--help":
 		fmt.Print(usage)
 		return 0
+	}
+
+	// `comms <cmd> --help` must show help, not run the command. Without this,
+	// e.g. `comms clear --help` silently executes clear and drops the caller's
+	// own heartbeat. Skip the check for commands whose remaining args are
+	// free-form message text (there "--help" may legitimately be message
+	// content).
+	switch args[0] {
+	case "tell", "broadcast", "--all", "ask", "reply":
+		// free text — leave as-is
+	default:
+		if hasHelp(args[1:]) {
+			fmt.Print(usage)
+			return 0
+		}
+	}
+
+	switch args[0] {
 	case "status":
 		state, note, patch := parseStatusArgs(args[1:])
 		cmdErr = b.DoStatus(state, note, patch)
 	case "clear":
+		// Destructive (drops my own heartbeat) and takes no arguments:
+		// refuse anything extra rather than silently ignoring it.
+		if len(args) > 1 {
+			cmdErr = usageErr("comms: clear takes no arguments")
+			break
+		}
 		cmdErr = b.DoClear()
 	case "touch":
 		cmdErr = b.DoTouch()
