@@ -2436,7 +2436,7 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 			p.Body = p.Subtitle + "\n\n" + p.Body
 		}
 		now := time.Now()
-		messageID := fmt.Sprintf("<%d>", now.UnixNano())
+		messageID := fmt.Sprintf("%d", now.UnixNano())
 		rec := &reports.ReportRecord{
 			MessageID:   messageID,
 			Date:        now.Format(time.RFC3339),

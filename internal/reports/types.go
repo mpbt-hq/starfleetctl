@@ -15,7 +15,7 @@ import (
 // ReportRecord is a single structured report submitted by a ship.
 // Uses RFC2822-style headers for the on-disk format.
 type ReportRecord struct {
-	MessageID   string   `json:"message_id"`   // Message-ID header
+	MessageID   string   `json:"message_id"`   // report id (bare; <> brackets belong to the header only)
 	Date        string   `json:"date"`         // Date header (RFC3339)
 	From        string   `json:"from"`         // From header (ship ID)
 	Subject     string   `json:"subject"`      // Subject header
@@ -58,9 +58,10 @@ func recordToJSON(r *ReportRecord) ReportJSON {
 }
 
 // toRFC2822String converts ReportRecord to RFC2822-style string for storage.
+// MessageID is stored bare; the RFC822 angle brackets are added here.
 func (r *ReportRecord) toRFC2822String() string {
 	var b strings.Builder
-	b.WriteString("Message-ID: " + r.MessageID + "\n")
+	b.WriteString("Message-ID: <" + r.MessageID + ">\n")
 	b.WriteString("Date: " + r.Date + "\n")
 	b.WriteString("From: " + r.From + "\n")
 	b.WriteString("Subject: " + r.Subject + "\n")
@@ -118,7 +119,8 @@ func parseRFC2822Format(s string, filename string) (*ReportRecord, error) {
 		val := strings.TrimSpace(h[colon+1:])
 		switch strings.ToLower(key) {
 		case "message-id":
-			r.MessageID = val
+			// Store bare; the RFC822 angle brackets belong to the header only.
+			r.MessageID = strings.Trim(val, "<>")
 		case "date":
 			r.Date = val
 			// Try to parse date as RFC3339 for Created epoch
@@ -151,9 +153,9 @@ func parseRFC2822Format(s string, filename string) (*ReportRecord, error) {
 			}
 		}
 	}
-	// Ensure Message-ID exists
+	// Ensure Message-ID exists (bare).
 	if r.MessageID == "" {
-		r.MessageID = "<" + filename + ">"
+		r.MessageID = filename
 	}
 	// Ensure Created is set
 	if r.Created == 0 {
@@ -185,7 +187,7 @@ func parseLegacyJSON(data []byte, filename string) (*ReportRecord, error) {
 		date = time.Unix(legacy.Created, 0).Format(time.RFC3339)
 	}
 	r := &ReportRecord{
-		MessageID:   "<" + legacy.ID + ">",
+		MessageID:   legacy.ID,
 		Date:        date,
 		From:        legacy.Ship,
 		Subject:     legacy.Title,

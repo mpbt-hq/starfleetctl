@@ -167,7 +167,7 @@ func runSubmit(root string, args []string) int {
 	}
 
 	now := time.Now()
-	messageID := fmt.Sprintf("<%d>", now.UnixNano())
+	messageID := fmt.Sprintf("%d", now.UnixNano())
 	rec := &ReportRecord{
 		MessageID:   messageID,
 		Date:        now.Format(time.RFC3339),
@@ -280,7 +280,7 @@ func runShow(root string, args []string) int {
 		fmt.Fprintln(os.Stderr, "reports:", err)
 		return 1
 	}
-	fmt.Printf("Message-ID: %s\n", r.MessageID)
+	fmt.Printf("Message-ID: <%s>\n", r.MessageID)
 	fmt.Printf("Date:       %s\n", r.Date)
 	fmt.Printf("From:       %s\n", r.From)
 	fmt.Printf("Subject:    %s\n", r.Subject)

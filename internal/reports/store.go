@@ -81,10 +81,8 @@ func reportIDFromName(name string) (string, bool) {
 // Dir returns the store directory path.
 func (s *Store) Dir() string { return s.dir }
 
-// Path returns the report file path for a given ID (Message-ID without brackets).
+// Path returns the report file path for a given (bare) report id.
 func (s *Store) Path(id string) string {
-	// Strip angle brackets if present
-	id = strings.Trim(id, "<>")
 	return filepath.Join(s.dir, id+reportExt)
 }
 
@@ -93,7 +91,7 @@ func (s *Store) Create(r *ReportRecord) (string, error) {
 	if r.MessageID == "" {
 		return "", fmt.Errorf("reports store: MessageID is required")
 	}
-	id := strings.Trim(r.MessageID, "<>")
+	id := r.MessageID
 	if _, err := s.Get(id); err == nil {
 		return "", fmt.Errorf("reports store: %s already exists", id)
 	}

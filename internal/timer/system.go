@@ -158,7 +158,7 @@ func runModelCheck(root string) error {
 		}
 	}
 	now := time.Now()
-	messageID := fmt.Sprintf("<%d>", now.UnixNano())
+	messageID := fmt.Sprintf("%d", now.UnixNano())
 	rec := &reports.ReportRecord{
 		MessageID: messageID,
 		Date:      now.Format(time.RFC3339),
