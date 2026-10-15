@@ -1493,12 +1493,53 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				continue
 			}
 			// Stream interrupted (failed=true) — treat as retryable to try next model in strategy
-			if failed && attempt < attempts {
+			if failed && (attempt < attempts || (attempt == attempts && attempts == 1)) {
 				p.logf("%s/%s: stream interrupted (attempt %d/%d) — retrying with next model", ship, prov.ID, attempt, attempts)
 				// Record the failure and check circuit breaker before retrying
 				p.tracker.record(ship, prov.ID, requestedModel, usage, retries, true)
-				if strat := p.getStrategyForModel(requestedModel); strat != nil {
+				strat := p.getStrategyForModel(requestedModel)
+				if strat != nil {
 					p.checkCircuitBreaker(strat, model)
+					// Force circuit breaker open for this model so routeStrategyModel skips it
+					strat.mu.Lock()
+					if cb := strat.CircuitBreakers[model]; cb != nil {
+						cb.mu.Lock()
+						cb.State = CircuitBreakerOpen
+						cb.LastStateChange = time.Now()
+						cb.mu.Unlock()
+					}
+					strat.mu.Unlock()
+					// Re-route to next available model in strategy
+					newModel, newProv, err := p.routeStrategyModel(strat, sessionID, requestedModel)
+					if err == nil && newProv != nil && newModel != model {
+						p.logf("%s/%s: switched to model %s (provider %s) for retry", ship, prov.ID, newModel, newProv.ID)
+						model = newModel
+						prov = newProv
+						// Update effective limit for new model
+						var modelInfo *config.ModelProxyStrategyModel
+						for _, s := range p.cfg.Strategies {
+							if s.ID == strat.Name {
+								modelInfo = s.GetModelByID(newModel)
+								break
+							}
+						}
+						if modelInfo != nil {
+							effectiveLimit = modelInfo.ContextWindow
+						}
+						if effectiveLimit == 0 {
+							effectiveLimit = strat.EffectiveLimit
+						}
+						if effectiveLimit > 0 {
+							w.Header().Set("X-Context-Limit", fmt.Sprintf("%d", effectiveLimit))
+						}
+						// Reset attempt to allow full retry budget for new model
+						attempt = 0 // will be incremented to 1 by loop
+						retries = 0
+						writeHeaders = true
+						skipSaturationWait = false
+						continue
+					}
+					p.logf("%s/%s: no alternative model available in strategy %s", ship, prov.ID, strat.Name)
 				}
 				retries++
 				writeHeaders = false
