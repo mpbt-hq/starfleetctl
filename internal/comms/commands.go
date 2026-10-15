@@ -961,10 +961,15 @@ func (b *Bus) DoPrune() error {
 				break
 			}
 		}
-		if !keep {
-			if mpath, err := b.mfile(m.ID, m.Target); err == nil {
-				os.Remove(mpath)
-			}
+		if keep {
+			continue
+		}
+		// A spent directive lives in the recipient's unseen/ (never acked) or
+		// seen/ (acked). Remove whichever copy exists: the old code only probed
+		// the unseen/ path (via mfile), so fully-acked directives were counted
+		// as pruned but never actually deleted — the source of the unbounded
+		// seen/ growth.
+		if b.removeMsgCopies(m.ID, m.Target) {
 			msgCnt++
 		}
 	}
@@ -972,6 +977,24 @@ func (b *Bus) DoPrune() error {
 	b.LogEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
 	fmt.Printf("comms: pruned %d stale heartbeat(s), %d spent directive(s)\n", statusCnt, msgCnt)
 	return nil
+}
+
+// removeMsgCopies deletes every on-disk copy of message id for recipient
+// target: the legacy flat file, plus the per-target unseen/ and seen/ copies.
+// Returns true if at least one file was removed.
+func (b *Bus) removeMsgCopies(id, target string) bool {
+	removed := false
+	cands := []string{
+		filepath.Join(b.MsgDir, fsafe(id)+".json"),
+		filepath.Join(b.MsgDir, fsafe(target), "unseen", fsafe(id)+".json"),
+		filepath.Join(b.MsgDir, fsafe(target), "seen", fsafe(id)+".json"),
+	}
+	for _, p := range cands {
+		if err := os.Remove(p); err == nil {
+			removed = true
+		}
+	}
+	return removed
 }
 
 // DoPurgeOld implements `comms purge [--older-than <dur>] [--all]`.
