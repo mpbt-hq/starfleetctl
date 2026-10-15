@@ -2,10 +2,9 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Report store: file-based CRUD for report records. Each report is a single
-// RFC2822/email-style file with a <message-id>.json filename. The .json
-// suffix is a known misnomer — the content is RFC2822, not JSON — left in
-// place for compatibility with already-stored reports (see the report-format
-// discussion topic).
+// RFC2822/email-style file named <message-id>.eml — the .eml suffix marks it
+// as a mail-format file and distinguishes it from any other status files that
+// may later share the directory.
 package reports
 
 import (
@@ -15,6 +14,14 @@ import (
 	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	// reportExt is the on-disk suffix for report files (RFC2822/email format).
+	reportExt = ".eml"
+	// legacyReportExt is the pre-rename suffix, still accepted on read so a
+	// store that has not been migrated yet keeps its reports visible.
+	legacyReportExt = ".json"
 )
 
 // Store provides file-based report CRUD.
@@ -32,7 +39,43 @@ func NewStore(root string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("reports store: mkdir %s: %w", dir, err)
 	}
-	return &Store{dir: dir}, nil
+	s := &Store{dir: dir}
+	s.migrateLegacySuffix()
+	return s, nil
+}
+
+// migrateLegacySuffix renames legacy <id>.json report files to <id>.eml.
+// Idempotent and a no-op once every file carries the current suffix (an
+// existing .eml is never overwritten).
+func (s *Store) migrateLegacySuffix() {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), legacyReportExt) {
+			continue
+		}
+		oldPath := filepath.Join(s.dir, e.Name())
+		newPath := filepath.Join(s.dir, strings.TrimSuffix(e.Name(), legacyReportExt)+reportExt)
+		if _, err := os.Stat(newPath); err == nil {
+			continue // already migrated
+		}
+		_ = os.Rename(oldPath, newPath)
+	}
+}
+
+// reportIDFromName returns the report id for a filename carrying either the
+// current (.eml) or the legacy (.json) suffix.
+func reportIDFromName(name string) (string, bool) {
+	switch {
+	case strings.HasSuffix(name, reportExt):
+		return strings.TrimSuffix(name, reportExt), true
+	case strings.HasSuffix(name, legacyReportExt):
+		return strings.TrimSuffix(name, legacyReportExt), true
+	default:
+		return "", false
+	}
 }
 
 // Dir returns the store directory path.
@@ -42,7 +85,7 @@ func (s *Store) Dir() string { return s.dir }
 func (s *Store) Path(id string) string {
 	// Strip angle brackets if present
 	id = strings.Trim(id, "<>")
-	return filepath.Join(s.dir, id+".json")
+	return filepath.Join(s.dir, id+reportExt)
 }
 
 // Create persists a new report record. Returns an error if the ID exists.
@@ -98,14 +141,17 @@ func (s *Store) List() ([]*ReportRecord, error) {
 	}
 	var out []*ReportRecord
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() {
+			continue
+		}
+		id, ok := reportIDFromName(e.Name())
+		if !ok {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
 		if err != nil {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".json")
 		r, err := parseRFC2822(data, id)
 		if err != nil {
 			continue

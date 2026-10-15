@@ -702,10 +702,11 @@ Use the **Filter** fields to narrow the list by ship name or tag.
 
 ### Storage
 
-Reports are stored as individual JSON files on disk (persisted to git like dashboard topics):
+Each report is stored as a single RFC 2822 / email-style file on disk
+(git-tracked; see `doc/reports.md` for the persistence details):
 
 ```
-.starfleet-ai/reports/<id>.json
+.starfleet-ai/var/reports/<message-id>.eml
 ```
 
 Attachments are stored separately in the filestore (ephemeral, not git-tracked):

@@ -109,13 +109,12 @@ Use the **Filter** fields to narrow the list by ship name or tag.
 ## Storage
 
 Each report is stored as a single **RFC 2822 / email-style** file (headers
-`Message-ID`, `Date`, `From`, `Subject`, …) under `var/reports/`. The files
-carry a `.json` suffix for historical reasons even though the content is not
-JSON — a known naming inconsistency (see the discussion topic on the report
-file format); the loader accepts the `.json` suffix.
+`Message-ID`, `Date`, `From`, `Subject`, …) under `var/reports/`, with an
+`.eml` suffix (mail format; the suffix also keeps report files distinguishable
+from any other status files that may share the directory):
 
 ```
-.starfleet-ai/var/reports/<message-id>.json
+.starfleet-ai/var/reports/<message-id>.eml
 ```
 
 These files sit under `var/` but are **git-tracked**: `/var/reports/` is not in
