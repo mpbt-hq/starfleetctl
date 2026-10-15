@@ -1257,12 +1257,12 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ship := shipFromRequest(r.Header.Get("Authorization"))
-	p.forwardChat(w, r, prov, upstreamModel, body, isStreamingRequest(body), ship, req.Model, effectiveLimit)
+	p.forwardChat(w, r, prov, upstreamModel, body, isStreamingRequest(body), ship, req.Model, effectiveLimit, sessionID)
 }
 
 // forwardChat performs the (possibly retried) upstream chat request and
 // records the outcome in the per-ship tracker.
-func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string, effectiveLimit int) {
+func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provider, model string, body []byte, streaming bool, ship, requestedModel string, effectiveLimit int, sessionID string) {
 	p.logf("route: ship=%s requested=%s model=%s provider=%s", ship, requestedModel, model, prov.ID)
 	// Timeouts: streaming and non-streaming need different strategies.
 	// Non-streaming: overall deadline is fine (use provider timeout).
@@ -1304,6 +1304,10 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		// No Timeout - for streaming we rely on r.Context() and idle watchdog
 	}
 	attempts := prov.MaxRetries + 1
+	// Ensure at least one retry (2 attempts) for strategy routes so that 5xx fallback works
+	if p.getStrategyForModel(requestedModel) != nil && attempts < 2 {
+		attempts = 2
+	}
 
 	buildReq := func() (*http.Request, io.Reader, error) {
 		payload := body
@@ -1395,10 +1399,63 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
 			isSaturation := resp.StatusCode == http.StatusTooManyRequests || retryableErrorText(string(errBody))
+			isServerError := resp.StatusCode >= 500 && resp.StatusCode < 600
 			if attempt < attempts && (transientStatus(resp.StatusCode) || isSaturation) {
 				if isSaturation {
 					p.recordSaturation(prov, resp)
 					skipSaturationWait = true // we're about to sleep RetryDelayMS, skip next waitForSaturationGate
+				}
+				// If this request was routed through a strategy and we hit saturation/429 OR a 5xx server error,
+				// immediately re-route to the next model in the strategy instead of
+				// retrying the same failing provider multiple times.
+				strat := p.getStrategyForModel(requestedModel)
+				shouldReroute := (isSaturation || isServerError) && strat != nil
+				if shouldReroute {
+					if isSaturation {
+						p.logf("%s/%s: saturation on model %s — re-routing to next model in strategy %s", ship, prov.ID, model, strat.Name)
+					} else {
+						p.logf("%s/%s: server error %d on model %s — re-routing to next model in strategy %s", ship, prov.ID, resp.StatusCode, model, strat.Name)
+					}
+					// Force circuit breaker open for this model so routeStrategyModel skips it
+					strat.mu.Lock()
+					if cb := strat.CircuitBreakers[model]; cb != nil {
+						cb.mu.Lock()
+						cb.State = CircuitBreakerOpen
+						cb.LastStateChange = time.Now()
+						cb.mu.Unlock()
+					}
+					strat.mu.Unlock()
+					// Re-route to next available model in strategy
+					newModel, newProv, err := p.routeStrategyModel(strat, sessionID, requestedModel)
+					if err == nil && newProv != nil && newModel != model {
+						p.logf("%s/%s: switched to model %s (provider %s) for retry", ship, prov.ID, newModel, newProv.ID)
+						model = newModel
+						prov = newProv
+						// Update effective limit for new model
+						var modelInfo *config.ModelProxyStrategyModel
+						for _, s := range p.cfg.Strategies {
+							if s.ID == strat.Name {
+								modelInfo = s.GetModelByID(newModel)
+								break
+							}
+						}
+						if modelInfo != nil {
+							effectiveLimit = modelInfo.ContextWindow
+						}
+						if effectiveLimit == 0 {
+							effectiveLimit = strat.EffectiveLimit
+						}
+						if effectiveLimit > 0 {
+							w.Header().Set("X-Context-Limit", fmt.Sprintf("%d", effectiveLimit))
+						}
+						// Reset attempt to allow full retry budget for new model
+						attempt = 0 // will be incremented to 1 by loop
+						retries = 0
+						writeHeaders = true
+						skipSaturationWait = false
+						continue
+					}
+					p.logf("%s/%s: no alternative model available in strategy %s", ship, prov.ID, strat.Name)
 				}
 				p.logf("%s/%s: transient HTTP %d (attempt %d/%d): %.300s — retrying", ship, prov.ID, resp.StatusCode, attempt, attempts, string(errBody))
 				retries++
