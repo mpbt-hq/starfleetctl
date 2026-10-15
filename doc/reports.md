@@ -108,11 +108,22 @@ Use the **Filter** fields to narrow the list by ship name or tag.
 
 ## Storage
 
-Reports are stored as individual JSON files on disk (persisted to git like dashboard topics):
+Each report is stored as a single **RFC 2822 / email-style** file (headers
+`Message-ID`, `Date`, `From`, `Subject`, …) under `var/reports/`. The files
+carry a `.json` suffix for historical reasons even though the content is not
+JSON — a known naming inconsistency (see the discussion topic on the report
+file format); the loader accepts the `.json` suffix.
 
 ```
-.starfleet-ai/reports/<id>.json
+.starfleet-ai/var/reports/<message-id>.json
 ```
+
+These files sit under `var/` but are **git-tracked**: `/var/reports/` is not in
+`.starfleet-ai/.gitignore`'s ephemeral list (removed in commit `9c2b9d49c1`).
+Unlike dashboard topics there is **no tool-side commit path** — a report only
+reaches git if an agent `ws-commit`s it (e.g. the auto-commit policy on
+`mtx/agent-config`). A report that is never committed lives only on disk and is
+lost on a `var/` wipe.
 
 Attachments are stored separately in the filestore (ephemeral, not git-tracked):
 

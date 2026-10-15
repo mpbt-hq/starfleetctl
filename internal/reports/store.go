@@ -2,7 +2,10 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
 // Report store: file-based CRUD for report records. Each report is a single
-// RFC2822-style file (<message-id>.json) in the reports directory.
+// RFC2822/email-style file with a <message-id>.json filename. The .json
+// suffix is a known misnomer — the content is RFC2822, not JSON — left in
+// place for compatibility with already-stored reports (see the report-format
+// discussion topic).
 package reports
 
 import (
@@ -20,8 +23,10 @@ type Store struct {
 }
 
 // NewStore returns a store rooted at the reports directory, creating it.
-// Reports are stored under .starfleet-ai/var/reports/ (under var/) so they
-// are treated as runtime state (like ships, comms, timers), not persisted to git.
+// Reports are stored under .starfleet-ai/var/reports/. That path is NOT in
+// .starfleet-ai/.gitignore's ephemeral list, so report files are (unlike
+// ships/comms/timers) git-tracked — but only once an agent commits them: this
+// package has no git path of its own (see doc/reports.md).
 func NewStore(root string) (*Store, error) {
 	dir := filepath.Join(root, ".starfleet-ai", "var", "reports")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
