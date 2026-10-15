@@ -118,14 +118,14 @@ const opencodeClientUA = "opencode/1.18.35 ai-sdk/provider-utils/4.0.23 runtime/
 
 func TestApplyUpstreamHeaders(t *testing.T) {
 	tests := []struct {
-		name          string
-		prov          Provider
-		from          map[string]string // client request headers ("" = absent)
-		wantUA        string
-		wantSession   string
-		wantClient    string
-		wantProject   string
-		wantReqPrefix string
+		name        string
+		prov        Provider
+		from        map[string]string // client request headers ("" = absent)
+		wantUA      string
+		wantSession string
+		wantClient  string
+		wantProject string
+		wantRequest string
 	}{
 		{
 			name:   "generic provider untouched",
@@ -168,6 +168,16 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 			wantSession: "",
 			wantClient:  "cli",
 			wantProject: "global",
+		},
+		{
+			name:        "forwards client x-opencode-request verbatim, never synthesizes one",
+			prov:        Provider{ID: "zen-proxy", Type: "opencode-zen"},
+			from:        map[string]string{"x-opencode-request": "msg_13ae660ca001R4bmhSmJaN1vnE", "X-Session-Id": "ses_realid", "User-Agent": opencodeClientUA},
+			wantUA:      opencodeClientUA,
+			wantSession: "ses_realid",
+			wantClient:  "cli",
+			wantProject: "global",
+			wantRequest: "msg_13ae660ca001R4bmhSmJaN1vnE",
 		},
 		{
 			name:        "non-opencode client UA falls back to default zen UA",
@@ -244,8 +254,8 @@ func TestApplyUpstreamHeaders(t *testing.T) {
 			if got := up.Header.Get("x-opencode-project"); got != tt.wantProject {
 				t.Errorf("x-opencode-project = %q, want %q", got, tt.wantProject)
 			}
-			if got := up.Header.Get("x-opencode-request"); !strings.HasPrefix(got, "msg_") {
-				t.Errorf("x-opencode-request = %q, want msg_ prefixed", got)
+			if got := up.Header.Get("x-opencode-request"); got != tt.wantRequest {
+				t.Errorf("x-opencode-request = %q, want %q", got, tt.wantRequest)
 			}
 		})
 	}

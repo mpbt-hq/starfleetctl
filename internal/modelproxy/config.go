@@ -4,15 +4,12 @@
 package modelproxy
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -432,9 +429,12 @@ const defaultOpenCodeZenUserAgent = "opencode/1.18.30 ai-sdk/provider-utils/4.0.
 //	X-Session-Id) — forward the same value verbatim under BOTH spellings so
 //	Zen's per-session prefix cache hits across turns. A session the client
 //	did not provide is NOT synthesized here: Zen's free tier rejects
-//	fabricated session ids. The request id may be synthesized (fresh random
-//	per request); a sticky bad request id would route every retry to a broken
-//	upstream replica (see opencode issue #46011).
+//	fabricated session ids. The request id is likewise NOT synthesized: Zen
+//	validates the x-opencode-request format when present, and a fabricated
+//	"msg_"+hex value is rejected with HTTP 403 FreeTierError. The official
+//	client omits the header entirely, so forwarding the client's value
+//	verbatim (and sending nothing when absent) is both correct and faithful.
+//	Measured against the live gateway 2026-10-15.
 //
 // Add new cases here as further per-provider requirements arise.
 func (p *Provider) applyUpstreamHeaders(up *http.Request, from *http.Request) {
@@ -478,10 +478,10 @@ func (p *Provider) applyUpstreamHeaders(up *http.Request, from *http.Request) {
 	} else {
 		up.Header.Set("x-opencode-project", "global")
 	}
+	// Request id: forward the client's value verbatim when present, otherwise
+	// send nothing. Never synthesize one (see the format note above).
 	if v := headerFrom(from, "x-opencode-request"); v != "" {
 		up.Header.Set("x-opencode-request", v)
-	} else {
-		up.Header.Set("x-opencode-request", "msg_"+randHex(16))
 	}
 }
 
@@ -492,18 +492,6 @@ func headerFrom(r *http.Request, key string) string {
 		return ""
 	}
 	return r.Header.Get(key)
-}
-
-// randHex returns n random bytes encoded as lowercase hex, for synthesizing
-// OpenCode Zen x-opencode-session / x-opencode-request ids.
-func randHex(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		// crypto/rand can only fail on a bespoke, non-portable setup; fall
-		// back to a timestamp so the request is still well-formed.
-		return strconv.FormatInt(time.Now().UnixNano(), 16)
-	}
-	return hex.EncodeToString(b)
 }
 
 // zenToolsRequired is the list of real opencode tool names that satisfy Zen's body gate.
