@@ -505,25 +505,34 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 		if !b.stale(m.Epoch, "") {
 			continue
 		}
-		keep := false
+		// Check if we can prune: for all live agents, the message must be acked.
+		canPrune := true
 		for agent := range live {
-			if m.Target != agent {
-				continue
-			}
 			if !b.acked(m.ID, agent) {
-				keep = true
+				canPrune = false
 				break
 			}
 		}
-		if !keep {
-			if mpath, err := b.mfile(m.ID, m.Target); err == nil {
-				os.Remove(mpath)
+		if !canPrune {
+			continue
+		}
+		// Determine recipients: if broadcast (target == "all"), clean up for all recipients; otherwise just the target.
+		var recipients []string
+		if m.Target == "all" {
+			recipients = b.broadcastRecipients()
+		} else {
+			recipients = []string{m.Target}
+		}
+		// Remove the message from all recipients' directories (unseen/ and seen/).
+		removedAny := false
+		for _, agent := range recipients {
+			if b.removeMsgCopies(m.ID, agent) {
+				removedAny = true
 			}
+		}
+		if removedAny {
 			msgCnt++
 		}
-	}
-	if statusCnt+msgCnt > 0 {
-		b.LogEvent("prune", fmt.Sprintf("%d stale heartbeats, %d directives", statusCnt, msgCnt))
 	}
 
 	// 4. Set status to idle.
