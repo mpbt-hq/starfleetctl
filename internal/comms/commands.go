@@ -156,6 +156,12 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 	if target == "all" {
 		recipients = b.broadcastRecipients()
 	}
+	// Write all recipient copies to temporary files first (atomicity)
+	type tempFile struct {
+		rcpt string
+		path string
+	}
+	tempFiles := make([]tempFile, 0, len(recipients))
 	for _, rcpt := range recipients {
 		mc := msg
 		mc.Target = rcpt
@@ -167,7 +173,30 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 		if err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(mpath, data, 0o644); err != nil {
+		// Write to temp file first
+		tmpPath := mpath + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+			// Cleanup on failure
+			for _, tf := range tempFiles {
+				os.Remove(tf.path)
+			}
+			return "", err
+		}
+		tempFiles = append(tempFiles, tempFile{rcpt: rcpt, path: tmpPath})
+	}
+	// Atomic move all temp files to final locations
+	for _, tf := range tempFiles {
+		finalPath, err := b.mfile(id, tf.rcpt)
+		if err != nil {
+			for _, tf2 := range tempFiles {
+				os.Remove(tf2.path)
+			}
+			return "", err
+		}
+		if err := os.Rename(tf.path, finalPath); err != nil {
+			for _, tf2 := range tempFiles {
+				os.Remove(tf2.path)
+			}
 			return "", err
 		}
 	}
