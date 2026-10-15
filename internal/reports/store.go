@@ -83,7 +83,13 @@ func reportIDFromName(name string) (string, bool) {
 func (s *Store) Dir() string { return s.dir }
 
 // Path returns the report file path for a given (bare) report id.
+// Sanitizes the id to prevent path traversal attacks.
 func (s *Store) Path(id string) string {
+	// Sanitize: only allow alphanumeric, dash, underscore, dot
+	// Reject any path traversal attempts
+	if strings.Contains(id, "..") || strings.Contains(id, "/") || strings.Contains(id, "\\") {
+		return filepath.Join(s.dir, "invalid"+reportExt)
+	}
 	return filepath.Join(s.dir, id+reportExt)
 }
 
