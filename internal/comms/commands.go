@@ -21,6 +21,13 @@ import (
 // nextID allocates the next monotonic zero-padded message id (m0001, m0002,
 // …) from MsgDir/.seq. Caller must already hold the bus lock, matching
 // bash's next_id() which only runs inside lock_bus'd callers.
+//
+// .seq is a lone ephemeral dotfile under the (gitignored) var/comms tree; if
+// it is lost or reset while the message files survive, the counter would
+// restart at 1 and hand out ids that COLLIDE with (and sort before) existing
+// messages. To stay monotonic regardless, the candidate is floored at one
+// above the highest id already present in the store — so a lost .seq costs
+// nothing but a one-time directory scan.
 func (b *Bus) nextID() (string, error) {
 	seqFile := filepath.Join(b.MsgDir, ".seq")
 	n := int64(0)
@@ -30,11 +37,43 @@ func (b *Bus) nextID() (string, error) {
 			n = v
 		}
 	}
+	if hi := b.highestMsgID(); hi > n {
+		n = hi
+	}
 	n++
 	if err := os.WriteFile(seqFile, []byte(fmt.Sprintf("%d\n", n)), 0o644); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("m%04d", n), nil
+}
+
+// highestMsgID returns the largest numeric message id currently present in
+// the store (legacy flat files plus every target's unseen/ and seen/ dir),
+// or 0 if there are none. Filename-only scan (readdir, no parsing), so it is
+// cheap relative to the message bodies.
+func (b *Bus) highestMsgID() int64 {
+	hi := int64(0)
+	consider := func(names []string) {
+		for _, id := range names {
+			if v := parseIDNum(id); v > uint64(hi) {
+				hi = int64(v)
+			}
+		}
+	}
+	consider(globSortedFiles(b.MsgDir, "m", ".json"))
+	entries, err := os.ReadDir(b.MsgDir)
+	if err != nil {
+		return hi
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		d := filepath.Join(b.MsgDir, e.Name())
+		consider(globSortedFiles(filepath.Join(d, "unseen"), "m", ".json"))
+		consider(globSortedFiles(filepath.Join(d, "seen"), "m", ".json"))
+	}
+	return hi
 }
 
 // attachThreshold is the inline directive size (in bytes) above which DoPost
