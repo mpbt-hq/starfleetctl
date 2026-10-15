@@ -60,13 +60,13 @@ starfleetctl reports list --tag ci
 ### Show a report
 
 ```sh
-starfleetctl reports show r-1700000000123456789
+starfleetctl reports show 1700000000123456789
 ```
 
 ### Delete a report
 
 ```sh
-starfleetctl reports delete r-1700000000123456789
+starfleetctl reports delete 1700000000123456789
 ```
 
 ## Web UI

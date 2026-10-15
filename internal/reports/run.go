@@ -167,7 +167,7 @@ func runSubmit(root string, args []string) int {
 	}
 
 	now := time.Now()
-	messageID := fmt.Sprintf("<r-%d@starfleet>", now.UnixNano())
+	messageID := fmt.Sprintf("<%d>", now.UnixNano())
 	rec := &ReportRecord{
 		MessageID:   messageID,
 		Date:        now.Format(time.RFC3339),
