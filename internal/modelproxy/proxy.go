@@ -1282,6 +1282,9 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 	connectTimeout := 10 * time.Second
 	// Response header timeout (time from connect to first byte of response headers)
 	responseHeaderTimeout := 30 * time.Second
+	if prov.ResponseHeaderTimeout > 0 {
+		responseHeaderTimeout = prov.ResponseHeaderTimeout
+	}
 
 	// Non-streaming client with overall timeout
 	nonStreamClient := &http.Client{

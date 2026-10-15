@@ -168,6 +168,10 @@ type ModelProxyProvider struct {
 	// Timeout is the per-request HTTP timeout for upstream calls (streaming & non-streaming).
 	// If set, overrides the default (30s non-streaming, 15s for opencode-zen streaming).
 	Timeout time.Duration `yaml:"timeout"`
+	// ResponseHeaderTimeout is the time allowed for the upstream to send response
+	// headers after the connection is established. If set, overrides the default
+	// (30s for all providers). This is useful for slow upstream providers.
+	ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
 	// Type selects the provider class, which drives upstream-specific
 	// request handling (headers, body tweaks, ...). Empty = generic
 	// OpenAI-compatible. Known types:

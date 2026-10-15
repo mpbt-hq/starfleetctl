@@ -110,6 +110,10 @@ type Provider struct {
 	// Timeout is the per-request HTTP timeout for upstream calls (streaming & non-streaming).
 	// If set, overrides the default (30s non-streaming, 15s for opencode-zen streaming).
 	Timeout time.Duration
+	// ResponseHeaderTimeout is the time allowed for the upstream to send response
+	// headers after the connection is established. If set, overrides the default
+	// (30s for all providers). This is useful for slow upstream providers.
+	ResponseHeaderTimeout time.Duration
 	// Type is the provider class, driving upstream-specific request
 	// handling. Empty = generic OpenAI-compatible. See
 	// Provider.applyUpstreamHeaders for the known types.
@@ -262,6 +266,10 @@ func Load(root string) (*Config, error) {
 			} else {
 				prov.Timeout = 30 * time.Second
 			}
+		}
+		prov.ResponseHeaderTimeout = p.ResponseHeaderTimeout
+		if prov.ResponseHeaderTimeout <= 0 {
+			prov.ResponseHeaderTimeout = 30 * time.Second
 		}
 		prov.UserAgent = strings.TrimSpace(p.UserAgent)
 		prov.Capabilities = append([]string(nil), p.Capabilities...) // copy, never alias the yaml slice
