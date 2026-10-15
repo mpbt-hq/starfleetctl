@@ -258,23 +258,34 @@ func (b *Bus) RecentMsgRecords(max int) []msgRecord {
 	return out
 }
 
-// conversationFiles returns all message files (id+path) across every target
-// dir plus legacy flat files, newest id first. Shared by the per-ship
-// conversation scans.
-func (b *Bus) conversationFiles() []struct {
+// msgFile identifies one message file on disk (id + path) plus its
+// modification time, used for recency ordering.
+type msgFile struct {
 	id   string
 	path string
-} {
-	var files []struct {
-		id   string
-		path string
-	}
+	mod  int64
+}
+
+// conversationFiles returns all message files (id+path) across every target
+// dir plus legacy flat files, newest FIRST BY MODIFICATION TIME (== post time;
+// the seen/ack path renames the file, which preserves mtime). Shared by the
+// per-ship conversation scans.
+//
+// Deliberately NOT ordered by numeric id: the id counter lives in the
+// ephemeral MsgDir/.seq, which can be lost/reset (e.g. a restore that drops
+// the dotfile). After such a reset new ids are LOWER than older ones, so
+// ordering by id would present stale messages as "newest" and hide fresh
+// ones. mtime is robust against that.
+func (b *Bus) conversationFiles() []msgFile {
+	var files []msgFile
 	addDir := func(dir string) {
 		for _, id := range globSortedFiles(dir, "m", ".json") {
-			files = append(files, struct {
-				id   string
-				path string
-			}{id, filepath.Join(dir, id+".json")})
+			p := filepath.Join(dir, id+".json")
+			var mod int64
+			if fi, err := os.Stat(p); err == nil {
+				mod = fi.ModTime().UnixNano()
+			}
+			files = append(files, msgFile{id: id, path: p, mod: mod})
 		}
 	}
 	addDir(b.MsgDir)
@@ -289,7 +300,14 @@ func (b *Bus) conversationFiles() []struct {
 			addDir(filepath.Join(b.MsgDir, target, "seen"))
 		}
 	}
-	sort.Slice(files, func(i, j int) bool { return parseIDNum(files[i].id) > parseIDNum(files[j].id) })
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].mod != files[j].mod {
+			return files[i].mod > files[j].mod
+		}
+		// Identical mtime (e.g. a fanned-out broadcast): tie-break by id so
+		// the order stays deterministic.
+		return parseIDNum(files[i].id) > parseIDNum(files[j].id)
+	})
 	return files
 }
 
