@@ -1485,32 +1485,32 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 						p.logf("%s/%s: switched to model %s (provider %s) for retry", ship, prov.ID, newModel, newProv.ID)
 						model = newModel
 						prov = newProv
-								// Recreate HTTP clients with new provider's settings
-								if prov.Type == "opencode-zen" {
-									 nonStreamTimeout = 15 * time.Second
-								} else {
-									 nonStreamTimeout = 30 * time.Second
-								}
-								nonStreamTimeout = time.Duration(prov.Timeout)
-								// Recreate non-streaming client
-								nonStreamClient = &http.Client{Timeout: nonStreamTimeout}
-								// Response header timeout
-								responseHeaderTimeout = 30 * time.Second
-								if prov.ResponseHeaderTimeout > 0 {
-									 responseHeaderTimeout = prov.ResponseHeaderTimeout
-								}
-								// Recreate streaming transport and client
-								streamTransport = &http.Transport{
-									 DialContext: (&net.Dialer{
-										 Timeout:   connectTimeout,
-										 KeepAlive: 30 * time.Second,
-									 }).DialContext,
-									 ResponseHeaderTimeout: responseHeaderTimeout,
-									 ExpectContinueTimeout: 1 * time.Second,
-									 IdleConnTimeout:       90 * time.Second,
-									 TLSHandshakeTimeout:   10 * time.Second,
-								}
-								streamClient = &http.Client{Transport: streamTransport}
+						// Recreate HTTP clients with new provider's settings
+						if prov.Type == "opencode-zen" {
+							nonStreamTimeout = 15 * time.Second
+						} else {
+							nonStreamTimeout = 30 * time.Second
+						}
+						nonStreamTimeout = time.Duration(prov.Timeout)
+						// Recreate non-streaming client
+						nonStreamClient = &http.Client{Timeout: nonStreamTimeout}
+						// Response header timeout
+						responseHeaderTimeout = 30 * time.Second
+						if prov.ResponseHeaderTimeout > 0 {
+							responseHeaderTimeout = prov.ResponseHeaderTimeout
+						}
+						// Recreate streaming transport and client
+						streamTransport = &http.Transport{
+							DialContext: (&net.Dialer{
+								Timeout:   connectTimeout,
+								KeepAlive: 30 * time.Second,
+							}).DialContext,
+							ResponseHeaderTimeout: responseHeaderTimeout,
+							ExpectContinueTimeout: 1 * time.Second,
+							IdleConnTimeout:       90 * time.Second,
+							TLSHandshakeTimeout:   10 * time.Second,
+						}
+						streamClient = &http.Client{Transport: streamTransport}
 						// Update effective limit for new model
 						var modelInfo *config.ModelProxyStrategyModel
 						for _, s := range p.cfg.Strategies {
@@ -1602,32 +1602,32 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 						p.logf("%s/%s: switched to model %s (provider %s) for retry", ship, prov.ID, newModel, newProv.ID)
 						model = newModel
 						prov = newProv
-								// Recreate HTTP clients with new provider's settings
-								if prov.Type == "opencode-zen" {
-									 nonStreamTimeout = 15 * time.Second
-								} else {
-									 nonStreamTimeout = 30 * time.Second
-								}
-								nonStreamTimeout = time.Duration(prov.Timeout)
-								// Recreate non-streaming client
-								nonStreamClient = &http.Client{Timeout: nonStreamTimeout}
-								// Response header timeout
-								responseHeaderTimeout = 30 * time.Second
-								if prov.ResponseHeaderTimeout > 0 {
-									 responseHeaderTimeout = prov.ResponseHeaderTimeout
-								}
-								// Recreate streaming transport and client
-								streamTransport = &http.Transport{
-									 DialContext: (&net.Dialer{
-										 Timeout:   connectTimeout,
-										 KeepAlive: 30 * time.Second,
-									 }).DialContext,
-									 ResponseHeaderTimeout: responseHeaderTimeout,
-									 ExpectContinueTimeout: 1 * time.Second,
-									 IdleConnTimeout:       90 * time.Second,
-									 TLSHandshakeTimeout:   10 * time.Second,
-								}
-								streamClient = &http.Client{Transport: streamTransport}
+						// Recreate HTTP clients with new provider's settings
+						if prov.Type == "opencode-zen" {
+							nonStreamTimeout = 15 * time.Second
+						} else {
+							nonStreamTimeout = 30 * time.Second
+						}
+						nonStreamTimeout = time.Duration(prov.Timeout)
+						// Recreate non-streaming client
+						nonStreamClient = &http.Client{Timeout: nonStreamTimeout}
+						// Response header timeout
+						responseHeaderTimeout = 30 * time.Second
+						if prov.ResponseHeaderTimeout > 0 {
+							responseHeaderTimeout = prov.ResponseHeaderTimeout
+						}
+						// Recreate streaming transport and client
+						streamTransport = &http.Transport{
+							DialContext: (&net.Dialer{
+								Timeout:   connectTimeout,
+								KeepAlive: 30 * time.Second,
+							}).DialContext,
+							ResponseHeaderTimeout: responseHeaderTimeout,
+							ExpectContinueTimeout: 1 * time.Second,
+							IdleConnTimeout:       90 * time.Second,
+							TLSHandshakeTimeout:   10 * time.Second,
+						}
+						streamClient = &http.Client{Transport: streamTransport}
 						// Update effective limit for new model
 						var modelInfo *config.ModelProxyStrategyModel
 						for _, s := range p.cfg.Strategies {
