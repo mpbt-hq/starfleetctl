@@ -54,6 +54,7 @@ func (c *Config) virtualModelInfos(prov Provider) []ModelInfo {
 		infos = append(infos, ModelInfo{
 			ID:            s.ID,
 			Object:        "model",
+			Output:        s.EffectiveLimit,
 			OwnedBy:       prov.ID,
 			Label:         label,
 			Context:       s.EffectiveLimit,
