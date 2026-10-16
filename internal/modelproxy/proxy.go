@@ -246,7 +246,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := &responseRecorder{ResponseWriter: w}
 	p.mux.ServeHTTP(rw, r)
 	duration := time.Since(start)
-	p.logf("request: method=%s path=%s remote=%s status=%d latency=%s", r.Method, r.URL.Path, r.RemoteAddr, rw.status, duration)
+	ship := shipFromRequest(r.Header.Get("Authorization"))
+	p.logf("request: method=%s path=%s remote=%s ship=%s status=%d latency=%s", r.Method, r.URL.Path, r.RemoteAddr, ship, rw.status, duration)
 }
 
 type responseRecorder struct {
