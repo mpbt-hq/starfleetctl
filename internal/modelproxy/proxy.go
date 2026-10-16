@@ -1116,6 +1116,44 @@ func retryableErrorText(s string) bool {
 	return false
 }
 
+// upstreamFaultText reports whether an upstream error body describes a
+// backend-side fault that arrives with a client-error status although nothing
+// in our request caused it. NIM answers a cluster-internal condition — a
+// function flipped to DEGRADED — with
+//
+//	400 {"detail":"Function id '…': DEGRADED function cannot be invoked"}
+//
+// Classified by status alone such a response is a permanent client error:
+// no retry, no strategy fallback, straight back to the client — for a fault
+// that usually clears itself moments later. Matching on the body absorbs it
+// here, while genuine client errors (invalid params, unknown model, oversized
+// payload) keep failing immediately because their bodies never carry these
+// fragments.
+func upstreamFaultText(s string) bool {
+	l := strings.ToLower(s)
+	for _, frag := range []string{
+		"degraded function", "cannot be invoked",
+	} {
+		if strings.Contains(l, frag) {
+			return true
+		}
+	}
+	return false
+}
+
+// faultTag labels a retryable upstream response for the log: "transient" when
+// the status is transient by itself (or saturation/5xx), "upstream fault" when
+// only the body reveals the backend cause behind a client-error status.
+func faultTag(isUpstreamFault, isSaturation, isServerError, statusTransient bool) string {
+	if statusTransient || isSaturation || isServerError {
+		return "transient"
+	}
+	if isUpstreamFault {
+		return "upstream fault"
+	}
+	return "transient"
+}
+
 // isStreamingRequest reports whether the chat request asked for a stream.
 func isStreamingRequest(body []byte) bool {
 	var req struct {
@@ -1396,28 +1434,41 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		}
 
 		if resp.StatusCode >= 400 {
-			// Read the error body once for logging; retry transient statuses
-			// and gRPC-style saturation errors (e.g. ResourceExhausted) that
-			// some backends return with a generic status.
+			// Read the error body once for logging; retry transient statuses,
+			// gRPC-style saturation errors (e.g. ResourceExhausted) that some
+			// backends return with a generic status, and backend faults that
+			// arrive with a client-error status (upstreamFaultText).
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
 			isSaturation := resp.StatusCode == http.StatusTooManyRequests || retryableErrorText(string(errBody))
 			isServerError := resp.StatusCode >= 500 && resp.StatusCode < 600
-			if attempt < attempts && (transientStatus(resp.StatusCode) || isSaturation) {
+			isUpstreamFault := upstreamFaultText(string(errBody))
+			if isUpstreamFault && attempts < 2 {
+				// A direct (non-strategy) route with the default budget of a
+				// single attempt would hand the fault straight back to the
+				// client; lift it to one retry. Bounded at 2 on purpose: the
+				// same condition repeating must not grow the budget.
+				attempts = 2
+				p.logf("%s/%s: upstream fault body on attempt 1 — extending budget to 2 attempts", ship, prov.ID)
+			}
+			if attempt < attempts && (transientStatus(resp.StatusCode) || isSaturation || isUpstreamFault) {
 				if isSaturation {
 					p.recordSaturation(prov, resp)
 					skipSaturationWait = true // we're about to sleep RetryDelayMS, skip next waitForSaturationGate
 				}
-				// If this request was routed through a strategy and we hit saturation/429 OR a 5xx server error,
+				// If this request was routed through a strategy and we hit saturation/429, a 5xx
+				// server error or an upstream fault reported with a client-error status,
 				// immediately re-route to the next model in the strategy instead of
 				// retrying the same failing provider multiple times.
 				strat := p.getStrategyForModel(requestedModel)
-				shouldReroute := (isSaturation || isServerError) && strat != nil
+				shouldReroute := (isSaturation || isServerError || isUpstreamFault) && strat != nil
 				if shouldReroute {
 					if isSaturation {
 						p.logf("%s/%s: saturation on model %s — re-routing to next model in strategy %s", ship, prov.ID, model, strat.Name)
-					} else {
+					} else if isServerError {
 						p.logf("%s/%s: server error %d on model %s — re-routing to next model in strategy %s", ship, prov.ID, resp.StatusCode, model, strat.Name)
+					} else {
+						p.logf("%s/%s: upstream fault reported as HTTP %d on model %s — re-routing to next model in strategy %s", ship, prov.ID, resp.StatusCode, model, strat.Name)
 					}
 					// Force circuit breaker open for this model so routeStrategyModel skips it
 					strat.mu.Lock()
@@ -1460,7 +1511,7 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 					}
 					p.logf("%s/%s: no alternative model available in strategy %s", ship, prov.ID, strat.Name)
 				}
-				p.logf("%s/%s: transient HTTP %d (attempt %d/%d): %.300s — retrying", ship, prov.ID, resp.StatusCode, attempt, attempts, string(errBody))
+				p.logf("%s/%s: %s HTTP %d (attempt %d/%d): %.300s — retrying", ship, prov.ID, faultTag(isUpstreamFault, isSaturation, isServerError, transientStatus(resp.StatusCode)), resp.StatusCode, attempt, attempts, string(errBody))
 				retries++
 				time.Sleep(time.Duration(prov.RetryDelayMS) * time.Millisecond)
 				continue
@@ -1487,8 +1538,15 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 		p.clearSaturation(prov.ID)
 
 		if streaming {
-			usage, failed, retryEarly := p.pipeSSE(w, resp, writeHeaders, attempt < attempts, prov, ship)
+			usage, failed, retryEarly := p.pipeSSE(w, resp, writeHeaders, attempt < attempts, attempt == 1 && attempts <= 1, prov, ship)
 			if retryEarly {
+				if attempts < 2 {
+					// upstream fault on a single-attempt budget: lift once so the
+					// loop actually performs the extra attempt (bounded — a repeat
+					// on attempt 2 finds attempts already at its limit)
+					attempts = 2
+					p.logf("%s/%s: upstream fault in stream on attempt 1 — extending budget to 2 attempts", ship, prov.ID)
+				}
 				p.logf("%s/%s: retryable streamed error before content (attempt %d/%d) — retrying", ship, prov.ID, attempt, attempts)
 				retries++
 				writeHeaders = false
@@ -1702,12 +1760,20 @@ func (p *Proxy) clearSaturation(provID string) {
 // content) and errors once the retry budget is exhausted are passed through as
 // structured error events.
 //
+// Backend faults reported in the body (upstreamFaultText — e.g. NIM's
+// DEGRADED function, a condition that is never caused by our request) are
+// treated the same way, with one extension: faultRetryOK lets them take one
+// extra attempt even when the configured budget is a single attempt, mirroring
+// the lift done for fault responses with an error status. The caller bounds it
+// (lifts attempts to 2), so a persistently broken upstream cannot turn this
+// into a retry storm.
+//
 // When the retry budget is exhausted (canRetry=false) and a saturation error
 // arrives in the stream, the proxy enters a keepalive hold: it sends SSE
 // comment lines (": keepalive\n\n") every 3s to keep the connection alive
 // while waiting for the provider to recover, up to HoldTimeoutMS (default 15s).
 // After the timeout, the final error is relayed to the client.
-func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders, canRetry bool, prov *Provider, ship string) (*Usage, bool, bool) {
+func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders, canRetry, faultRetryOK bool, prov *Provider, ship string) (*Usage, bool, bool) {
 	defer resp.Body.Close()
 	if writeHeaders {
 		for k, vv := range resp.Header {
@@ -1822,15 +1888,18 @@ func (p *Proxy) pipeSSE(w http.ResponseWriter, resp *http.Response, writeHeaders
 					stopKeepaliveTicker()
 				} else if strings.HasPrefix(payload, "{") && strings.Contains(payload, "\"error\"") {
 					// A streamed error event. Before any content chunk a retryable
-					// overload/rate-limit error is aborted for a clean retry;
-					// everything else is passed through and remembered so we don't
-					// append our own error on EOF.
-					if !sawContent && canRetry && retryableErrorText(payload) {
+					// overload/rate-limit error — or a backend fault such as a
+					// DEGRADED function reported inside a 200 stream — is aborted
+					// for a clean retry; everything else is passed through and
+					// remembered so we don't append our own error on EOF.
+					retryable := retryableErrorText(payload)
+					fault := upstreamFaultText(payload)
+					if !sawContent && (retryable || fault) && (canRetry || (fault && faultRetryOK)) {
 						stopKeepaliveTicker()
 						return nil, true, true
 					}
 					// Saturation error after retry budget exhausted: enter keepalive hold
-					if !sawContent && !canRetry && retryableErrorText(payload) {
+					if !sawContent && !canRetry && retryable {
 						saturationErrorPayload = payload
 						inKeepalive = true
 						keepaliveStart = time.Now()

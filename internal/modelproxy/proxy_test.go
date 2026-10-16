@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -20,6 +21,13 @@ import (
 // testProxy builds a Proxy pointing at a single upstream test server that
 // serves /models and /chat/completions via the given handler.
 func testProxy(t *testing.T, upstream http.Handler) (*Proxy, *httptest.Server) {
+	return testProxyRetries(t, upstream, 2)
+}
+
+// testProxyRetries is testProxy with an explicit provider retry budget, for
+// cases where the budget itself is part of the behaviour under test (the
+// production default is 0 — a single attempt).
+func testProxyRetries(t *testing.T, upstream http.Handler, maxRetries int) (*Proxy, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(upstream)
 	t.Cleanup(srv.Close)
@@ -30,7 +38,7 @@ func testProxy(t *testing.T, upstream http.Handler) (*Proxy, *httptest.Server) {
 			Name:         "Test",
 			BaseURL:      srv.URL,
 			APIKey:       "k",
-			MaxRetries:   2,
+			MaxRetries:   maxRetries,
 			RetryDelayMS: 1,
 		}},
 	}
@@ -212,6 +220,167 @@ func TestChatNonTransientNotRetried(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("upstream calls = %d, want 1", calls.Load())
+	}
+}
+
+// nimDegradedBody is the verbatim shape NIM answers with when one of its
+// functions has flipped to DEGRADED: a backend/cluster fault that is entirely
+// independent of our request, yet delivered with HTTP 400.
+const nimDegradedBody = `{"status":400,"title":"Bad Request","detail":"Function id '948fe171-ce7a-4332-8bc0-5e14e90259f9': DEGRADED function cannot be invoked"}`
+
+// TestChatDegradedFunctionFaultRetried: a direct model route runs with the
+// production retry budget of a single attempt. The DEGRADED-function fault must
+// still get one more attempt instead of being handed to the client as a client
+// error, because the fault lives upstream and typically clears immediately.
+func TestChatDegradedFunctionFaultRetried(t *testing.T) {
+	var calls atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, nimDegradedBody)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ok"})
+	})
+	p, _ := testProxyRetries(t, upstream, 0)
+	resp := postChat(t, p, "m1", false)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 after fault retry (calls=%d)", resp.StatusCode, calls.Load())
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls = %d, want 2", calls.Load())
+	}
+}
+
+// TestChatDegradedFunctionFaultBudgetBounded: an upstream that stays degraded
+// must stop at the lifted budget of 2 attempts and surface the original status
+// — one extra attempt, never a retry storm.
+func TestChatDegradedFunctionFaultBudgetBounded(t *testing.T) {
+	var calls atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, nimDegradedBody)
+	})
+	p, _ := testProxyRetries(t, upstream, 0)
+	resp := postChat(t, p, "m1", false)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status = %d, want 400 from upstream", resp.StatusCode)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls = %d, want 2 (bounded lift from 1 attempt)", calls.Load())
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "DEGRADED function") {
+		t.Fatalf("relay lost the upstream detail: %q", string(body))
+	}
+}
+
+// TestChatDegradedFunctionReroutesStrategy: on a strategy route the fault must
+// behave like a server error — open the breaker on the failing model and
+// re-route to the next one instead of burning retries on a dead function.
+func TestChatDegradedFunctionReroutesStrategy(t *testing.T) {
+	var gotModels []string
+	var mu sync.Mutex
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}, {"id": "m2"}}})
+			return
+		}
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		gotModels = append(gotModels, body.Model)
+		first := len(gotModels) == 1
+		mu.Unlock()
+		if body.Model == "m1" && first {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, nimDegradedBody)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resp", "choices": []any{}})
+	})
+	srv := httptest.NewServer(upstream)
+	t.Cleanup(srv.Close)
+	cfg := &Config{
+		ListenAddr: "127.0.0.1:1",
+		Providers: []Provider{
+			{ID: "upstream", Name: "Upstream", BaseURL: srv.URL, APIKey: "k", MaxRetries: 0, RetryDelayMS: 1},
+			{ID: "meta-model", Name: "Meta Models", Type: typeMetaModel},
+		},
+		Strategies: []config.ModelProxyStrategy{{
+			ID:             "heavy",
+			Description:    "Heavy duty",
+			EffectiveLimit: 64000,
+			Strategy:       "fallback",
+			Models: []config.ModelProxyStrategyModel{
+				{ID: "m1", Provider: "upstream", Priority: 1},
+				{ID: "m2", Provider: "upstream", Priority: 2},
+			},
+		}},
+	}
+	p := New(cfg)
+
+	resp := postChat(t, p, "heavy", false)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 after strategy re-route", resp.StatusCode)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(gotModels) < 2 || gotModels[0] != "m1" || gotModels[1] != "m2" {
+		t.Fatalf("upstream model requests = %v, want [m1 m2]", gotModels)
+	}
+}
+
+// TestChatStreamingRetriesEarlyDegradedFunction: some backends report the same
+// fault as a structured error event inside a 200 stream. Before any content
+// it must be absorbed and retried, not forwarded to the client.
+func TestChatStreamingRetriesEarlyDegradedFunction(t *testing.T) {
+	var calls atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "m1"}}})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		f, _ := w.(http.Flusher)
+		if calls.Add(1) == 1 {
+			_, _ = io.WriteString(w, "data: {\"error\":{\"message\":\"Function id '948fe171-ce7a-4332-8bc0-5e14e90259f9': DEGRADED function cannot be invoked\"}}\n\n")
+			f.Flush()
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		f.Flush()
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		f.Flush()
+	})
+	p, _ := testProxyRetries(t, upstream, 0)
+	resp := postChat(t, p, "m1", true)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if strings.Contains(s, "DEGRADED function") {
+		t.Fatalf("client saw the upstream fault, proxy must absorb it: %q", s)
+	}
+	if !strings.Contains(s, `"hi"`) || !strings.Contains(s, "data: [DONE]") {
+		t.Fatalf("client stream wrong, want the successful retry content: %q", s)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls = %d, want 2", calls.Load())
 	}
 }
 

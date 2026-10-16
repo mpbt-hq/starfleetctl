@@ -220,7 +220,7 @@ model_proxy:
       # direct: false                   # true = expose upstream directly, bypass proxy
       # type: opencode-zen              # provider class (see Types below)
       # model_filter: "free-only"       # "", "all", "free-only", or id allowlist
-      # max_retries: 3                  # default 3
+      # max_retries: 3                  # default 0 = single attempt; negative = 3
       # retry_delay_ms: 1000            # default 1000
       # capabilities: [toolcall, temperature]  # forces caps on all models
 ```
@@ -275,7 +275,7 @@ should go into strategies). Query the current state without a live request via
 | `type` | string | `` | provider class driving upstream-specific handling; see Types |
 | `user_agent` | string | — | upstream `User-Agent` override (mainly for `opencode-zen`) |
 | `model_filter` | string | `all` | `all`/`""` = no filter; `free-only` = auto-filter free models; comma-separated ids = explicit allowlist |
-| `max_retries` | int | 3 | retries on transient errors (429/5xx/conn-reset/ResourceExhausted) |
+| `max_retries` | int | 0 (single attempt; negative = 3) | retries on transient errors (429/5xx/conn-reset/ResourceExhausted) and on backend-fault bodies sent with a client-error status (e.g. NIM `DEGRADED function cannot be invoked` as 400 — such faults get at least one retry, and a strategy routes straight to the next model) |
 | `retry_delay_ms` | int | 1000 | delay between retries |
 | `capabilities` | list | type-specific | force capability flags (`toolcall`, `temperature`, `reasoning`, `attachment`, …) on EVERY model entry of this provider in the generated ship config |
 

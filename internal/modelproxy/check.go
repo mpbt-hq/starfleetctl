@@ -457,7 +457,10 @@ func probeModel(prov Provider, model string) (string, int, bool) {
 		resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			errText := string(body)
-			transient := transientStatus(resp.StatusCode) || retryableErrorText(errText)
+			// Client-error statuses still count as transient when the body
+			// shows a backend fault (e.g. NIM's DEGRADED function answered
+			// with 400) — the probe must report it as degraded, not failed.
+			transient := transientStatus(resp.StatusCode) || retryableErrorText(errText) || upstreamFaultText(errText)
 			if transient {
 				if attempt < attempts {
 					lastFail = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, firstLine(errText))
