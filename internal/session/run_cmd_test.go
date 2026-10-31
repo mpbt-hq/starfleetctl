@@ -14,7 +14,7 @@ import (
 // generated config said "terminal" while the process env lacked the variable,
 // letting ships inherit a stale/default "background" label.
 func TestRunClientEnvLaunchType(t *testing.T) {
-	env := runClientEnv("TestShip", "ship", t.TempDir())
+	env := runClientEnv("TestShip", "ship", t.TempDir(), "opencode")
 	launchSeen := ""
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "STARFLEET_LAUNCH_TYPE=") {
@@ -28,7 +28,7 @@ func TestRunClientEnvLaunchType(t *testing.T) {
 
 // TestRunClientEnvShipTarget ensures ship-role runs get the flagship target var.
 func TestRunClientEnvShipTarget(t *testing.T) {
-	env := runClientEnv("TestShip", "ship", t.TempDir())
+	env := runClientEnv("TestShip", "ship", t.TempDir(), "opencode")
 	targetSeen := ""
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "STARFLEET_TARGET=") {
@@ -39,7 +39,7 @@ func TestRunClientEnvShipTarget(t *testing.T) {
 		t.Error("STARFLEET_TARGET missing for ship role")
 	}
 	// Non-ship roles must not leak a target.
-	for _, kv := range runClientEnv("Flagship", "flagship", t.TempDir()) {
+	for _, kv := range runClientEnv("Flagship", "flagship", t.TempDir(), "opencode") {
 		if strings.HasPrefix(kv, "STARFLEET_TARGET=") {
 			t.Errorf("STARFLEET_TARGET should not be set for role=flagship: %s", kv)
 		}

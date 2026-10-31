@@ -235,7 +235,7 @@ func RunCmd(root string, args []string) int {
 	}
 
 	// Build env vars for client
-	env := runClientEnv(shipID, role, root)
+	env := runClientEnv(shipID, role, root, client)
 
 	if useExec {
 		return execClientDirect(root, client, shipID, systemPrompt, prompt, model, env, clientArgs, sessionID)
@@ -249,7 +249,7 @@ func RunCmd(root string, args []string) int {
 // + heartbeat above), so STARFLEET_LAUNCH_TYPE is pinned to "terminal" — the
 // client process must see the same truth as the config and heartbeat instead of
 // inheriting a stale/default "background" label.
-func runClientEnv(shipID, role, root string) []string {
+func runClientEnv(shipID, role, root string, client string) []string {
 	env := append(os.Environ(),
 		"STARFLEET_SHIP_ID="+shipID,
 		"STARFLEET_ROLE="+role,
@@ -257,6 +257,11 @@ func runClientEnv(shipID, role, root string) []string {
 	)
 	if role == "ship" {
 		env = append(env, "STARFLEET_TARGET="+shipnames.FlagshipName(root))
+	}
+	if client == "opencode" {
+		if cfg := os.Getenv("OPENCODE_CONFIG"); cfg != "" {
+			env = append(env, "OPENCODE_CONFIG="+cfg)
+		}
 	}
 	return env
 }
