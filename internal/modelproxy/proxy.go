@@ -1444,15 +1444,15 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 			isSaturation := resp.StatusCode == http.StatusTooManyRequests || retryableErrorText(string(errBody))
 			isServerError := resp.StatusCode >= 500 && resp.StatusCode < 600
 			isUpstreamFault := upstreamFaultText(string(errBody))
-			if isUpstreamFault && attempts < 2 {
+			if (isUpstreamFault || resp.StatusCode == http.StatusNotFound) && attempts < 2 {
 				// A direct (non-strategy) route with the default budget of a
 				// single attempt would hand the fault straight back to the
 				// client; lift it to one retry. Bounded at 2 on purpose: the
 				// same condition repeating must not grow the budget.
 				attempts = 2
-				p.logf("%s/%s: upstream fault body on attempt 1 — extending budget to 2 attempts", ship, prov.ID)
+				p.logf("%s/%s: HTTP %d on attempt 1 — extending budget to 2 attempts", ship, prov.ID, resp.StatusCode)
 			}
-			if attempt < attempts && (transientStatus(resp.StatusCode) || isSaturation || isUpstreamFault) {
+			if attempt < attempts && (transientStatus(resp.StatusCode) || isSaturation || isUpstreamFault || resp.StatusCode == http.StatusNotFound) {
 				if isSaturation {
 					p.recordSaturation(prov, resp)
 					skipSaturationWait = true // we're about to sleep RetryDelayMS, skip next waitForSaturationGate
@@ -1462,10 +1462,12 @@ func (p *Proxy) forwardChat(w http.ResponseWriter, r *http.Request, prov *Provid
 				// immediately re-route to the next model in the strategy instead of
 				// retrying the same failing provider multiple times.
 				strat := p.getStrategyForModel(requestedModel)
-				shouldReroute := (isSaturation || isServerError || isUpstreamFault) && strat != nil
+				shouldReroute := (isSaturation || isServerError || isUpstreamFault || resp.StatusCode == http.StatusNotFound) && strat != nil
 				if shouldReroute {
 					if isSaturation {
 						p.logf("%s/%s: saturation on model %s — re-routing to next model in strategy %s", ship, prov.ID, model, strat.Name)
+					} else if resp.StatusCode == http.StatusNotFound {
+						p.logf("%s/%s: 404 on model %s — re-routing to next model in strategy %s", ship, prov.ID, model, strat.Name)
 					} else if isServerError {
 						p.logf("%s/%s: server error %d on model %s — re-routing to next model in strategy %s", ship, prov.ID, resp.StatusCode, model, strat.Name)
 					} else {
