@@ -60,11 +60,11 @@ type dispatchRequest struct {
 
 // dispatchResponse is the JSON returned to the plugin.
 type dispatchResponse struct {
-	OK       bool       `json:"ok"`
-	Error    string     `json:"error,omitempty"`
-	Messages []inboxMsg `json:"messages,omitempty"`
-	Seen     []string   `json:"seen,omitempty"`
-	Tag      string     `json:"tag,omitempty"`
+	OK       bool      `json:"ok"`
+	Error    string    `json:"error,omitempty"`
+	Messages []Message `json:"messages,omitempty"`
+	Seen     []string  `json:"seen,omitempty"`
+	Tag      string    `json:"tag,omitempty"`
 
 	// config response
 	HeartbeatMS     int    `json:"heartbeat_ms,omitempty"`
@@ -81,11 +81,21 @@ type dispatchResponse struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
-type inboxMsg struct {
-	ID   string `json:"id"`
-	From string `json:"from"`
-	Text string `json:"text"`
-	Type string `json:"type,omitempty"`
+// Message represents a full Comms message with all metadata.
+// This is the structured format sent to the plugin for injection.
+type Message struct {
+	ID             string `json:"id"`
+	Epoch          int64  `json:"epoch"`
+	ISO            string `json:"iso"`
+	From           string `json:"from"`
+	Target         string `json:"target"`
+	Text           string `json:"text"`
+	ReplyTo        string `json:"reply_to,omitempty"`
+	Type           string `json:"type,omitempty"`   // "ship", "user", "control"
+	Attach         string `json:"attach,omitempty"` // attachment filename if present
+	ExternalSource string `json:"external_source,omitempty"`
+	ExternalID     string `json:"external_id,omitempty"`
+	ExternalHash   string `json:"external_sha256,omitempty"`
 }
 
 // DoDispatch implements `comms dispatch --stdin` — the single JSON-RPC
@@ -125,7 +135,7 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 	case "health":
 		return b.dispatchHealth(req)
 	case "inbox":
-		return b.dispatchInbox()
+		return b.dispatchInbox(req)
 	case "ack":
 		return b.dispatchAck(req)
 	case "tell":
@@ -233,10 +243,10 @@ func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
 	return dispatchResponse{OK: true}
 }
 
-func (b *Bus) dispatchInbox() dispatchResponse {
+func (b *Bus) dispatchInbox(req dispatchRequest) dispatchResponse {
 	msgs := b.allMsgRecords()
 	agent := b.ShipID
-	var out []inboxMsg
+	var out []Message
 	for _, m := range msgs {
 		if m.Target != agent {
 			continue
@@ -244,9 +254,22 @@ func (b *Bus) dispatchInbox() dispatchResponse {
 		if b.acked(m.ID, agent) {
 			continue
 		}
-		out = append(out, inboxMsg{ID: m.ID, From: m.From, Text: m.Text, Type: m.Type})
+		out = append(out, Message{
+			ID:             m.ID,
+			Epoch:          m.Epoch,
+			ISO:            m.ISO,
+			From:           m.From,
+			Target:         m.Target,
+			Text:           m.Text,
+			ReplyTo:        m.ReplyTo,
+			Type:           m.Type,
+			Attach:         m.Attach,
+			ExternalSource: m.ExternalSource,
+			ExternalID:     m.ExternalID,
+			ExternalHash:   m.ExternalHash,
+		})
 	}
-	return dispatchResponse{OK: true, Messages: orEmptyInbox(out)}
+	return dispatchResponse{OK: true, Messages: out}
 }
 
 func (b *Bus) dispatchAck(req dispatchRequest) dispatchResponse {
@@ -491,6 +514,7 @@ func (b *Bus) dispatchSeenMark(req dispatchRequest) dispatchResponse {
 	if req.ID == "" {
 		return dispatchResponse{OK: false, Error: "seen_mark: need id"}
 	}
+	// Execute the ack (seen_mark). No claim verification needed.
 	if err := b.DoAck(req.ID, "seen-mark"); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
@@ -543,9 +567,9 @@ func printDispatch(resp dispatchResponse) error {
 	return enc.Encode(resp)
 }
 
-func orEmptyInbox(s []inboxMsg) []inboxMsg {
+func orEmptyInbox(s []Message) []Message {
 	if s == nil {
-		return []inboxMsg{}
+		return []Message{}
 	}
 	return s
 }

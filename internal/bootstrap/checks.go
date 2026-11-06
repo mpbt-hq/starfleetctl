@@ -1156,6 +1156,7 @@ const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persis
 /var/model-health.json
 /var/model-proxy.pid
 /var/web.pid
+/var/wormholes/
 
 # Built binary (built from src/starfleetctl/)
 /bin/starfleetctl

@@ -115,9 +115,10 @@ func TestDoAckUnknown(t *testing.T) {
 	}
 }
 
-// TestDoInitAcksFannedOutBroadcast verifies the startup path acking also
-// handles fanned-out broadcasts: the per-ship copy is moved into seen/.
-func TestDoInitAcksFannedOutBroadcast(t *testing.T) {
+// TestDoInitKeepsUnreadPending verifies that startup does NOT consume work:
+// fanned-out broadcasts must stay unacked and remain in unseen/ until the
+// consumer actually delivered them (claim + prompt + seen_mark).
+func TestDoInitKeepsUnreadPending(t *testing.T) {
 	b := newTestBus(t, "Enterprise")
 
 	id, err := b.post("all", "hello fleet", "", "", "", "ship")
@@ -126,15 +127,25 @@ func TestDoInitAcksFannedOutBroadcast(t *testing.T) {
 	}
 	myUnseen := filepath.Join(b.MsgDir, b.ShipID, "unseen", id+".json")
 
-	if _, err := b.DoInit("startup"); err != nil {
+	pending, err := b.DoInit("startup")
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !b.acked(id, b.ShipID) {
-		t.Error("broadcast should be acked for this ship after DoInit")
+	if b.acked(id, b.ShipID) {
+		t.Error("broadcast must NOT be acked by DoInit")
 	}
-	if _, err := os.Stat(myUnseen); !os.IsNotExist(err) {
-		t.Errorf("broadcast copy should be moved out of unseen/ after DoInit: err=%v", err)
+	if _, err := os.Stat(myUnseen); err != nil {
+		t.Errorf("broadcast copy must stay in unseen/ after DoInit: err=%v", err)
+	}
+	found := false
+	for _, m := range pending {
+		if m.ID == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("DoInit must return unread messages for delivery")
 	}
 }
 

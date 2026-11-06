@@ -20,6 +20,7 @@ type Config struct {
 	Fleet      FleetConfig      `yaml:"fleet"`
 	ModelProxy ModelProxyConfig `yaml:"model_proxy"`
 	Services   ServicesConfig   `yaml:"services"`
+	Wormholes  WormholesConfig  `yaml:"wormholes"`
 }
 
 // ServicesConfig holds daemon lifecycle configuration
@@ -240,6 +241,61 @@ type FleetConfig struct {
 	DirectProviders []ModelProxyProvider `yaml:"direct_providers"`
 }
 
+// WormholesConfig holds wormhole manager configuration
+// (.starfleet-ai/conf/wormholes.yaml).
+type WormholesConfig struct {
+	// Enabled turns wormhole sync on/off. Default: false.
+	Enabled bool `yaml:"enabled"`
+	// Sync controls per-sync behavior.
+	Sync SyncConfig `yaml:"sync"`
+	// Repositories defines the wormhole-repositories to mirror.
+	Repositories []RepositoryConfig `yaml:"repositories"`
+}
+
+// SyncConfig controls per-sync behavior.
+type SyncConfig struct {
+	// Interval is how often the worker syncs enabled repositories.
+	// Default: 5s. Positive time.ParseDuration duration.
+	Interval string `yaml:"interval"`
+	// StartupSync runs an immediate first sync on worker start.
+	// Default: true.
+	StartupSync bool `yaml:"startup_sync"`
+	// CloneTimeout is the per-clone operation timeout. Default: 2m.
+	CloneTimeout string `yaml:"clone_timeout"`
+	// CommandTimeout is the per-Git-command timeout. Default: 30s.
+	CommandTimeout string `yaml:"command_timeout"`
+	// PushRetries is the number of push retries on non-fast-forward race.
+	// Default: 3. Valid: 0 to 10.
+	PushRetries int `yaml:"push_retries"`
+}
+
+// RepositoryConfig defines one mirrored wormhole repository.
+type RepositoryConfig struct {
+	// ID is the repository identifier. Must be unique and consist solely of
+	// ASCII letters, digits, `-`, `_`. No slash, no dot-segment, no empty.
+	ID string `yaml:"id"`
+	// Remote is the git remote URL (SSH or HTTPS). Required for active repos.
+	Remote string `yaml:"remote"`
+	// Branch is the git branch to track. Required for active repos.
+	Branch string `yaml:"branch"`
+	// Enabled toggles this repository on/off. Default: true.
+	Enabled *bool `yaml:"enabled"`
+	// Access is read-only or read-write. Default: read-write.
+	Access string `yaml:"access"`
+	// Incoming controls message import from this repository.
+	Incoming IncomingConfig `yaml:"incoming"`
+}
+
+// IncomingConfig controls message import from a repository.
+// Per W0-129 §3: receiver lifecycle uses fixed Maildir layout mail/<target-ship>/new/, cur/, processed/, failed/.
+// No configurable paths — all lifecycle transitions are exact-path moves under the fixed layout.
+type IncomingConfig struct {
+	// Enabled toggles incoming message processing. Default: true.
+	Enabled *bool `yaml:"enabled"`
+	// InitialScan selects baseline/replay on first scan. Default: baseline.
+	InitialScan string `yaml:"initial_scan"`
+}
+
 // WebConfig holds web server configuration.
 type WebConfig struct {
 	ListenAddr       string `yaml:"listen_addr"`
@@ -268,6 +324,30 @@ type CommsConfig struct {
 	RetryCooldownMS int    `yaml:"retry_cooldown_ms"`
 	LogPollMS       int    `yaml:"log_poll_ms"`
 	LogCooldownMS   int    `yaml:"log_cooldown_ms"`
+	// Routing is the single source of truth for deciding whether a Comms
+	// recipient is local or must be sent through a remote transport.
+	Routing RoutingConfig `yaml:"routing"`
+}
+
+// RoutingConfig maps logical communication domains to transports. Domainless
+// recipients and the local domain are local; every other domain must have a
+// route. Domains are logical peers, not hostnames.
+type RoutingConfig struct {
+	// LocalDomain is the domain name that explicitly denotes the local bus.
+	// Default: "local".
+	LocalDomain string `yaml:"local_domain"`
+	// Domains lists the remote domain routes.
+	Domains []DomainRouteConfig `yaml:"domains"`
+}
+
+// DomainRouteConfig is one entry of the Comms routing table.
+type DomainRouteConfig struct {
+	Domain string `yaml:"domain"`
+	// Transport names a registered transport backend (e.g. "wormhole").
+	Transport string `yaml:"transport"`
+	// Repository is the transport-specific endpoint identity. For wormhole
+	// this is the configured repository ID whose spool represents the domain.
+	Repository string `yaml:"repository"`
 }
 
 // DefaultConfig returns defaults.
@@ -289,6 +369,9 @@ func DefaultConfig() *Config {
 			RetryCooldownMS: 10_000,
 			LogPollMS:       10_000,
 			LogCooldownMS:   10_000,
+			Routing: RoutingConfig{
+				LocalDomain: "local",
+			},
 		},
 		Fleet: FleetConfig{
 			ProviderMode: "all",
@@ -297,6 +380,16 @@ func DefaultConfig() *Config {
 			ListenAddr: "127.0.0.1:8443",
 			PIDFile:    ".starfleet-ai/var/model-proxy.pid",
 			LogFile:    ".starfleet-ai/var/log/model-proxy.log",
+		},
+		Wormholes: WormholesConfig{
+			Enabled: false,
+			Sync: SyncConfig{
+				Interval:       "5s",
+				StartupSync:    true,
+				CloneTimeout:   "2m",
+				CommandTimeout: "30s",
+				PushRetries:    3,
+			},
 		},
 	}
 }
@@ -337,6 +430,7 @@ func Load(root string) (*Config, error) {
 		{"fleet.yaml", "fleet", &cfg.Fleet},
 		{"model-proxy.yaml", "model_proxy", &cfg.ModelProxy},
 		{"services.yaml", "services", &cfg.Services},
+		{"wormholes.yaml", "wormholes", &cfg.Wormholes},
 	} {
 		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)
 		data, err := os.ReadFile(path)

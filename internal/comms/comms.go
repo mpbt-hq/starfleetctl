@@ -80,6 +80,11 @@ func New(root string) (*Bus, error) {
 		}
 	}
 
+	// External journal directory for durable PostExternal dedupe tombstones.
+	if err := os.MkdirAll(filepath.Join(b.BusDir, "external"), 0o755); err != nil {
+		return nil, err
+	}
+
 	// Migration + backwards-compat symlink: move health/*.json → status/*.json,
 	// then symlink health/ → status/ so the opencode plugin (which writes to
 	// health/<ship>.json) continues to work transparently.

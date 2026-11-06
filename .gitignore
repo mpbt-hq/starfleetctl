@@ -5,3 +5,4 @@ bin/
 node_modules/
 package.json
 package-lock.json
+/.starfleet-ai/var/wormholes/

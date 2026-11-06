@@ -28,6 +28,9 @@ import (
 // messages. To stay monotonic regardless, the candidate is floored at one
 // above the highest id already present in the store — so a lost .seq costs
 // nothing but a one-time directory scan.
+//
+// The .seq file is fsynced after write to ensure the reservation is durable
+// before any dependent external record is created (crash-safety for PostExternal).
 func (b *Bus) nextID() (string, error) {
 	seqFile := filepath.Join(b.MsgDir, ".seq")
 	n := int64(0)
@@ -41,8 +44,24 @@ func (b *Bus) nextID() (string, error) {
 		n = hi
 	}
 	n++
-	if err := os.WriteFile(seqFile, []byte(fmt.Sprintf("%d\n", n)), 0o644); err != nil {
+	// Atomic write with fsync for crash durability
+	tmp := seqFile + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
+	if err := os.WriteFile(tmp, []byte(fmt.Sprintf("%d\n", n)), 0o644); err != nil {
+		os.Remove(tmp)
 		return "", err
+	}
+	if err := syncFile(tmp); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Rename(tmp, seqFile); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	// fsync the directory to ensure rename is durable
+	if d, err := os.Open(filepath.Dir(seqFile)); err == nil {
+		d.Sync()
+		d.Close()
 	}
 	return fmt.Sprintf("m%04d", n), nil
 }
@@ -51,6 +70,7 @@ func (b *Bus) nextID() (string, error) {
 // the store (legacy flat files plus every target's unseen/ and seen/ dir),
 // or 0 if there are none. Filename-only scan (readdir, no parsing), so it is
 // cheap relative to the message bodies.
+// Also considers CommsIDs from external records to prevent ID reuse after crash.
 func (b *Bus) highestMsgID() int64 {
 	hi := int64(0)
 	consider := func(names []string) {
@@ -72,6 +92,27 @@ func (b *Bus) highestMsgID() int64 {
 		d := filepath.Join(b.MsgDir, e.Name())
 		consider(globSortedFiles(filepath.Join(d, "unseen"), "m", ".json"))
 		consider(globSortedFiles(filepath.Join(d, "seen"), "m", ".json"))
+	}
+	// Also consider external records - they reserve CommsIDs that must not be reused
+	extDir := filepath.Join(b.BusDir, "external")
+	if extEntries, err := os.ReadDir(extDir); err == nil {
+		for _, ext := range extEntries {
+			if ext.IsDir() || !strings.HasSuffix(ext.Name(), ".json") {
+				continue
+			}
+			// external records are named by hash, but we can read the CommsID from the file
+			path := filepath.Join(extDir, ext.Name())
+			if data, err := os.ReadFile(path); err == nil {
+				var rec externalRecord
+				if err := json.Unmarshal(data, &rec); err == nil {
+					if rec.CommsID != "" {
+						if v := parseIDNum(rec.CommsID); v > uint64(hi) {
+							hi = int64(v)
+						}
+					}
+				}
+			}
+		}
 	}
 	return hi
 }
@@ -103,6 +144,35 @@ func (b *Bus) post(target, summary, payload, basename, replyTo, msgType string) 
 // the timer worker) to attribute a directive to the ship that owns/created
 // it, rather than to the daemon process itself.
 func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType string) (string, error) {
+	// Resolve the recipient through the Comms routing table before touching
+	// the local bus. Remote recipients are handed to their transport via the
+	// same normal send path as local ones.
+	if target != "all" {
+		localTarget, route, remote, err := b.resolveTarget(target)
+		if err != nil {
+			return "", err
+		}
+		if remote {
+			if msgType == "command" {
+				return "", fmt.Errorf("comms: refusing to send a command to remote domain %q", route.Domain)
+			}
+			if payload != "" {
+				return "", fmt.Errorf("comms: remote transport does not support attachments yet")
+			}
+			if msgType == "" {
+				msgType = "ship"
+			}
+			return b.publishRemote(route, OutboundMessage{
+				From:    from,
+				Target:  localTarget,
+				Text:    clean(summary),
+				Type:    msgType,
+				ReplyTo: replyTo,
+			})
+		}
+		target = localTarget
+	}
+
 	lock, err := b.lockBus()
 	if err != nil {
 		return "", err
@@ -463,17 +533,20 @@ func (b *Bus) DoExit(reason string) error {
 }
 
 // DoInit consolidates the plugin's startup sequence into a single bus call:
-// ack all unacked inbox, prune stale data, set status to idle.
-// Returns the acked messages so the plugin can populate its state.
-func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
+// prune stale data, set status to idle, and return the unread messages.
+//
+// It deliberately does NOT ack them: acknowledging at startup would consume
+// work the agent never saw (the classic "messages lost across restart" bug).
+// Delivery (prompt + seen_mark) is the consumer's job.
+func (b *Bus) DoInit(note string) ([]Message, error) {
 	lock, err := b.lockBus()
 	if err != nil {
 		return nil, err
 	}
 	defer lock.Close()
 
-	// 1. Ack all unacked inbox for this ship.
-	var acked []inboxMsg
+	// 1. Collect unread inbox for this ship WITHOUT acknowledging it.
+	var acked []Message
 	for _, m := range b.allMsgRecords() {
 		if m.Target != b.ShipID {
 			continue
@@ -481,12 +554,20 @@ func (b *Bus) DoInit(note string) ([]inboxMsg, error) {
 		if b.acked(m.ID, b.ShipID) {
 			continue
 		}
-		// Mark as seen by moving/copying to seen/ (no ack file needed)
-		if err := b.ackMessage(m.ID); err != nil {
-			continue // best-effort — never fail startup on a stray message
-		}
-		acked = append(acked, inboxMsg{ID: m.ID, From: m.From, Text: m.Text})
-		b.LogEvent("ack", m.ID+" init-seen")
+		acked = append(acked, Message{
+			ID:             m.ID,
+			Epoch:          m.Epoch,
+			ISO:            m.ISO,
+			From:           m.From,
+			Target:         m.Target,
+			Text:           m.Text,
+			ReplyTo:        m.ReplyTo,
+			Type:           m.Type,
+			Attach:         m.Attach,
+			ExternalSource: m.ExternalSource,
+			ExternalID:     m.ExternalID,
+			ExternalHash:   m.ExternalHash,
+		})
 	}
 
 	// 2. Prune stale heartbeats + old directives.

@@ -17,6 +17,7 @@ import (
 	"github.com/metux/starfleetctl/internal/modelproxy"
 	"github.com/metux/starfleetctl/internal/timer"
 	"github.com/metux/starfleetctl/internal/web"
+	"github.com/metux/starfleetctl/internal/wormhole"
 )
 
 // AutostartConfigured brings up every service listed in services.yaml
@@ -71,8 +72,16 @@ func startOne(root, name string, out io.Writer) error {
 		}
 		fmt.Fprintln(out, "services: timer worker started")
 		return nil
+	case "wormhole":
+		ok, err := wormhole.Autostart(root)
+		if err == nil && ok {
+			fmt.Fprintln(out, "services: wormhole running")
+		} else if err == nil {
+			fmt.Fprintln(out, "services: wormhole start failed")
+		}
+		return err
 	default:
-		return fmt.Errorf("unknown service %q (supported: web, model-proxy, timer)", name)
+		return fmt.Errorf("unknown service %q (supported: web, model-proxy, timer, wormhole)", name)
 	}
 }
 

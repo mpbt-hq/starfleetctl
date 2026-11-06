@@ -15,6 +15,7 @@ missing file simply means defaults apply. The files and their layout:
 | [`models.yaml`](#modelsyaml-legacy) | legacy model registry (no longer used) |
 | [`timers/*.json`](#timersjson) | persistent timers |
 | [`ship-names.yaml`](#ship-namesyaml) | legacy ship-name pool override |
+| [`wormholes.yaml`](#wormholesyaml) | wormhole manager configuration |
 
 All paths that are relative (pid/log files) resolve against the workspace
 root; runtime state lives under `.starfleet-ai/var/`. The workspace root
@@ -361,6 +362,60 @@ names:
   - Defiant
   - Voyager
 ```
+
+### wormholes.yaml
+
+Wormhole manager configuration for inter-ship message forwarding via the
+comms bus (Git-Maildir transport):
+
+```yaml
+wormholes:
+  enabled: false
+  sync:
+    interval: "5s"
+    startup_sync: true
+    clone_timeout: "2m"
+    command_timeout: "30s"
+    push_retries: 3
+  repositories:
+    - id: relay
+      remote: "ssh://git@example.com/relay.git"
+      branch: "main"
+      enabled: true
+      access: read-write
+      incoming:
+        enabled: true
+        initial_scan: baseline  # or "replay"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable wormhole sync |
+| `sync.interval` | duration | `5s` | Sync interval |
+| `sync.startup_sync` | bool | `true` | Run sync on daemon startup |
+| `sync.clone_timeout` | duration | `2m` | Git clone timeout |
+| `sync.command_timeout` | duration | `30s` | Git command timeout (fetch, push, etc.) |
+| `sync.push_retries` | int | `3` | Push retries on non-fast-forward (0-10) |
+| `repositories[].id` | string | required | Unique repository identifier (ASCII letters, digits, `-`, `_`) |
+| `repositories[].remote` | string | required | Git remote URL (SSH/HTTPS) |
+| `repositories[].branch` | string | required | Git branch to track |
+| `repositories[].enabled` | bool | `true` | Enable/disable this repository |
+| `repositories[].access` | string | `read-write` | `read-only` or `read-write` |
+| `repositories[].incoming.enabled` | bool | `true` | Enable incoming message processing |
+| `repositories[].incoming.initial_scan` | string | `baseline` | `baseline` (mark existing as processed) or `replay` (import existing) |
+
+### Repository Access Modes
+
+- **`read-write`** (default): Full sync — fetch, rebase, publish messages, push transitions.
+- **`read-only`**: Fetch remote changes and process mailbox locally (claim, import, move to processed/failed), but **skip all pushes**. Local Maildir transitions are crash-safe.
+
+### Initial Scan Modes
+
+On first run for a given mailbox:
+- **`baseline`** (default): Move all existing messages from `new/` to `processed/` without importing. Establishes a baseline for future messages.
+- **`replay`**: Import all existing messages normally through the standard pipeline.
+
+The scan state is persisted in `.starfleet-state/initial_scan_done` per repository/ship.
 
 ---
 

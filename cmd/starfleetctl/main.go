@@ -39,6 +39,7 @@ import (
 	"github.com/metux/starfleetctl/internal/web"
 	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/worktree"
+	"github.com/metux/starfleetctl/internal/wormhole"
 	"github.com/metux/starfleetctl/internal/wscommit"
 )
 
@@ -102,6 +103,10 @@ func main() {
 		printHelp()
 		return
 	}
+
+	// Make Wormhole available as a remote transport for the normal Comms
+	// send path. Registration is inert until a routing table selects it.
+	wormhole.InstallCommsTransport()
 
 	// with-clone-lock operates on whatever git working tree the CALLER's cwd
 	// is in — an agent clone, a driver clone, anywhere — not just
@@ -266,6 +271,8 @@ func main() {
 		os.Exit(filestore.Run(root, os.Args[2:]))
 	case "logs":
 		os.Exit(logs.Run(root, os.Args[2:]))
+	case "wormhole":
+		os.Exit(wormhole.Run(os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)

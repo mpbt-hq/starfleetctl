@@ -100,6 +100,12 @@ type msgRecord struct {
 	ReplyTo string `json:"reply_to,omitempty"`
 	Type    string `json:"type,omitempty"`   // "ship", "user", "control"
 	Attach  string `json:"attach,omitempty"` // attachment filename if present
+	// ExternalHosting fields are populated only for messages delivered
+	// via PostExternal (wormhole / external source). They enable crash-idempotent
+	// re-delivery and survive ACK/Purge/Purge-old as durable tombstones.
+	ExternalSource string `json:"external_source,omitempty"`
+	ExternalID     string `json:"external_id,omitempty"`
+	ExternalHash   string `json:"external_sha256,omitempty"`
 }
 
 func readFirstLine(path string) (string, error) {
