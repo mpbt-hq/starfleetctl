@@ -722,6 +722,8 @@ const logPollTimer = setInterval(async () => {
         appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${msg.text.slice(0, 80)}`)
         // handleMessage: type=command → execute, type=ship/user/control → false (inject)
         if (await handleMessage(msg, client, currentSessionID)) {
+          // Command executed successfully, acknowledge it
+          bus({ cmd: 'seen_mark', id: msg.id })
           submitted.add(msg.id)
           continue
         }
@@ -830,10 +832,14 @@ const logPollTimer = setInterval(async () => {
       const pendingMsgs = [...bootBacklog, ...(r.messages || [])]
       for (const msg of pendingMsgs) {
         if (submitted.has(msg.id)) continue
-        bus({ cmd: 'seen_mark', id: msg.id })
-        submitted.add(msg.id)
-        // handleMessage: type=command → execute, type=ship/user/control → inject
-        if (currentSessionID && await handleMessage(msg, client, currentSessionID)) continue
+        // handleMessage: type=command → execute, type=ship/user/control → false (inject)
+        if (currentSessionID && await handleMessage(msg, client, currentSessionID)) {
+          // Command executed successfully, acknowledge it
+          bus({ cmd: 'seen_mark', id: msg.id })
+          submitted.add(msg.id)
+          continue
+        }
+        // Not a command: inject as directive
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
       }
       if (lines.length > 0) {
