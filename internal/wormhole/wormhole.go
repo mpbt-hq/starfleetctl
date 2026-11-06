@@ -240,6 +240,20 @@ func Status() string {
 		daemonInstance.pid, daemonInstance.status, daemonInstance.started)
 }
 
+// Autostart starts the wormhole daemon if the configuration enables it.
+// Returns true if the daemon was started (or is already running), false if
+// wormholes are disabled in config.
+func Autostart(root string) (bool, error) {
+	cfg := LoadConfig(root)
+	if !cfg.AutoStart {
+		return false, nil
+	}
+	if err := StartDaemon(root); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // IsRunning returns whether the daemon is currently running.
 func IsRunning() bool {
 	return daemonInstance != nil && daemonInstance.running

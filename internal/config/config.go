@@ -20,6 +20,7 @@ type Config struct {
 	Fleet      FleetConfig      `yaml:"fleet"`
 	ModelProxy ModelProxyConfig `yaml:"model_proxy"`
 	Services   ServicesConfig   `yaml:"services"`
+	Wormholes  WormholesConfig  `yaml:"wormholes"`
 }
 
 // ServicesConfig holds daemon lifecycle configuration
@@ -240,6 +241,100 @@ type FleetConfig struct {
 	DirectProviders []ModelProxyProvider `yaml:"direct_providers"`
 }
 
+// WormholesConfig holds wormhole manager configuration
+// (.starfleet-ai/conf/wormholes.yaml).
+type WormholesConfig struct {
+	// Enabled turns wormhole sync on/off. Default: false.
+	Enabled bool `yaml:"enabled"`
+	// Sync controls per-sync behavior.
+	Sync SyncConfig `yaml:"sync"`
+	// Repositories defines the wormhole-repositories to mirror.
+	Repositories []RepositoryConfig `yaml:"repositories"`
+}
+
+// SyncConfig controls per-sync behavior.
+type SyncConfig struct {
+	// Interval is how often the worker syncs enabled repositories.
+	// Default: 5s. Positive time.ParseDuration duration.
+	Interval string `yaml:"interval"`
+	// StartupSync runs an immediate first sync on worker start.
+	// Default: true.
+	StartupSync bool `yaml:"startup_sync"`
+	// CloneTimeout is the per-clone operation timeout. Default: 2m.
+	CloneTimeout string `yaml:"clone_timeout"`
+	// CommandTimeout is the per-Git-command timeout. Default: 30s.
+	CommandTimeout string `yaml:"command_timeout"`
+	// PushRetries is the number of push retries on non-fast-forward race.
+	// Default: 3. Valid: 0 to 10.
+	PushRetries int `yaml:"push_retries"`
+}
+
+// RepositoryConfig defines one mirrored wormhole repository.
+type RepositoryConfig struct {
+	// ID is the repository identifier. Must be unique and consist solely of
+	// ASCII letters, digits, `-`, `_`. No slash, no dot-segment, no empty.
+	ID string `yaml:"id"`
+	// Remote is the git remote URL (SSH or HTTPS). Required for active repos.
+	Remote string `yaml:"remote"`
+	// Branch is the git branch to track. Required for active repos.
+	Branch string `yaml:"branch"`
+	// Enabled toggles this repository on/off. Default: true.
+	Enabled *bool `yaml:"enabled"`
+	// Access is read-only or read-write. Default: read-write.
+	Access string `yaml:"access"`
+	// Incoming controls message import from this repository.
+	Incoming IncomingConfig `yaml:"incoming"`
+	// Outgoing controls message export to this repository.
+	Outgoing OutgoingConfig `yaml:"outgoing"`
+}
+
+// IncomingConfig controls message import from a repository.
+type IncomingConfig struct {
+	// Enabled toggles incoming message processing. Default: true.
+	Enabled *bool `yaml:"enabled"`
+	// InitialScan selects baseline/replay on first scan. Default: baseline.
+	InitialScan string `yaml:"initial_scan"`
+	// Messages controls message ingestion.
+	Messages MessageConfig `yaml:"messages"`
+	// Decisions controls decision ingestion.
+	Decisions DecisionConfig `yaml:"decisions"`
+}
+
+// MessageConfig controls message ingestion paths.
+type MessageConfig struct {
+	// Enabled toggles message ingestion. Default: true.
+	Enabled *bool `yaml:"enabled"`
+	// Paths are glob patterns (relative to checkout root) for message files.
+	// Default: inbox/**/*.md
+	Paths []string `yaml:"paths"`
+	// TargetAliases maps wormhole target aliases to ship IDs.
+	// Default contains starfleetctl: flagship, owner: flagship.
+	TargetAliases map[string]string `yaml:"target_aliases"`
+}
+
+// DecisionConfig controls decision ingestion paths.
+type DecisionConfig struct {
+	// Enabled toggles decision ingestion. Default: false.
+	Enabled *bool `yaml:"enabled"`
+	// Paths are glob patterns (relative to checkout root) for decision files.
+	// Default: decisions/**/*.md
+	Paths []string `yaml:"paths"`
+	// Target is the ship ID decisions route to when they have no `to:` field.
+	// Default: flagship.
+	Target string `yaml:"target"`
+}
+
+// OutgoingConfig controls message export to a repository.
+type OutgoingConfig struct {
+	// Enabled toggles outgoing message publication. Default: false.
+	Enabled *bool `yaml:"enabled"`
+	// Paths are glob patterns (relative to checkout root) for outbox files.
+	// Default: outbox/**/*.md when enabled and no paths given.
+	Paths []string `yaml:"paths"`
+	// CommitMessage is the git commit message. Default contains the repo ID.
+	CommitMessage string `yaml:"commit_message"`
+}
+
 // WebConfig holds web server configuration.
 type WebConfig struct {
 	ListenAddr       string `yaml:"listen_addr"`
@@ -298,6 +393,16 @@ func DefaultConfig() *Config {
 			PIDFile:    ".starfleet-ai/var/model-proxy.pid",
 			LogFile:    ".starfleet-ai/var/log/model-proxy.log",
 		},
+		Wormholes: WormholesConfig{
+			Enabled: false,
+			Sync: SyncConfig{
+				Interval:        "5s",
+				StartupSync:     true,
+				CloneTimeout:    "2m",
+				CommandTimeout:  "30s",
+				PushRetries:     3,
+			},
+		},
 	}
 }
 
@@ -337,6 +442,7 @@ func Load(root string) (*Config, error) {
 		{"fleet.yaml", "fleet", &cfg.Fleet},
 		{"model-proxy.yaml", "model_proxy", &cfg.ModelProxy},
 		{"services.yaml", "services", &cfg.Services},
+		{"wormholes.yaml", "wormholes", &cfg.Wormholes},
 	} {
 		path := filepath.Join(root, ".starfleet-ai", "conf", f.file)
 		data, err := os.ReadFile(path)

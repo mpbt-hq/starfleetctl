@@ -91,15 +91,21 @@ type StatusPatch struct {
 // msgRecord mirrors one msgs/<id>.json line (new format) or legacy .tsv line.
 // Message type: "ship" (fleet ship), "user" (web frontend/user), "control" (automation/CLI).
 type msgRecord struct {
-	ID      string `json:"id"`
-	Epoch   int64  `json:"epoch"`
-	ISO     string `json:"iso"`
-	From    string `json:"from"`
-	Target  string `json:"target"`
-	Text    string `json:"text"`
-	ReplyTo string `json:"reply_to,omitempty"`
-	Type    string `json:"type,omitempty"`   // "ship", "user", "control"
-	Attach  string `json:"attach,omitempty"` // attachment filename if present
+	ID        string `json:"id"`
+	Epoch     int64  `json:"epoch"`
+	ISO       string `json:"iso"`
+	From      string `json:"from"`
+	Target    string `json:"target"`
+	Text      string `json:"text"`
+	ReplyTo   string `json:"reply_to,omitempty"`
+	Type      string `json:"type,omitempty"`   // "ship", "user", "control"
+	Attach    string `json:"attach,omitempty"` // attachment filename if present
+	// ExternalHosting fields are populated only for messages delivered
+	// via PostExternal (wormhole / external source). They enable crash-idempotent
+	// re-delivery and survive ACK/Purge/Purge-old as durable tombstones.
+	ExternalSource string `json:"external_source,omitempty"`
+	ExternalID     string `json:"external_id,omitempty"`
+	ExternalHash   string `json:"external_sha256,omitempty"`
 }
 
 func readFirstLine(path string) (string, error) {
