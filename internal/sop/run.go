@@ -18,7 +18,7 @@ const usage = `sop <command> [args…]
                                               scaffold a new fragment file
   reindex                                  regenerate sop.d/index.md from sop.d/**/*.md
                                            (inlines all fragment bodies, strips frontmatter)
-  commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment, or (no slug) CLAUDE.md+index.md
+  commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment
   install-self [--order <n>]                 install/refresh the starfleet skills and
                                                clean up legacy agent fragments
   install-starfleet [<subdir>]               install all embedded starfleet fragments from the binary

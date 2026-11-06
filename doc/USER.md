@@ -140,7 +140,7 @@ Markdown-based topic tracking in `.starfleet-ai/dashboard/topics/*.md`. Managed 
 Per-topic Markdown files that become the agent's system prompt. Two sources:
 user-maintained (`sop.d/`) and auto-installed starfleet-owned
 (`.starfleet-ai/var/sop.d/starfleet-instructions/`). At reindex time,
-all fragment bodies are inlined into `CLAUDE.md` and `index.md`.
+all fragment bodies are inlined into `.starfleet-ai/var/sop.d/index.md` (CLAUDE.md is no longer generated).
 
 ```sh
 starfleetctl sop new project/my-topic --title "My Topic"    # create

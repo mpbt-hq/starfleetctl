@@ -325,6 +325,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 			return nil, fmt.Errorf("generate opencode config: %w", err)
 		}
 		inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
+		inner += "export OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1; "
 		inner += "exec " + shellQuote(clientPath)
 		for _, a := range clientArgs {
 			inner += " " + shellQuote(a)
@@ -732,6 +733,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		}
 
 		inner := "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
+		inner += "export OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1; "
 		inner += "exec " + shellQuote(resolveClientPath("opencode"))
 		inner += " --model " + shellQuote(effectiveModel)
 		if sessionID != "" {

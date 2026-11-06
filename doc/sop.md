@@ -8,7 +8,7 @@ the content that becomes the agent's system prompt.
 A **fragment** is a small Markdown file with a YAML-like frontmatter block.
 Each fragment covers one topic (e.g. "inter-ship communication",
 "licensing policy", "CI gotchas"). At reindex time, every fragment's body
-(frontmatter stripped) is inlined into the auto-generated `CLAUDE.md` and
+(frontmatter stripped) is is inlined into the auto-generated `.starfleet-ai/var/sop.d/index.md`
 `.starfleet-ai/var/sop.d/index.md` — this is what the agent reads as its
 system prompt.
 
@@ -190,7 +190,8 @@ frontmatter, wraps each body in `<!-- begin/end inlined fragment: <slug> -->`
 markers, sorts by `(order, slug)`, and writes:
 
 1. `.starfleet-ai/var/sop.d/index.md` — the canonical fragment index
-2. `CLAUDE.md` — same content with a CLAUDE.md header, for ships that
+
+2. (removed) CLAUDE.md is no longer generated — opencode loads only index.md via its instructions array
    don't resolve `@-imports` (e.g. opencode)
 
 **Idempotent.** Two concurrent reindex operations converge to the same
@@ -212,7 +213,7 @@ Fragments and skills serve different purposes:
 |--------|------------------------|---------------------------|
 | **Content** | Agent instructions (always active) | Reference docs (loaded on demand) |
 | **Loading** | Inlined into system prompt at reindex | LLM calls `skill()` tool when needed |
-| **Used by** | Claude Code + opencode (via `CLAUDE.md`) | Claude Code + opencode (native skill tool) |
+| **Used by** | opencode (via `.starfleet-ai/var/sop.d/index.md` instructions) | Claude Code + opencode (native skill tool) |
 | **Format** | `slug`/`title`/`order` frontmatter | `name`/`description` frontmatter |
 | **Location** | `sop.d/` + `.starfleet-ai/var/sop.d/starfleet-instructions/` | `.claude/skills/<name>/SKILL.md` |
 
@@ -224,7 +225,7 @@ covered by fragments) but serve different loading models. Fragments are
 
 ### Claude Code
 
-Claude Code reads `CLAUDE.md` from the workspace root at session start.
+Opencode reads `.starfleet-ai/var/sop.d/index.md` from the workspace root at session start (via instructions array). Claude Code may still use a local CLAUDE.md if present, but it is no longer auto-generated or required.
 The file contains all fragment bodies inlined. Alternatively, Claude Code
 can use `@import` to reference individual fragments — but the generated
 `CLAUDE.md` already contains everything.
@@ -288,7 +289,7 @@ starfleetctl sop <command> [args…]
   write <slug> <file|->                      replace one fragment's content, then reindex
   new <slug> --title "<t>" [--order <n>] [--owner "<tool>"]
                                              scaffold a new fragment
-  reindex                                    regenerate index.md + CLAUDE.md
+  reindex                                    regenerate index.md
   commit [<slug>] -m "<msg>" [--no-push]     commit+push one fragment (or generated files)
   install-self [--order <n>]                 install starfleet skill + clean legacy fragments
   install-starfleet [<subdir>]               install embedded starfleet instruction fragments

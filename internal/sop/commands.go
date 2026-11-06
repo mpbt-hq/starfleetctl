@@ -131,10 +131,13 @@ func (s *SOP) DoNew(slug, title string, order int, owner string) error {
 }
 
 // DoReindex regenerates the fragment index (.starfleet-ai/var/sop.d/index.md)
-// and CLAUDE.md with every fragment's body inlined (frontmatter stripped).
+// with every fragment's body inlined (frontmatter stripped).
 // Pure function of the current fragment set — two ships racing a reindex
 // converge to the same byte-identical output. Bootstraps the index first
 // if it doesn't exist yet.
+// CLAUDE.md is no longer generated: opencode must load only index.md via its
+// "instructions" array. Loading both index.md and CLAUDE.md would duplicate
+// the same instructions (~24k extra tokens per request).
 func (s *SOP) DoReindex() error {
 	if _, err := s.EnsureBootstrapped(); err != nil {
 		return err
@@ -169,14 +172,6 @@ func (s *SOP) DoReindex() error {
 		return err
 	}
 
-	// CLAUDE.md is the entry point for ships that don't resolve @-imports
-	// (e.g. opencode). Write the full inlined content directly into it.
-	claudePath := filepath.Join(s.Root, "CLAUDE.md")
-	claude := claudeHeader + indexContent
-	if err := os.WriteFile(claudePath, []byte(claude), 0o644); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -186,7 +181,7 @@ func (s *SOP) LoadAllFragments() ([]FragmentMeta, []string, error) {
 }
 
 // DoCommit stages, commits, and (unless push is false) pushes ONE fragment
-// file (or, with slug == "", both CLAUDE.md and the index file).
+// file (or, with slug == "", just the index file).
 // Same shared clone lock as every other Go git-mutating command here.
 func (s *SOP) DoCommit(slug, msg string, push bool) error {
 	lh, err := s.lock()
@@ -197,7 +192,7 @@ func (s *SOP) DoCommit(slug, msg string, push bool) error {
 
 	var paths []string
 	if slug == "" {
-		paths = []string{"CLAUDE.md", s.IndexFile()}
+		paths = []string{s.IndexFile()}
 	} else {
 		paths = []string{s.fragmentPath(slug)}
 	}
