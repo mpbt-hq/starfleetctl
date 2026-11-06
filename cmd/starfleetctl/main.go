@@ -40,6 +40,7 @@ import (
 	"github.com/metux/starfleetctl/internal/withclonelock"
 	"github.com/metux/starfleetctl/internal/worktree"
 	"github.com/metux/starfleetctl/internal/wscommit"
+	"github.com/metux/starfleetctl/internal/wormhole"
 )
 
 const helpText = `starfleetctl — fleet-coordination tool for the mpbt-workspace fleet.
@@ -266,6 +267,8 @@ func main() {
 		os.Exit(filestore.Run(root, os.Args[2:]))
 	case "logs":
 		os.Exit(logs.Run(root, os.Args[2:]))
+	case "wormhole":
+		os.Exit(wormhole.Run(os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "starfleetctl: unknown subcommand: %s\n", os.Args[1])
 		os.Exit(2)

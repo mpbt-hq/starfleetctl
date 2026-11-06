@@ -15,6 +15,7 @@ missing file simply means defaults apply. The files and their layout:
 | [`models.yaml`](#modelsyaml-legacy) | legacy model registry (no longer used) |
 | [`timers/*.json`](#timersjson) | persistent timers |
 | [`ship-names.yaml`](#ship-namesyaml) | legacy ship-name pool override |
+| [`wormholes.yaml`](#wormholesyaml) | wormhole manager configuration |
 
 All paths that are relative (pid/log files) resolve against the workspace
 root; runtime state lives under `.starfleet-ai/var/`. The workspace root
@@ -361,6 +362,35 @@ names:
   - Defiant
   - Voyager
 ```
+
+### wormholes.yaml
+
+Wormhole manager configuration for inter-ship message forwarding via the
+comms bus:
+
+```yaml
+wormhole:
+  listen_addr: "127.0.0.1:9999"
+  pid_file: "pid"
+  state_file: "state"
+  max_message_age: 3600s
+  auto_start: true
+  forward_mode: "targeted"
+  worker:
+    poll_interval: 3s
+    max_concurrent: 5
+    persist_state: true
+```
+
+- `listen_addr` — address the wormhole daemon listens on
+- `pid_file` — PID file name (relative to `.starfleet-ai/var/wormholes/`)
+- `state_file` — state file name (relative to `.starfleet-ai/var/wormholes/`)
+- `max_message_age` — maximum age of a message before it is considered stale
+- `auto_start` — whether to auto-start on flagship launch
+- `forward_mode` — `targeted` (per-ship) or `broadcast` (all ships)
+- `worker.poll_interval` — interval between message polling cycles
+- `worker.max_concurrent` — maximum concurrent message processing jobs
+- `worker.persist_state` — whether to persist message state across restarts
 
 ---
 
