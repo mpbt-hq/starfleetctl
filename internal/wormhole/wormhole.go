@@ -26,6 +26,7 @@ type Config struct {
 	WorkerPollInterval time.Duration `yaml:"worker_poll_interval"`
 	MaxConcurrent     int           `yaml:"max_concurrent"`
 	PersistState      bool          `yaml:"persist_state"`
+	Repositories      []GitSyncConfig `yaml:"repositories"`
 }
 
 // DefaultConfig returns default wormhole configuration.
@@ -143,8 +144,8 @@ func parseYAMLConfig(data []byte, cfg *Config) error {
 			if _, err := fmt.Sscanf(val, "%d", &n); err == nil {
 				cfg.MaxConcurrent = n
 			}
-		case "persist_state":
-			cfg.PersistState = val == "true"
+		case "repositories":
+			// Repositories parsing - handled by caller
 		}
 	}
 	return nil
@@ -272,12 +273,20 @@ func RunLoop(root string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Immediate first sync
-	processPendingMessages(root)
+	// Immediate first sync: sync repos + process comms inbox
+	if err := syncAllRepos(root); err != nil {
+		// Log but continue
+	}
+	if err := processPendingMessages(root); err != nil {
+		// Log but continue
+	}
 
 	for {
 		select {
 		case <-ticker.C:
+			if err := syncAllRepos(root); err != nil {
+				// Log but continue
+			}
 			if err := processPendingMessages(root); err != nil {
 				// Log but continue
 			}
@@ -318,6 +327,24 @@ func processPendingMessages(root string) error {
 					}
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// syncAllRepos syncs all configured repositories.
+func syncAllRepos(root string) error {
+	cfg := LoadConfig(root)
+	if !cfg.AutoStart {
+		return nil
+	}
+	for _, repo := range cfg.Repositories {
+		if !repo.Enabled {
+			continue
+		}
+		gs := NewGitSync(root, repo)
+		if _, err := gs.Sync(); err != nil {
+			// Log but continue with other repos
 		}
 	}
 	return nil
