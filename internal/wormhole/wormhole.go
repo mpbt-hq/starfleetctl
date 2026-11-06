@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/metux/starfleetctl/internal/comms"
 )
 
 // Config holds the wormhole manager configuration.
@@ -144,6 +146,8 @@ func parseYAMLConfig(data []byte, cfg *Config) error {
 			if _, err := fmt.Sscanf(val, "%d", &n); err == nil {
 				cfg.MaxConcurrent = n
 			}
+		case "persist_state":
+			cfg.PersistState = val == "true"
 		case "repositories":
 			// Repositories parsing - handled by caller
 		}
@@ -261,7 +265,7 @@ func IsRunning() bool {
 }
 
 // RunLoop runs the daemon's main processing loop.
-func RunLoop(root string) error {
+func RunLoop(root string, bus *comms.Bus) error {
 	if daemonInstance == nil {
 		return fmt.Errorf("wormhole daemon not started")
 	}
@@ -277,7 +281,7 @@ func RunLoop(root string) error {
 	if err := syncAllRepos(root); err != nil {
 		// Log but continue
 	}
-	if err := processPendingMessages(root); err != nil {
+	if err := processPendingMessages(root, bus); err != nil {
 		// Log but continue
 	}
 
@@ -287,7 +291,7 @@ func RunLoop(root string) error {
 			if err := syncAllRepos(root); err != nil {
 				// Log but continue
 			}
-			if err := processPendingMessages(root); err != nil {
+			if err := processPendingMessages(root, bus); err != nil {
 				// Log but continue
 			}
 		case <-sigChan:
@@ -297,10 +301,13 @@ func RunLoop(root string) error {
 }
 
 // processPendingMessages processes any pending wormhole messages.
-func processPendingMessages(root string) error {
-	inboxDir := filepath.Join(root, ".starfleet-ai", "var", "comms", "msgs")
+func processPendingMessages(root string, bus *comms.Bus) error {
+	inboxDir := filepath.Join(root, ".starfleet-ai", "var", "wormholes")
 	entries, err := os.ReadDir(inboxDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 
@@ -308,23 +315,26 @@ func processPendingMessages(root string) error {
 		if !entry.IsDir() {
 			continue
 		}
-		shipDir := filepath.Join(inboxDir, entry.Name(), "unseen")
-		msgEntries, err := os.ReadDir(shipDir)
+		repoID := entry.Name()
+		inboxDir := filepath.Join(inboxDir, repoID, "inbox")
+		msgEntries, err := os.ReadDir(inboxDir)
 		if err != nil {
 			continue
 		}
 		for _, msgEntry := range msgEntries {
-			if !msgEntry.IsDir() && strings.HasSuffix(msgEntry.Name(), ".json") {
-				msgPath := filepath.Join(shipDir, msgEntry.Name())
+			if !msgEntry.IsDir() && strings.HasSuffix(msgEntry.Name(), ".md") {
+				msgPath := filepath.Join(inboxDir, msgEntry.Name())
 				data, err := os.ReadFile(msgPath)
 				if err != nil {
 					continue
 				}
 				msg := parseMessageFromFile(data)
-				if msg != nil {
-					if err := RouteMessage(root, msg); err != nil {
-						return err
-					}
+				if msg == nil {
+					continue
+				}
+				// Route through Comms bus using PostExternal for crash-idempotent delivery
+				if _, err := bus.PostExternal(repoID, msg.ID, msg.From, msg.To, msg.Content); err != nil {
+					// Log but continue with other messages
 				}
 			}
 		}
@@ -350,28 +360,38 @@ func syncAllRepos(root string) error {
 	return nil
 }
 
-// parseMessageFromFile parses a message from a JSON file.
+// parseMessageFromFile parses a message from a YAML front matter file.
 func parseMessageFromFile(data []byte) *Message {
 	msg := &Message{}
-	parts := strings.Split(string(data), ",")
-	for _, part := range parts {
-		kv := strings.SplitN(part, ":", 2)
-		if len(kv) != 2 {
+	lines := strings.Split(string(data), "\n")
+	inFrontMatter := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "---" {
+			if inFrontMatter {
+				break // End of front matter
+			}
+			inFrontMatter = true
 			continue
 		}
-		key := strings.TrimSpace(kv[0])
-		val := strings.TrimSpace(strings.Trim(kv[1], "\""))
+		if !inFrontMatter {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(strings.Trim(parts[1], "\""))
 		switch key {
-		case `"id"`:
+		case "id":
 			msg.ID = val
-		case `"from"`:
+		case "from":
 			msg.From = val
-		case `"to"`:
+		case "to":
 			msg.To = val
-		case `"content"`:
+		case "content":
 			msg.Content = val
-		case `"state"`:
-			msg.State = val
 		}
 	}
 	if msg.ID == "" {

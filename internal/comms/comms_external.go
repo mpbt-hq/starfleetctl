@@ -70,7 +70,7 @@ func externalRecordPath(b *Bus, source, externalID string) (string, error) {
 // validExternalKey checks that source/externalID contain only safe path-safe
 // characters (no slashes, no traversal).
 func validExternalKey(s string) bool {
-	if s == "" {
+	if s == "" || s == "." || s == ".." {
 		return false
 	}
 	for _, c := range s {
@@ -180,6 +180,7 @@ func saveExternalRecordLocked(b *Bus, rec *externalRecord) error {
 
 // publishExternalRecipientsLocked publishes all pending recipients of an
 // external record. It must be called with the bus lock held.
+// The CommsID must already be reserved in rec.CommsID before calling.
 func publishExternalRecipientsLocked(b *Bus, rec *externalRecord) error {
 	var shipIDs []string
 	if len(rec.Recipients) == 0 {
@@ -202,17 +203,7 @@ func publishExternalRecipientsLocked(b *Bus, rec *externalRecord) error {
 			return err
 		}
 	}
-	// Reserve CommsID once, durably.
-	id, err := b.nextID()
-	if err != nil {
-		return err
-	}
-	rec.CommsID = id
-	rec.State = externalPosting
-	if err := saveExternalRecordLocked(b, rec); err != nil {
-		return err
-	}
-	// Publish recipients.
+	// Publish recipients (CommsID already reserved by caller).
 	for _, r := range rec.Recipients {
 		if r.State == externalRecipientPublished {
 			continue
