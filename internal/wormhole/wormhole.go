@@ -277,24 +277,27 @@ func RunLoop(root string, bus *comms.Bus) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	fmt.Fprintf(os.Stderr, "[wormhole] RunLoop started, pid=%d\n", os.Getpid())
+
 	// Immediate first sync: sync repos + process comms inbox
 	if err := syncAllRepos(root); err != nil {
-		// Log but continue
+		fmt.Fprintf(os.Stderr, "[wormhole] syncAllRepos error: %v\n", err)
 	}
 	if err := processPendingMessages(root, bus); err != nil {
-		// Log but continue
+		fmt.Fprintf(os.Stderr, "[wormhole] processPendingMessages error: %v\n", err)
 	}
 
 	for {
 		select {
 		case <-ticker.C:
 			if err := syncAllRepos(root); err != nil {
-				// Log but continue
+				fmt.Fprintf(os.Stderr, "[wormhole] syncAllRepos error: %v\n", err)
 			}
 			if err := processPendingMessages(root, bus); err != nil {
-				// Log but continue
+				fmt.Fprintf(os.Stderr, "[wormhole] processPendingMessages error: %v\n", err)
 			}
-		case <-sigChan:
+		case sig := <-sigChan:
+			fmt.Fprintf(os.Stderr, "[wormhole] Received signal %v, stopping\n", sig)
 			return StopDaemon()
 		}
 	}

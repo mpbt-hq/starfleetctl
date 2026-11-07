@@ -8,6 +8,8 @@ package wormhole
 import (
 	"fmt"
 	"os"
+
+	"github.com/metux/starfleetctl/internal/comms"
 )
 
 // Run executes a wormhole subcommand.
@@ -46,6 +48,20 @@ func runStart(root string) int {
 		return 1
 	}
 	fmt.Println("Wormhole daemon started")
+	
+	// Create comms bus and run the daemon loop
+	bus, err := comms.New(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wormhole: comms init failed: %v\n", err)
+		return 1
+	}
+	
+	if err := RunLoop(root, bus); err != nil {
+		fmt.Fprintf(os.Stderr, "wormhole run loop failed: %v\n", err)
+		return 1
+	}
+	
+	fmt.Println("Wormhole daemon stopped")
 	return 0
 }
 
