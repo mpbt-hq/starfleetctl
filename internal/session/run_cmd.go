@@ -262,6 +262,7 @@ func runClientEnv(shipID, role, root string, client string) []string {
 		if cfg := os.Getenv("OPENCODE_CONFIG"); cfg != "" {
 			env = append(env, "OPENCODE_CONFIG="+cfg)
 		}
+		env = append(env, "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1")
 	}
 	return env
 }
@@ -393,6 +394,7 @@ func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model s
 	if client == "opencode" {
 		if cfg := os.Getenv("OPENCODE_CONFIG"); cfg != "" {
 			parts = append(parts, "export OPENCODE_CONFIG="+shellQuote(cfg))
+			parts = append(parts, "export OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1")
 			parts = append(parts, "unset OPENCODE_CONFIG_CONTENT")
 		}
 	}
