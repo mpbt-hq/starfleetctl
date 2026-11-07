@@ -1182,14 +1182,12 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, 
 	}
 	permission["external_directory"] = externalDirRules
 
-	// Background/auto ships have no human at the terminal, so the
-	// "question" tool (which prompts the user for a decision) would block
-	// forever. Deny it — the LLM gets a fast tool error and must proceed
-	// autonomously. Terminal ships keep the default ("ask") so the human
-	// can answer.
+	// Managed ships must not use the interactive "question" tool:
+	// terminal-attached ships are also prohibited from invoking ask.
+	// Unrestricted ships retain the opencode default.
 	// Note: "question" only accepts a single action string per opencode schema,
 	// not a pattern map like other tools.
-	if launchType != "terminal" && !unrestricted {
+	if !unrestricted {
 		permission["question"] = "deny"
 	}
 

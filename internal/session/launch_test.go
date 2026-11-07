@@ -73,7 +73,7 @@ func TestGenerateOpencodeConfigExternalDirectory(t *testing.T) {
 	t.Setenv("HOME", home)
 	workspacePattern := root + "/**"
 
-	// background/auto ships: deny everything outside the workspace (fast
+	// terminal/background/auto ships: deny everything outside the workspace (fast
 	// failure, agent can recover) while keeping the workspace + ~/.local/bin
 	// allowed.
 	for _, launchType := range []string{"background", "auto"} {
@@ -170,7 +170,7 @@ func TestGenerateOpencodeConfigQuestionPermission(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	// background/auto ships: question denied (no human at the terminal).
-	for _, launchType := range []string{"background", "auto"} {
+	for _, launchType := range []string{"terminal", "background", "auto"} {
 		cfgPath, err := generateOpencodeConfig(root, "TestShip", launchType, false, "", "")
 		if err != nil {
 			t.Fatalf("generateOpencodeConfig(%q): %v", launchType, err)
@@ -180,22 +180,12 @@ func TestGenerateOpencodeConfigQuestionPermission(t *testing.T) {
 		}
 	}
 
-	// terminal ships: no question rule (opencode default "ask" applies).
-	cfgPath, err := generateOpencodeConfig(root, "TestShip", "terminal", false, "", "")
-	if err != nil {
-		t.Fatalf("generateOpencodeConfig(terminal): %v", err)
-	}
-	perm, _ := readShipConfig(t, cfgPath)["permission"].(map[string]any)
-	if _, ok := perm["question"]; ok {
-		t.Errorf("terminal: question rule present, want absent (opencode default)")
-	}
-
 	// unrestricted: no question rule (allow everything).
-	cfgPath, err = generateOpencodeConfig(root, "TestShip", "background", true, "", "")
+	cfgPath, err := generateOpencodeConfig(root, "TestShip", "background", true, "", "")
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(unrestricted): %v", err)
 	}
-	perm, _ = readShipConfig(t, cfgPath)["permission"].(map[string]any)
+	perm, _ := readShipConfig(t, cfgPath)["permission"].(map[string]any)
 	if _, ok := perm["question"]; ok {
 		t.Errorf("unrestricted: question rule present, want absent")
 	}
