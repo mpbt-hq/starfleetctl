@@ -772,7 +772,7 @@ func TestInitialScanCrashDuringBaselineMove(t *testing.T) {
 	if err := sp.runOnce(nil, false); err != nil {
 		t.Fatalf("initial sync: %v", err)
 	}
-	if sp.hasInitialScanCompleted() {
+	if sp.hasInitialScanCompleted("alpha") {
 		t.Fatal("no initial scan may have run yet")
 	}
 
@@ -818,7 +818,7 @@ func TestInitialScanCrashDuringBaselineMove(t *testing.T) {
 		t.Fatalf("dirty working tree after recovery:\n%s", out)
 	}
 	// The marker now exists, so a further cycle does not re-run the scan.
-	if !sp.hasInitialScanCompleted() {
+	if !sp.hasInitialScanCompleted("alpha") {
 		t.Fatal("initial scan marker missing after recovery")
 	}
 }
@@ -872,7 +872,7 @@ func TestInitialScanCrashAfterMoveBeforeMarker(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(procDir, m1.ID+".md")); err != nil {
 		t.Fatalf("message not in processed/ after recovery: %v", err)
 	}
-	if !sp.hasInitialScanCompleted() {
+	if !sp.hasInitialScanCompleted("alpha") {
 		t.Fatal("initial scan marker missing after recovery")
 	}
 
@@ -3278,5 +3278,454 @@ func TestRecipientCopyMismatchMovesToFailed(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sp.git.CloneDir(), "mail", "alpha", "cur", msg.ID+".md")); !os.IsNotExist(err) {
 		t.Fatal("must not remain in cur/")
+	}
+}
+
+// ---- central multi-ship incoming processing --------------------------------
+
+// registerShipReservation creates a ship-name registry reservation using the
+// same on-disk location and format as the shipnames registry.
+func registerShipReservation(t *testing.T, root, name string) {
+	t.Helper()
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(bus.BusDir, "ships")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("0:0:/dev/null\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeFleetShips writes a fleet.yaml carrying the flagship and declarative
+// standing ships.
+func writeFleetShips(t *testing.T, root, flagship string, ships ...string) {
+	t.Helper()
+	dir := filepath.Join(root, ".starfleet-ai", "conf")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	b.WriteString("fleet:\n")
+	if flagship != "" {
+		fmt.Fprintf(&b, "  flagship: %q\n", flagship)
+	}
+	if len(ships) > 0 {
+		b.WriteString("  ships:\n")
+		for _, s := range ships {
+			fmt.Fprintf(&b, "    - name: %q\n", s)
+			b.WriteString("      model: \"nim-primary\"\n")
+			b.WriteString("      client: opencode\n")
+			b.WriteString("      class: worker\n")
+			b.WriteString("      launch_type: background\n")
+			b.WriteString("      respawn: true\n")
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeBoardStatus writes a comms status record for agent, representing a
+// currently running ship on the board.
+func writeBoardStatus(t *testing.T, root, agent string) {
+	t.Helper()
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := comms.StatusRecord{
+		Epoch:  time.Now().Unix(),
+		ISO:    time.Now().UTC().Format(time.RFC3339),
+		Agent:  agent,
+		State:  "idle",
+		Handle: agent,
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bus.StatusDir, agent+".json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setupCentralTest prepares a workspace with one wormhole repository, an
+// initial sync, and no STARFLEET_SHIP_ID (the central daemon model).
+func setupCentralTest(t *testing.T) (root string, sp *Spool) {
+	t.Helper()
+	remote := setupRemote(t)
+	root = t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "")
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp = newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	return root, sp
+}
+
+// TestCentralProcessingFlagshipAndWorkers proves that one cycle processes the
+// mailboxes of the flagship, a declarative standing ship, a reserved worker
+// and a worker known only from the board.
+func TestCentralProcessingFlagshipAndWorkers(t *testing.T) {
+	root, sp := setupCentralTest(t)
+
+	writeFleetShips(t, root, "Enterprise", "Laforge")
+	registerShipReservation(t, root, "Discovery")
+	writeBoardStatus(t, root, "Voyager")
+
+	ships := []string{"Enterprise", "Laforge", "Discovery", "Voyager"}
+	for _, ship := range ships {
+		if err := sp.Publish(NewMessage("Sender", ship, "ship", "hello "+ship, "")); err != nil {
+			t.Fatalf("publish to %s: %v", ship, err)
+		}
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != len(ships) {
+		t.Fatalf("expected %d imported messages, got %d", len(ships), n)
+	}
+	for _, ship := range ships {
+		entries, err := os.ReadDir(filepath.Join(sp.git.CloneDir(), "mail", ship, "processed"))
+		if err != nil {
+			t.Fatalf("read processed/%s: %v", ship, err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("ship %s: expected 1 processed message, got %d", ship, len(entries))
+		}
+	}
+}
+
+// TestCentralProcessingWithoutShipEnv proves that a ship is processed even
+// when the daemon process has no STARFLEET_SHIP_ID at all.
+func TestCentralProcessingWithoutShipEnv(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	registerShipReservation(t, root, "Discovery")
+
+	msg := NewMessage("Enterprise", "Discovery", "ship", "no env", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sp.git.CloneDir(), "mail", "Discovery", "processed", msg.ID+".md")); err != nil {
+		t.Fatalf("message not imported without STARFLEET_SHIP_ID: %v", err)
+	}
+}
+
+// TestUserHostFallbackNeverUsedAsMailbox proves that the daemon's user/host
+// fallback identity (e.g. "nekrad@x1") never becomes a mailbox, even though
+// it is what comms.New falls back to when STARFLEET_SHIP_ID is unset.
+func TestUserHostFallbackNeverUsedAsMailbox(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	registerShipReservation(t, root, "Discovery")
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback := bus.ShipID
+	if validToken(fallback) {
+		t.Fatalf("test requires a non-token fallback identity, got %q", fallback)
+	}
+
+	msg := NewMessage("Enterprise", "Discovery", "ship", "payload", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sp.git.CloneDir(), "mail", fallback)); !os.IsNotExist(err) {
+		t.Fatalf("fallback identity %q must never be used as a mailbox (stat err=%v)", fallback, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(sp.git.CloneDir(), "mail"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue // transient message temp dir (mail/.tmp) is not a mailbox
+		}
+		if !validToken(e.Name()) {
+			t.Fatalf("non-ship mailbox entry created: %q", e.Name())
+		}
+	}
+}
+
+// TestCentralProcessingDeduplicatesShipEntries proves that a ship present in
+// several canonical sources is processed exactly once.
+func TestCentralProcessingDeduplicatesShipEntries(t *testing.T) {
+	root, sp := setupCentralTest(t)
+
+	writeFleetShips(t, root, "Enterprise", "Discovery")
+	registerShipReservation(t, root, "Discovery")
+	writeBoardStatus(t, root, "Discovery")
+
+	ships, err := localShips(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]int)
+	for _, s := range ships {
+		seen[s]++
+	}
+	for s, n := range seen {
+		if n != 1 {
+			t.Fatalf("ship %q appears %d times in localShips", s, n)
+		}
+	}
+
+	msg := NewMessage("Enterprise", "Discovery", "ship", "dedup", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 1 {
+		t.Fatalf("expected exactly 1 imported message, got %d", n)
+	}
+	processed, err := os.ReadDir(filepath.Join(sp.git.CloneDir(), "mail", "Discovery", "processed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(processed) != 1 {
+		t.Fatalf("expected 1 processed message, got %d", len(processed))
+	}
+}
+
+// TestCentralProcessingIsolatesMailboxErrors proves that a broken mailbox does
+// not prevent the other mailboxes from being processed, while the error is
+// still aggregated and reported.
+func TestCentralProcessingIsolatesMailboxErrors(t *testing.T) {
+	root, sp := setupCentralTest(t)
+
+	registerShipReservation(t, root, "Discovery")
+	registerShipReservation(t, root, "Broken")
+
+	msg := NewMessage("Enterprise", "Discovery", "ship", "survives", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// A regular file where the mailbox directory is expected makes the layout
+	// creation for this one ship fail.
+	if err := os.WriteFile(filepath.Join(sp.git.CloneDir(), "mail", "Broken"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := processPendingMessages(root)
+	if err == nil {
+		t.Fatal("expected an aggregated mailbox error")
+	}
+	if !strings.Contains(err.Error(), "Broken") {
+		t.Fatalf("error must identify the failing mailbox: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sp.git.CloneDir(), "mail", "Discovery", "processed", msg.ID+".md")); err != nil {
+		t.Fatalf("other mailbox must still be processed: %v", err)
+	}
+}
+
+// TestWormholeSyncUsesMultiShipLogic proves that `wormhole sync` runs the same
+// central multi-ship cycle as the daemon.
+func TestWormholeSyncUsesMultiShipLogic(t *testing.T) {
+	root, sp := setupCentralTest(t)
+
+	writeFleetShips(t, root, "Enterprise", "Laforge")
+	registerShipReservation(t, root, "Discovery")
+
+	ships := []string{"Enterprise", "Laforge", "Discovery"}
+	for _, ship := range ships {
+		if err := sp.Publish(NewMessage("Sender", ship, "ship", "via sync", "")); err != nil {
+			t.Fatalf("publish to %s: %v", ship, err)
+		}
+	}
+
+	if rc := runSync(root); rc != 0 {
+		t.Fatalf("wormhole sync failed: rc=%d", rc)
+	}
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != len(ships) {
+		t.Fatalf("expected %d imported messages via wormhole sync, got %d", len(ships), n)
+	}
+}
+
+// setupRemoteWithLegacyArchives creates a remote whose mail/ already carries
+// the frozen top-level inbox/ and outbox/ archives.
+func setupRemoteWithLegacyArchives(t *testing.T) string {
+	t.Helper()
+	base := t.TempDir()
+	remote := filepath.Join(base, "remote.git")
+	runGit(t, "", "init", "--bare", "-b", "main", remote)
+	seed := filepath.Join(base, "seed")
+	if err := os.MkdirAll(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, seed, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacy := map[string]string{
+		"mail/inbox/new/old-inbox.md":   "---\nid: w0-legacy-inbox\nfrom: beta\nto: Discovery\n---\nold inbox\n",
+		"mail/outbox/new/old-outbox.md": "---\nid: w0-legacy-outbox\nfrom: Discovery\nto: beta\n---\nold outbox\n",
+	}
+	for rel, content := range legacy {
+		p := filepath.Join(seed, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, seed, "add", "-A")
+	runGit(t, seed, "commit", "-q", "-m", "seed with legacy archives")
+	runGit(t, seed, "remote", "add", "origin", remote)
+	runGit(t, seed, "push", "-q", "origin", "main")
+	return remote
+}
+
+// TestLegacyTopLevelArchivesUntouched proves that the frozen top-level
+// inbox/ and outbox/ archives are neither scanned nor imported.
+func TestLegacyTopLevelArchivesUntouched(t *testing.T) {
+	remote := setupRemoteWithLegacyArchives(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "")
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	registerShipReservation(t, root, "Discovery")
+	msg := NewMessage("Enterprise", "Discovery", "ship", "active", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	for _, rel := range []string{"mail/inbox/new/old-inbox.md", "mail/outbox/new/old-outbox.md"} {
+		if _, err := os.Stat(filepath.Join(sp.git.CloneDir(), rel)); err != nil {
+			t.Fatalf("legacy archive file must stay untouched: %v (%s)", err, rel)
+		}
+	}
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 1 {
+		t.Fatalf("legacy archive must not be imported, got %d comms messages", n)
+	}
+}
+
+// TestCentralProcessingNoRedelivery proves that a second cycle does not import
+// or move an already processed message again.
+func TestCentralProcessingNoRedelivery(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	registerShipReservation(t, root, "Discovery")
+
+	msg := NewMessage("Enterprise", "Discovery", "ship", "once", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("first process: %v", err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 1 {
+		t.Fatalf("expected 1 imported message, got %d", n)
+	}
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("second process: %v", err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 1 {
+		t.Fatalf("already processed message re-delivered: %d comms messages", n)
+	}
+	processed, err := os.ReadDir(filepath.Join(sp.git.CloneDir(), "mail", "Discovery", "processed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(processed) != 1 {
+		t.Fatalf("expected 1 processed message, got %d", len(processed))
+	}
+}
+
+// TestCentralProcessingBaselineMultiShip proves that incoming.initial_scan:
+// baseline establishes the baseline per ship without importing pre-existing
+// messages, also when several ships are processed in one cycle.
+func TestCentralProcessingBaselineMultiShip(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	cfg.Repositories[0].Incoming.InitialScan = "baseline"
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "")
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	registerShipReservation(t, root, "Discovery")
+	registerShipReservation(t, root, "Voyager")
+	for _, ship := range []string{"Discovery", "Voyager"} {
+		if err := sp.Publish(NewMessage("Enterprise", ship, "ship", "pre-existing", "")); err != nil {
+			t.Fatalf("publish to %s: %v", ship, err)
+		}
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 0 {
+		t.Fatalf("baseline must not import pre-existing messages, got %d", n)
+	}
+	for _, ship := range []string{"Discovery", "Voyager"} {
+		entries, err := os.ReadDir(filepath.Join(sp.git.CloneDir(), "mail", ship, "processed"))
+		if err != nil {
+			t.Fatalf("read processed/%s: %v", ship, err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("ship %s: expected 1 baselined message, got %d", ship, len(entries))
+		}
 	}
 }
