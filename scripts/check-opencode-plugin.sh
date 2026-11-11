@@ -59,12 +59,17 @@ fi
 # reports TS2591 "Cannot find name 'process'" noise for every node global,
 # so skip instead of failing.
 types_ok=false
+TSC_EXTRA=()
 case "${TYPES_MODE:-}" in
     local-global)
-        [ -d node_modules/@types/node ] && types_ok=true
-        if [ "$types_ok" = false ] && command -v npm >/dev/null 2>&1; then
+        if [ -d node_modules/@types/node ]; then
+            types_ok=true
+        elif command -v npm >/dev/null 2>&1; then
             g="$(npm root -g 2>/dev/null || true)"
-            [ -n "$g" ] && [ -d "$g/@types/node" ] && types_ok=true
+            if [ -n "$g" ] && [ -d "$g/@types/node" ]; then
+                types_ok=true
+                TSC_EXTRA=(--typeRoots "$g/@types")
+            fi
         fi
         ;;
     local)
@@ -77,7 +82,7 @@ if [ "${#TSC[@]}" -eq 0 ]; then
 elif [ "$types_ok" = false ]; then
     note "typescript found, but @types/node missing — skipping type check (npm i -g @types/node)"
 else
-    if "${TSC[@]}" -p "$TSCONFIG"; then
+    if "${TSC[@]}" -p "$TSCONFIG" "${TSC_EXTRA[@]}"; then
         note "tsc --noEmit OK ($TSCONFIG)"
     else
         note "tsc --noEmit FAILED"
