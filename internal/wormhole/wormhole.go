@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +29,7 @@ import (
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
 	"github.com/metux/starfleetctl/internal/flock"
+	"github.com/metux/starfleetctl/internal/shipnames"
 	"gopkg.in/yaml.v3"
 )
 
@@ -855,11 +857,13 @@ func RunLoop(root string, cfg *config.WormholesConfig) error {
 	}
 }
 
-// processPendingMessages syncs every enabled repository and processes the local
-// ship's mailbox for repositories with incoming enabled. Each repository is
-// handled under its own writer lock; failures are aggregated. The push retry
-// count comes from the loaded configuration (sync.push_retries), so callers
-// cannot supply a contradictory value.
+// processPendingMessages syncs every enabled repository and processes the
+// mailboxes of all locally responsible ships for repositories with incoming
+// enabled. The local ship set is determined centrally from existing Starfleet
+// configuration and registry state (see localShips) — never from the daemon's
+// user/host fallback identity. Each repository is handled under its own writer
+// lock; failures of one mailbox or repository do not prevent processing others
+// and are aggregated.
 func processPendingMessages(root string) error {
 	cfg, err := LoadConfig(root)
 	if err != nil {
@@ -867,6 +871,10 @@ func processPendingMessages(root string) error {
 	}
 	if !cfg.Enabled {
 		return nil
+	}
+	ships, err := localShips(root)
+	if err != nil {
+		return fmt.Errorf("local ships: %w", err)
 	}
 	bus, err := comms.New(root)
 	if err != nil {
@@ -879,8 +887,15 @@ func processPendingMessages(root string) error {
 		if !repoEnabled(repo) {
 			continue
 		}
-		sp := newSpool(root, repo, cfg.Sync.PushRetries, bus.ShipID, cloneTimeout, commandTimeout)
-		if err := sp.runOnce(bus, incomingEnabled(repo)); err != nil {
+		syncer := newSpool(root, repo, cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
+		if !incomingEnabled(repo) || len(ships) == 0 {
+			if err := syncer.runOnce(nil, false); err != nil {
+				errs = append(errs, fmt.Errorf("repo %q: %w", repo.ID, err))
+			}
+			continue
+		}
+		shipSet := uniqueShips(ships)
+		if err := syncer.RunCycleForShips(bus, shipSet); err != nil {
 			errs = append(errs, fmt.Errorf("repo %q: %w", repo.ID, err))
 		}
 	}
@@ -888,14 +903,6 @@ func processPendingMessages(root string) error {
 		return combineErrors(errs)
 	}
 	return nil
-}
-
-// busShipID returns the current ship ID from the environment or config.
-func busShipID(root string) string {
-	if id := os.Getenv("STARFLEET_SHIP_ID"); id != "" {
-		return id
-	}
-	return ""
 }
 
 // syncAllRepos syncs all enabled repositories without processing mailboxes.
@@ -924,4 +931,99 @@ func syncAllRepos(root string) error {
 		return combineErrors(errs)
 	}
 	return nil
+}
+
+// localShips returns the canonical set of locally responsible ship identities
+// for this workspace. No single existing source covers all local ships, so the
+// set is the union of the canonical representations, each read from its own
+// existing store (no parallel identity management is introduced):
+//
+//   - fleet configuration: the flagship (fleet.flagship) and the declarative
+//     standing ships (fleet.ships). The flagship is not necessarily present in
+//     the ship-name registry, and standing ships may not have been spawned yet.
+//   - ship-name registry (.starfleet-ai/var/comms/ships/): reserved names,
+//     including ships that are reserved but have not heartbeated yet (their
+//     mailbox may already contain messages).
+//   - comms board status records: ships that are actually running now. This
+//     covers ad-hoc ships whose reservation was garbage-collected.
+//   - STARFLEET_SHIP_ID, but only when it is explicitly set and is a valid
+//     ship token. This keeps the variable relevant for ship processes.
+//
+// The daemon's user/host fallback identity (e.g. "nekrad@x1", used when
+// STARFLEET_SHIP_ID is unset) is never a valid ship token and is filtered out
+// by isLocalShipID, so it can never become a mailbox.
+//
+// The returned slice is deduplicated, sorted and contains only valid ship
+// mailbox tokens.
+func localShips(root string) ([]string, error) {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var out []string
+	add := func(name string) {
+		if !isLocalShipID(name) || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+
+	// Flagship and declarative standing ships from fleet configuration.
+	add(shipnames.FlagshipName(root))
+	for _, s := range cfg.Fleet.Ships {
+		add(s.Name)
+	}
+
+	// Active/reserved ship identities from the existing ship registry.
+	reg := shipnames.New(root)
+	if entries, err := os.ReadDir(reg.ShipsDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			add(e.Name())
+		}
+	}
+
+	// Ships known to the comms board (status records).
+	bus, err := comms.New(root)
+	if err == nil {
+		for _, r := range bus.AllStatusRecords() {
+			add(r.Agent)
+		}
+		// The daemon's own explicitly configured ship identity. When
+		// STARFLEET_SHIP_ID is unset, bus.ShipID is the user/host fallback
+		// (e.g. "nekrad@x1"), which is not a valid mailbox token and is
+		// filtered out by isLocalShipID.
+		if bus.ShipIDSet {
+			add(bus.ShipID)
+		}
+	}
+
+	sort.Strings(out)
+	return out, nil
+}
+
+// uniqueShips returns a deduplicated copy of ships preserving order of first
+// occurrence, with invalid/non-mailbox identities filtered out.
+func uniqueShips(ships []string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, s := range ships {
+		if !isLocalShipID(s) || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// isLocalShipID reports whether s is a valid local ship mailbox identity.
+// User/host identities (e.g. "nekrad@x1", which contain '@' and are not
+// valid wormhole tokens) are rejected.
+func isLocalShipID(s string) bool {
+	return validToken(s)
 }

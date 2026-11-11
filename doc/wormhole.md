@@ -103,11 +103,23 @@ The wormhole uses **Git Maildir spool** for message transport:
 1. **Sender** publishes message to `mail/<target>/new/<id>.md` via `spool.Publish()`
 2. **Transport** commits+pushes to Git remote (Maildir spool in Git repo)
 3. **Receiver** runs `processPendingMessages()` to:
+   - Resolve the central set of locally responsible ships
    - Fetch + rebase remote changes
-   - Claim messages in `new/` → move to `cur/`
+   - For every local ship: claim messages in `new/` → move to `cur/`
    - Import via `Bus.PostExternal()` → Comms inbox
    - Move `cur/` → `processed/` on success, or `failed/` on permanent failure
 4. **At-least-once delivery**: Claims prevent duplicate processing; crashes between claim and import leave message in `cur/` for retry
+
+### Central multi-ship cycle
+
+`processPendingMessages()` runs the cycle above for the whole workspace. The
+local ship set is resolved centrally (fleet configuration: flagship +
+declarative standing ships; ship-name registry: reservations; comms board:
+status records; the daemon's own valid `STARFLEET_SHIP_ID`) and never from the
+daemon's user/host fallback identity. Every local ship gets its own mailbox
+(`mail/<ship>/new/`) processed inside the single repository-scoped writer lock;
+mailbox failures are isolated and aggregated, so one failing mailbox does not
+block the others.
 
 ### Message Format
 

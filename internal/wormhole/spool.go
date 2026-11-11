@@ -49,23 +49,42 @@ type Spool struct {
 	ship string
 }
 
-// initialScanStateFile returns the path to the initial scan state file.
-func (s *Spool) initialScanStateFile() string {
-	return filepath.Join(s.git.stateDir, "initial_scan_done")
+// initialScanStateFile returns the path to the initial scan state file for a
+// specific mailbox (ship). State is tracked per repository+ship so that a
+// central multi-ship cycle establishes the baseline/replay independently for
+// each mailbox.
+func (s *Spool) initialScanStateFile(target string) string {
+	if target == "" {
+		target = s.ship
+	}
+	return filepath.Join(s.git.stateDir, "initial_scan_done."+target)
 }
 
 // hasInitialScanCompleted checks if initial scan has been done for this repo/ship.
-func (s *Spool) hasInitialScanCompleted() bool {
-	_, err := os.Stat(s.initialScanStateFile())
-	return err == nil
+// It also recognizes the legacy global marker (initial_scan_done) written by
+// single-ship versions so that existing baseline/replay state is preserved.
+func (s *Spool) hasInitialScanCompleted(target string) bool {
+	if _, err := os.Stat(s.initialScanStateFile(target)); err == nil {
+		return true
+	}
+	legacy := filepath.Join(s.git.stateDir, "initial_scan_done")
+	if _, err := os.Stat(legacy); err == nil {
+		return true
+	}
+	return false
 }
 
 // markInitialScanCompleted records that initial scan is done.
-func (s *Spool) markInitialScanCompleted() error {
-	return os.WriteFile(s.initialScanStateFile(), []byte("done\n"), 0o644)
+func (s *Spool) markInitialScanCompleted(target string) error {
+	if err := os.MkdirAll(s.git.stateDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(s.initialScanStateFile(target), []byte("done\n"), 0o644)
 }
 
-// newSpool creates a Spool bound to one repository checkout and local ship.
+// newSpool creates a Spool bound to one repository checkout. ship may be empty
+// for repo-sync-only use or when mailboxes are processed per-ship via
+// RunCycleForShips.
 func newSpool(root string, repo config.RepositoryConfig, pushRetries int, ship string, cloneTimeout, commandTimeout time.Duration) *Spool {
 	return &Spool{
 		root: root,
@@ -99,7 +118,7 @@ func (s *Spool) rel(target, state, name string) string {
 	return filepath.ToSlash(filepath.Join(mailDirName, target, state, name))
 }
 
-// RunCycle syncs the repository and (when requested) processes the local
+// RunCycle syncs the repository and (when requested) processes the bound
 // ship's mailbox under the single repository-scoped writer lock.
 // For read-only repositories, sync still fetches remote changes and processes
 // the mailbox locally; lifecycle transitions are committed locally (never
@@ -118,6 +137,41 @@ func (s *Spool) runOnce(bus *comms.Bus, process bool) error {
 		return nil
 	}
 	return s.processLocked(bus)
+}
+
+// RunCycleForShips performs one repository sync and then processes the mailbox
+// of each ship in ships under the single repository-scoped writer lock. The
+// repository is synced exactly once; duplicate ship entries are processed only
+// once; mailbox failures are isolated so that an error in one ship's mailbox
+// does not prevent processing of the remaining mailboxes. All errors are
+// aggregated and returned.
+func (s *Spool) RunCycleForShips(bus *comms.Bus, ships []string) error {
+	lock, err := s.git.Lock(60 * time.Second)
+	if err != nil {
+		return fmt.Errorf("lock: %w", err)
+	}
+	defer lock.Close()
+
+	if err := s.git.SyncLocked(); err != nil {
+		return err
+	}
+
+	var errs []error
+	for _, ship := range uniqueShips(ships) {
+		if !validToken(ship) {
+			errs = append(errs, fmt.Errorf("invalid local ship identity %q", ship))
+			continue
+		}
+		sp := *s
+		sp.ship = ship
+		if err := sp.processLocked(bus); err != nil {
+			errs = append(errs, fmt.Errorf("ship %q: %w", ship, err))
+		}
+	}
+	if len(errs) > 0 {
+		return combineErrors(errs)
+	}
+	return nil
 }
 
 // ensureLayoutLocked creates the fixed lifecycle directories. Caller holds the
@@ -206,11 +260,11 @@ func (s *Spool) processLocked(bus *comms.Bus) error {
 	}
 
 	// Handle initial scan if not yet completed.
-	if !s.hasInitialScanCompleted() {
+	if !s.hasInitialScanCompleted(target) {
 		if err := s.performInitialScanLocked(bus, target); err != nil {
 			return fmt.Errorf("initial scan: %w", err)
 		}
-		if err := s.markInitialScanCompleted(); err != nil {
+		if err := s.markInitialScanCompleted(target); err != nil {
 			return fmt.Errorf("mark initial scan done: %w", err)
 		}
 	}
