@@ -3332,6 +3332,9 @@ func writeFleetShips(t *testing.T, root, flagship string, ships ...string) {
 
 // writeBoardStatus writes a comms status record for agent, representing a
 // currently running ship on the board.
+// writeBoardStatus writes a comms status record for agent, representing a
+// currently running ship on the board. Like every current status writer it
+// carries a valid, alive PID.
 func writeBoardStatus(t *testing.T, root, agent string) {
 	t.Helper()
 	bus, err := comms.New(root)
@@ -3343,6 +3346,7 @@ func writeBoardStatus(t *testing.T, root, agent string) {
 		ISO:    time.Now().UTC().Format(time.RFC3339),
 		Agent:  agent,
 		State:  "idle",
+		PID:    os.Getpid(),
 		Handle: agent,
 	}
 	data, err := json.Marshal(rec)
@@ -4046,5 +4050,62 @@ func TestInitialScanMarkersAreIndependentPerMailbox(t *testing.T) {
 	}
 	if _, err := os.Stat(sp.legacyInitialScanStateFile()); !os.IsNotExist(err) {
 		t.Fatalf("legacy global marker must not be created, stat err=%v", err)
+	}
+}
+
+// TestStatusRecordWithoutPIDIsNotActive proves that a status record without a
+// valid PID cannot qualify as a demonstrably active ship: it is filtered out
+// of ActiveStatusRecords (while AllStatusRecords still lists it) and therefore
+// does not enter the local ship set or activate a mailbox. All current status
+// writers set a PID, so PID==0 only occurs in files not written by them.
+func TestStatusRecordWithoutPIDIsNotActive(t *testing.T) {
+	root, sp := setupCentralTest(t)
+
+	writeBoardStatusWithPID(t, root, "NoPID", "idle", 0)
+	writeBoardStatusWithPID(t, root, "BadPID", "working", -5)
+	writeBoardStatusWithPID(t, root, "Alive", "working", os.Getpid())
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := make(map[string]bool)
+	for _, r := range bus.ActiveStatusRecords() {
+		active[r.Agent] = true
+	}
+	if active["NoPID"] || active["BadPID"] {
+		t.Fatalf("records without a valid PID must not be active: %v", active)
+	}
+	if !active["Alive"] {
+		t.Fatalf("record with a live PID must be active: %v", active)
+	}
+	// AllStatusRecords keeps reporting everything — the filter is only on top.
+	all := make(map[string]bool)
+	for _, r := range bus.AllStatusRecords() {
+		all[r.Agent] = true
+	}
+	if !all["NoPID"] || !all["BadPID"] {
+		t.Fatalf("AllStatusRecords must stay unfiltered: %v", all)
+	}
+
+	ships, err := localShips(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range ships {
+		if s == "NoPID" || s == "BadPID" {
+			t.Fatalf("ship with PID-less status record must not be local, got %v", ships)
+		}
+	}
+
+	msg := NewMessage("Enterprise", "NoPID", "ship", "must not arrive", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 0 {
+		t.Fatalf("message for a PID-less record must not be imported, got %d", n)
 	}
 }
