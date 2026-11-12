@@ -340,12 +340,14 @@ func (b *Bus) DoStatus(state, note string, patch StatusPatch) error {
 	prev, _ := parseStatusFile(b.sfile(b.ShipID))
 
 	rec := StatusRecord{
-		Epoch:           now(),
-		ISO:             isots(),
-		Agent:           b.ShipID,
-		Project:         pp,
-		State:           clean(state),
-		PID:             os.Getpid(),
+		Epoch:   now(),
+		ISO:     isots(),
+		Agent:   b.ShipID,
+		Project: pp,
+		State:   clean(state),
+		// See statusPIDForWrite: a live ship PID is preserved, a short-lived
+		// helper never overwrites it with its own PID.
+		PID:             statusPIDForWrite(prev.PID),
 		Handle:          hh,
 		Note:            clean(note),
 		PluginLastRun:   prev.PluginLastRun,
@@ -616,7 +618,12 @@ func (b *Bus) DoInit(note string) ([]Message, error) {
 		}
 	}
 
-	// 4. Set status to idle.
+	// 4. Set status to idle — preserving the ship's own fields.
+	// Start from the existing record so that the PID of the long-lived ship
+	// process and the plugin-liveness/task fields survive this write. This
+	// writer is a short-lived helper process (the ship calls it through its
+	// shell) and must not take over the PID nor drop liveness information.
+	prev, _ := parseStatusFile(b.sfile(b.ShipID))
 	if note == "" {
 		note = "opencode ship"
 	}
@@ -628,16 +635,15 @@ func (b *Bus) DoInit(note string) ([]Message, error) {
 	if hh == "" {
 		hh = "-"
 	}
-	rec := StatusRecord{
-		Epoch:   now(),
-		ISO:     isots(),
-		Agent:   b.ShipID,
-		Project: pp,
-		State:   "idle",
-		PID:     os.Getpid(),
-		Handle:  hh,
-		Note:    clean(note),
-	}
+	rec := prev
+	rec.Epoch = now()
+	rec.ISO = isots()
+	rec.Agent = b.ShipID
+	rec.Project = pp
+	rec.State = "idle"
+	rec.PID = statusPIDForWrite(prev.PID)
+	rec.Handle = hh
+	rec.Note = clean(note)
 	data, _ := json.MarshalIndent(rec, "", "  ")
 	_ = os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644)
 

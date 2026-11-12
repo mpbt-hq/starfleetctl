@@ -225,6 +225,22 @@ func statusRecordAlive(rec StatusRecord) bool {
 	return pidAliveCheck(rec.PID)
 }
 
+// statusPIDForWrite returns the PID a status write by the current process must
+// record. The PID field describes the long-lived ship process, so a still-alive
+// recorded PID is always preserved: a short-lived helper process (comms
+// status/ack invoked through the ship's shell, the opencode plugin's dispatch
+// subprocess) must never replace it with its own PID, which would make the ship
+// look dead as soon as the helper exits. Only when no live PID is recorded does
+// the writer install its own PID as the best available hint — it keeps proving
+// liveness while the writer is long-lived (ship supervisor, web daemon) and
+// stops proving it as soon as a short-lived writer exits.
+func statusPIDForWrite(prevPID int) int {
+	if prevPID > 0 && pidAliveCheck(prevPID) {
+		return prevPID
+	}
+	return os.Getpid()
+}
+
 func (b *Bus) allMsgRecords() []msgRecord {
 	var out []msgRecord
 

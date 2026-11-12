@@ -432,12 +432,15 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 
 	nowTs := time.Now().Format(time.RFC3339Nano)
 	rec := StatusRecord{
-		Epoch:           prev.Epoch,
-		ISO:             prev.ISO,
-		Agent:           coalesce(prev.Agent, b.ShipID),
-		Project:         prev.Project,
-		State:           coalesce(state, prev.State, "idle"),
-		PID:             coalesceInt(pid, prev.PID, os.Getpid()),
+		Epoch:   prev.Epoch,
+		ISO:     prev.ISO,
+		Agent:   coalesce(prev.Agent, b.ShipID),
+		Project: prev.Project,
+		State:   coalesce(state, prev.State, "idle"),
+		// An explicitly transmitted PID (the opencode plugin passes its own
+		// long-lived process PID) is authoritative; otherwise a live recorded
+		// PID is preserved — never the PID of this short-lived helper process.
+		PID:             coalesceInt(pid, statusPIDForWrite(prev.PID)),
 		Handle:          prev.Handle,
 		Note:            coalesce(note, prev.Note),
 		PluginLastRun:   coalesce(pluginTS, prev.PluginLastRun, nowTs),

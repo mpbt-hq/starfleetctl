@@ -99,6 +99,17 @@ starfleetctl comms touch
 starfleetctl comms clear
 ```
 
+The unified status record `status/<ship>.json` carries the heartbeat plus the
+plugin-liveness fields. Its `pid` field describes the **long-lived ship
+process** (the opencode process), not whichever helper wrote the record last:
+only the ship process itself may set it, by transmitting it explicitly
+(`comms health update --pid`, done by the opencode plugin). All other writers —
+`comms status`, the ack path (`comms init`), `comms touch` — run as short-lived
+helper processes and preserve a still-alive recorded PID instead of installing
+their own, so a running ship does not look dead as soon as a helper exits. A
+recorded PID that is no longer alive proves nothing: such a ship counts as
+ended (e.g. for `comms health` and for the wormhole daemon's local ship set).
+
 ### Board
 
 ```sh
