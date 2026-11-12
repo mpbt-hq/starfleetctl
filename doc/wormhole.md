@@ -149,7 +149,14 @@ On first run for a given mailbox, `incoming.initial_scan` controls how existing 
 - **`baseline`** (default): Move all existing messages from `new/` to `processed/` without importing. Establishes a baseline so only future messages are imported.
 - **`replay`**: Import all existing messages normally through the standard pipeline.
 
-The scan state is persisted in `.starfleet-state/initial_scan_done` per repository/ship.
+The scan state is persisted per mailbox in
+`.starfleet-state/initial_scan_done.<ship>` (per repository). The legacy global
+marker `.starfleet-state/initial_scan_done` — written by the former single-ship
+implementation — belongs to exactly one mailbox: the one of the ship that
+processed the repository back then (found via the mailbox showing evidence of
+that scan, or via the daemon's own `STARFLEET_SHIP_ID`). It is honored only for
+that mailbox and then migrated into its per-mailbox marker; every other mailbox
+runs its own `baseline`/`replay` scan.
 
 ## CLI Commands
 

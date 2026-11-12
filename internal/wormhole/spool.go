@@ -47,6 +47,9 @@ type Spool struct {
 	repo config.RepositoryConfig
 	git  *GitSync
 	ship string
+	// legacyOwner is the ship identity owning the legacy global initial-scan
+	// marker (initial_scan_done). It is empty when no owner can be determined.
+	legacyOwner string
 }
 
 // initialScanStateFile returns the path to the initial scan state file for a
@@ -60,16 +63,102 @@ func (s *Spool) initialScanStateFile(target string) string {
 	return filepath.Join(s.git.stateDir, "initial_scan_done."+target)
 }
 
-// hasInitialScanCompleted checks if initial scan has been done for this repo/ship.
-// It also recognizes the legacy global marker (initial_scan_done) written by
-// single-ship versions so that existing baseline/replay state is preserved.
+// legacyInitialScanStateFile returns the path of the legacy global initial
+// scan marker, written by the single-ship implementation.
+func (s *Spool) legacyInitialScanStateFile() string {
+	return filepath.Join(s.git.stateDir, "initial_scan_done")
+}
+
+// initialScanMarkerExists reports whether the per-mailbox initial scan marker
+// exists.
+func (s *Spool) initialScanMarkerExists(target string) bool {
+	_, err := os.Stat(s.initialScanStateFile(target))
+	return err == nil
+}
+
+// hasInitialScanCompleted checks if initial scan has been done for this
+// repo/ship.
+//
+// State is tracked per mailbox (initial_scan_done.<ship>). The legacy global
+// marker (initial_scan_done) was written by the single-ship implementation and
+// belongs to exactly one mailbox — the one of the ship that processed the
+// repository back then. It is therefore only honored for that mailbox
+// (legacyOwner); every other mailbox has to run its own baseline/replay scan.
 func (s *Spool) hasInitialScanCompleted(target string) bool {
-	if _, err := os.Stat(s.initialScanStateFile(target)); err == nil {
+	if s.initialScanMarkerExists(target) {
 		return true
 	}
-	legacy := filepath.Join(s.git.stateDir, "initial_scan_done")
-	if _, err := os.Stat(legacy); err == nil {
-		return true
+	if s.legacyOwner == "" || target != s.legacyOwner {
+		return false
+	}
+	_, err := os.Stat(s.legacyInitialScanStateFile())
+	return err == nil
+}
+
+// legacyScanOwner determines the mailbox owning the legacy global initial
+// scan marker.
+//
+// The single-ship implementation wrote that marker after scanning exactly one
+// mailbox: the mailbox of the ship identity the daemon was running under
+// (STARFLEET_SHIP_ID). The marker carries no identity, so it is reconstructed
+// from the state that is still available:
+//
+//   - the mailbox showing evidence of a previous scan (non-empty cur/ or
+//     processed/) while not having a per-mailbox marker yet: only the scanned
+//     mailbox ever had messages moved into those states. A single such
+//     mailbox identifies the owner unambiguously.
+//   - otherwise the daemon's explicitly configured ship identity, which is
+//     exactly the identity the single-ship implementation used.
+//
+// If the owner cannot be determined, the legacy marker is inherited by no
+// mailbox at all: every mailbox then performs its own baseline/replay scan.
+func (s *Spool) legacyScanOwner(bus *comms.Bus) string {
+	if owner := s.legacyScannedMailbox(); owner != "" {
+		return owner
+	}
+	if bus != nil && bus.ShipIDSet && validToken(bus.ShipID) {
+		return bus.ShipID
+	}
+	return ""
+}
+
+// legacyScannedMailbox returns the single mailbox showing evidence of a
+// previous scan, or "" when there is none or more than one.
+func (s *Spool) legacyScannedMailbox() string {
+	entries, err := os.ReadDir(s.mailRoot())
+	if err != nil {
+		return ""
+	}
+	found := ""
+	for _, e := range entries {
+		if !e.IsDir() || !validToken(e.Name()) {
+			continue
+		}
+		if s.initialScanMarkerExists(e.Name()) {
+			continue // already initialized in the per-mailbox format
+		}
+		if !mailboxHasScanEvidence(filepath.Join(s.mailRoot(), e.Name())) {
+			continue
+		}
+		if found != "" {
+			return "" // ambiguous
+		}
+		found = e.Name()
+	}
+	return found
+}
+
+// mailboxHasScanEvidence reports whether the mailbox shows evidence of a
+// previous scan, i.e. messages that were moved into cur/ or processed/.
+func mailboxHasScanEvidence(dir string) bool {
+	for _, state := range []string{maildirCur, maildirDone} {
+		entries, err := os.ReadDir(filepath.Join(dir, state))
+		if err != nil {
+			continue
+		}
+		if len(entries) > 0 {
+			return true
+		}
 	}
 	return false
 }
@@ -100,6 +189,9 @@ func newSpool(root string, repo config.RepositoryConfig, pushRetries int, ship s
 			CommandTimeout: commandTimeout,
 		}),
 		ship: ship,
+		// A spool bound to one ship reproduces the single-ship situation: the
+		// legacy global marker belongs to exactly that mailbox.
+		legacyOwner: ship,
 	}
 }
 
@@ -155,6 +247,11 @@ func (s *Spool) RunCycleForShips(bus *comms.Bus, ships []string) error {
 	if err := s.git.SyncLocked(); err != nil {
 		return err
 	}
+
+	// The legacy global initial-scan marker belongs to exactly one mailbox.
+	// Determine its owner before any mailbox is touched, while the previous
+	// state of the maildir is still intact.
+	s.legacyOwner = s.legacyScanOwner(bus)
 
 	var errs []error
 	for _, ship := range uniqueShips(ships) {
@@ -264,6 +361,11 @@ func (s *Spool) processLocked(bus *comms.Bus) error {
 		if err := s.performInitialScanLocked(bus, target); err != nil {
 			return fmt.Errorf("initial scan: %w", err)
 		}
+	}
+	// Record the per-mailbox marker in any case: it migrates a legacy global
+	// marker inherited by this mailbox and makes the per-mailbox state the
+	// single source of truth from then on.
+	if !s.initialScanMarkerExists(target) {
 		if err := s.markInitialScanCompleted(target); err != nil {
 			return fmt.Errorf("mark initial scan done: %w", err)
 		}
