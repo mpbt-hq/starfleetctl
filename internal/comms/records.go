@@ -187,12 +187,18 @@ func (b *Bus) AllStatusRecords() []StatusRecord {
 	return out
 }
 
-// ActiveStatusRecords returns the status records of ships that are still
-// alive. It reuses the lifecycle information the health watchdog works with:
-// a record belongs to a ship that has ended when the ship announced an
+// ActiveStatusRecords returns the status records of ships that are demonstrably
+// still alive. It reuses the lifecycle information the health watchdog works
+// with: a record belongs to a ship that has ended when the ship announced an
 // intentional shutdown (state "offline") or when the recorded PID is no longer
 // alive — such ships crash or get stopped and leave their status file behind.
-// Records without a PID cannot be proven dead and are kept.
+//
+// Every current status writer records a PID (the opencode plugin passes its own
+// long-lived process PID, the CLI writers their own), so a record qualifies as
+// active only when it carries a valid, still-alive PID. A record without a
+// valid PID — possible only for files not written by the current code — cannot
+// prove liveness and is deliberately treated as not active rather than being
+// silently counted as alive.
 //
 // Unlike AllStatusRecords this never reports a ship that has ended, so stale
 // status files cannot keep a ship alive indefinitely.
@@ -207,15 +213,16 @@ func (b *Bus) ActiveStatusRecords() []StatusRecord {
 	return out
 }
 
-// statusRecordAlive reports whether the ship behind rec is still running.
+// statusRecordAlive reports whether the ship behind rec is demonstrably still
+// running: not intentionally offline and carrying a valid, still-alive PID.
 func statusRecordAlive(rec StatusRecord) bool {
 	if rec.State == "offline" {
 		return false
 	}
-	if rec.PID > 0 && !pidAliveCheck(rec.PID) {
+	if rec.PID <= 0 {
 		return false
 	}
-	return true
+	return pidAliveCheck(rec.PID)
 }
 
 func (b *Bus) allMsgRecords() []msgRecord {
