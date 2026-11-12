@@ -115,7 +115,9 @@ The wormhole uses **Git Maildir spool** for message transport:
 `processPendingMessages()` runs the cycle above for the whole workspace. The
 local ship set is resolved centrally (fleet configuration: flagship +
 declarative standing ships; ship-name registry: reservations; comms board:
-status records; the daemon's own valid `STARFLEET_SHIP_ID`) and never from the
+status records of ships that are still alive — a record with state `offline`
+or a no-longer-alive PID belongs to a ship that has ended and never activates
+a mailbox; the daemon's own valid `STARFLEET_SHIP_ID`) and never from the
 daemon's user/host fallback identity. Every local ship gets its own mailbox
 (`mail/<ship>/new/`) processed inside the single repository-scoped writer lock;
 mailbox failures are isolated and aggregated, so one failing mailbox does not

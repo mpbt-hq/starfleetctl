@@ -187,6 +187,37 @@ func (b *Bus) AllStatusRecords() []StatusRecord {
 	return out
 }
 
+// ActiveStatusRecords returns the status records of ships that are still
+// alive. It reuses the lifecycle information the health watchdog works with:
+// a record belongs to a ship that has ended when the ship announced an
+// intentional shutdown (state "offline") or when the recorded PID is no longer
+// alive — such ships crash or get stopped and leave their status file behind.
+// Records without a PID cannot be proven dead and are kept.
+//
+// Unlike AllStatusRecords this never reports a ship that has ended, so stale
+// status files cannot keep a ship alive indefinitely.
+func (b *Bus) ActiveStatusRecords() []StatusRecord {
+	var out []StatusRecord
+	for _, r := range b.AllStatusRecords() {
+		if !statusRecordAlive(r) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// statusRecordAlive reports whether the ship behind rec is still running.
+func statusRecordAlive(rec StatusRecord) bool {
+	if rec.State == "offline" {
+		return false
+	}
+	if rec.PID > 0 && !pidAliveCheck(rec.PID) {
+		return false
+	}
+	return true
+}
+
 func (b *Bus) allMsgRecords() []msgRecord {
 	var out []msgRecord
 

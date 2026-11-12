@@ -945,7 +945,10 @@ func syncAllRepos(root string) error {
 //     including ships that are reserved but have not heartbeated yet (their
 //     mailbox may already contain messages).
 //   - comms board status records: ships that are actually running now. This
-//     covers ad-hoc ships whose reservation was garbage-collected.
+//     covers ad-hoc ships whose reservation was garbage-collected. Only
+//     records of ships that are still alive are used (state "offline" or a
+//     no-longer-alive PID means the ship has ended), so a status file left
+//     behind by an ended ship cannot keep a mailbox alive indefinitely.
 //   - STARFLEET_SHIP_ID, but only when it is explicitly set and is a valid
 //     ship token. This keeps the variable relevant for ship processes.
 //
@@ -987,10 +990,10 @@ func localShips(root string) ([]string, error) {
 		}
 	}
 
-	// Ships known to the comms board (status records).
+	// Ships known to the comms board that are still alive.
 	bus, err := comms.New(root)
 	if err == nil {
-		for _, r := range bus.AllStatusRecords() {
+		for _, r := range bus.ActiveStatusRecords() {
 			add(r.Agent)
 		}
 		// The daemon's own explicitly configured ship identity. When
