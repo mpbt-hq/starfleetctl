@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -3362,6 +3363,10 @@ func setupCentralTest(t *testing.T) (root string, sp *Spool) {
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
 	t.Setenv("STARFLEET_SHIP_ID", "")
+	// Keep the bus inside the test workspace. It must stay the default bus
+	// dir: the ship-name registry lives at config.BusDir(root)/ships and does
+	// not follow STARFLEET_BUS_DIR.
+	t.Setenv("STARFLEET_BUS_DIR", config.BusDir(root))
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp = newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
 	if err := sp.runOnce(nil, false); err != nil {
@@ -3727,5 +3732,319 @@ func TestCentralProcessingBaselineMultiShip(t *testing.T) {
 		if len(entries) != 1 {
 			t.Fatalf("ship %s: expected 1 baselined message, got %d", ship, len(entries))
 		}
+	}
+}
+
+// ---- regression: ended ships and legacy initial-scan marker ----------------
+
+// deadPID returns the PID of a process that has already exited.
+func deadPID(t *testing.T) int {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		cmd := exec.Command("true")
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("run true: %v", err)
+		}
+		pid := cmd.Process.Pid
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return pid
+		}
+	}
+	t.Fatal("no dead pid found")
+	return 0
+}
+
+// writeBoardStatusWithPID writes a comms status record with an explicit state
+// and PID — the lifecycle information the board carries.
+func writeBoardStatusWithPID(t *testing.T, root, agent, state string, pid int) {
+	t.Helper()
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := comms.StatusRecord{
+		Epoch:  time.Now().Unix(),
+		ISO:    time.Now().UTC().Format(time.RFC3339),
+		Agent:  agent,
+		State:  state,
+		PID:    pid,
+		Handle: agent,
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bus.StatusDir, agent+".json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeLegacyInitialScanMarker writes the legacy global initial-scan marker
+// exactly as the single-ship implementation did.
+func writeLegacyInitialScanMarker(t *testing.T, sp *Spool) {
+	t.Helper()
+	if err := os.MkdirAll(sp.git.stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sp.legacyInitialScanStateFile(), []byte("done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// countMailboxFiles counts the regular files of a mailbox lifecycle directory.
+func countMailboxFiles(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			n++
+		}
+	}
+	return n
+}
+
+// TestLocalShipsIgnoresEndedShipStatusRecord proves that status records of
+// ships that have ended never activate a mailbox: a leftover record of a
+// crashed ship (PID no longer alive) and a record announcing an intentional
+// shutdown (state "offline") are both ignored — even though "idle" records
+// never count as stale.
+func TestLocalShipsIgnoresEndedShipStatusRecord(t *testing.T) {
+	root, _ := setupCentralTest(t)
+
+	writeBoardStatusWithPID(t, root, "Ghost", "idle", deadPID(t))
+	writeBoardStatusWithPID(t, root, "Retired", "offline", os.Getpid())
+
+	ships, err := localShips(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range ships {
+		if s == "Ghost" || s == "Retired" {
+			t.Fatalf("ended ship %q must not be a local ship, got %v", s, ships)
+		}
+	}
+}
+
+// TestEndedShipStatusRecordDoesNotActivateMailbox proves that a message for a
+// ship that has ended is not imported: the leftover status record must not
+// keep the mailbox alive.
+func TestEndedShipStatusRecordDoesNotActivateMailbox(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	writeBoardStatusWithPID(t, root, "Ghost", "idle", deadPID(t))
+
+	msg := NewMessage("Enterprise", "Ghost", "ship", "for a ship that ended", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 0 {
+		t.Fatalf("message for ended ship must not be imported, got %d comms messages", n)
+	}
+}
+
+// TestRunningAdHocShipWithoutReservationIsDetected proves that a ship that is
+// actually running is still recognized without a registry reservation: its
+// live PID is the lifecycle information that proves it.
+func TestRunningAdHocShipWithoutReservationIsDetected(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	writeBoardStatusWithPID(t, root, "AdHoc", "working", os.Getpid())
+
+	ships, err := localShips(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range ships {
+		if s == "AdHoc" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("running ad-hoc ship must be a local ship, got %v", ships)
+	}
+
+	msg := NewMessage("Enterprise", "AdHoc", "ship", "for a running ship", "")
+	if err := sp.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 1 {
+		t.Fatalf("expected 1 imported message, got %d", n)
+	}
+}
+
+// setBaselineMode switches the test workspace's repository to baseline mode,
+// so that a performed initial scan is observable (pre-existing messages are
+// moved to processed/ without being imported).
+func setBaselineMode(t *testing.T, root string) {
+	t.Helper()
+	cfg, err := LoadConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Repositories[0].Incoming.InitialScan = "baseline"
+	writeConfig(t, root, cfg)
+}
+
+// TestLegacyInitialScanMarkerAppliesOnlyToOwnerMailbox proves that the legacy
+// global initial-scan marker is inherited by the mailbox it belongs to — the
+// one of the ship identity the single-ship implementation ran under — while a
+// newly appearing mailbox still runs its own baseline scan.
+func TestLegacyInitialScanMarkerAppliesOnlyToOwnerMailbox(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	setBaselineMode(t, root)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	registerShipReservation(t, root, "alpha")
+	registerShipReservation(t, root, "beta")
+	writeLegacyInitialScanMarker(t, sp)
+
+	msgAlpha := NewMessage("Enterprise", "alpha", "ship", "for alpha", "")
+	if err := sp.Publish(msgAlpha); err != nil {
+		t.Fatalf("publish alpha: %v", err)
+	}
+	msgBeta := NewMessage("Enterprise", "beta", "ship", "for beta", "")
+	if err := sp.Publish(msgBeta); err != nil {
+		t.Fatalf("publish beta: %v", err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The owner mailbox keeps its completed initial scan: its message is
+	// imported instead of being baselined away.
+	if n := countFiles(t, filepath.Join(bus.MsgDir, "alpha", "unseen")); n != 1 {
+		t.Fatalf("owner mailbox must not be re-baselined, got %d imported messages", n)
+	}
+	// The new mailbox runs its own baseline scan: its message is not imported.
+	if n := countFiles(t, filepath.Join(bus.MsgDir, "beta", "unseen")); n != 0 {
+		t.Fatalf("new mailbox must run its own initial scan, got %d imported messages", n)
+	}
+	if n := countMailboxFiles(t, filepath.Join(sp.git.CloneDir(), "mail", "beta", "processed")); n != 1 {
+		t.Fatalf("new mailbox must baseline its own message, got %d processed files", n)
+	}
+	// Both mailboxes carry their own marker now.
+	for _, ship := range []string{"alpha", "beta"} {
+		if _, err := os.Stat(sp.initialScanStateFile(ship)); err != nil {
+			t.Fatalf("missing per-mailbox marker for %s: %v", ship, err)
+		}
+	}
+}
+
+// TestLegacyInitialScanMarkerOwnerFromMailboxEvidence proves that the owner of
+// the legacy global marker is also found when the daemon runs without an
+// explicitly configured ship identity: the mailbox showing evidence of the
+// previous scan identifies it.
+func TestLegacyInitialScanMarkerOwnerFromMailboxEvidence(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	setBaselineMode(t, root)
+	registerShipReservation(t, root, "alpha")
+	registerShipReservation(t, root, "beta")
+	writeLegacyInitialScanMarker(t, sp)
+
+	// Evidence of the previous scan: the single-ship implementation had moved
+	// a message of alpha's mailbox into processed/.
+	legacyAbs := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "processed", "legacy.md")
+	if err := os.MkdirAll(filepath.Dir(legacyAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyAbs, []byte("---\nid: legacy\n---\nold\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, sp.git.CloneDir(), "add", "-A")
+	runGit(t, sp.git.CloneDir(), "commit", "-q", "-m", "wormhole: legacy baseline")
+
+	msgAlpha := NewMessage("Enterprise", "alpha", "ship", "for alpha", "")
+	if err := sp.Publish(msgAlpha); err != nil {
+		t.Fatalf("publish alpha: %v", err)
+	}
+	msgBeta := NewMessage("Enterprise", "beta", "ship", "for beta", "")
+	if err := sp.Publish(msgBeta); err != nil {
+		t.Fatalf("publish beta: %v", err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, filepath.Join(bus.MsgDir, "alpha", "unseen")); n != 1 {
+		t.Fatalf("owner mailbox must not be re-baselined, got %d imported messages", n)
+	}
+	if n := countFiles(t, filepath.Join(bus.MsgDir, "beta", "unseen")); n != 0 {
+		t.Fatalf("new mailbox must run its own initial scan, got %d imported messages", n)
+	}
+	if _, err := os.Stat(sp.initialScanStateFile("alpha")); err != nil {
+		t.Fatalf("missing per-mailbox marker for alpha: %v", err)
+	}
+}
+
+// TestInitialScanMarkersAreIndependentPerMailbox proves that every mailbox
+// initializes itself independently when no legacy marker exists: each one runs
+// its own baseline scan and gets its own marker.
+func TestInitialScanMarkersAreIndependentPerMailbox(t *testing.T) {
+	root, sp := setupCentralTest(t)
+	setBaselineMode(t, root)
+	registerShipReservation(t, root, "alpha")
+	registerShipReservation(t, root, "beta")
+
+	msgAlpha := NewMessage("Enterprise", "alpha", "ship", "for alpha", "")
+	if err := sp.Publish(msgAlpha); err != nil {
+		t.Fatalf("publish alpha: %v", err)
+	}
+	msgBeta := NewMessage("Enterprise", "beta", "ship", "for beta", "")
+	if err := sp.Publish(msgBeta); err != nil {
+		t.Fatalf("publish beta: %v", err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countFiles(t, bus.MsgDir); n != 0 {
+		t.Fatalf("baseline must not import pre-existing messages, got %d", n)
+	}
+	for _, ship := range []string{"alpha", "beta"} {
+		if _, err := os.Stat(sp.initialScanStateFile(ship)); err != nil {
+			t.Fatalf("missing per-mailbox marker for %s: %v", ship, err)
+		}
+		if n := countMailboxFiles(t, filepath.Join(sp.git.CloneDir(), "mail", ship, "processed")); n != 1 {
+			t.Fatalf("mailbox %s must baseline its own message, got %d processed files", ship, n)
+		}
+	}
+	if _, err := os.Stat(sp.legacyInitialScanStateFile()); !os.IsNotExist(err) {
+		t.Fatalf("legacy global marker must not be created, stat err=%v", err)
 	}
 }
