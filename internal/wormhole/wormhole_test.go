@@ -3742,12 +3742,24 @@ func TestCentralProcessingBaselineMultiShip(t *testing.T) {
 // ---- regression: ended ships and legacy initial-scan marker ----------------
 
 // deadPID returns the PID of a process that has already exited.
+// TestWormholeHelperProcess is not a real test: deadPID re-executes the test
+// binary with GO_WANT_HELPER_PROCESS=1 to obtain a process that has already
+// exited. This avoids any dependency on external binaries such as sleep/true.
+func TestWormholeHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	os.Exit(0)
+}
+
+// deadPID returns the PID of a process that has already exited.
 func deadPID(t *testing.T) int {
 	t.Helper()
 	for i := 0; i < 20; i++ {
-		cmd := exec.Command("true")
+		cmd := exec.Command(os.Args[0], "-test.run=^TestWormholeHelperProcess$")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
 		if err := cmd.Run(); err != nil {
-			t.Fatalf("run true: %v", err)
+			t.Fatalf("run helper process: %v", err)
 		}
 		pid := cmd.Process.Pid
 		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {

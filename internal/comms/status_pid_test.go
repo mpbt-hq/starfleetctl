@@ -13,15 +13,38 @@ import (
 	"time"
 )
 
-// spawnLivePID starts a helper process and returns its still-alive PID. It
-// stands in for the long-lived ship process (the opencode process), whose PID
-// is the one that proves the ship is alive.
-func spawnLivePID(t *testing.T) int {
+// TestHelperProcess is not a real test: the tests below re-execute the test
+// binary with GO_WANT_HELPER_PROCESS=1 to obtain a live (blocking) or dead
+// (exiting) helper process. This avoids any dependency on external binaries
+// such as sleep/true, so the PID tests run on every platform the package
+// builds on (the package itself needs syscall.Kill/Flock, i.e. Unix).
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	if os.Getenv("GO_HELPER_MODE") == "live" {
+		select {} // block until the parent kills us
+	}
+	os.Exit(0)
+}
+
+// spawnHelper starts the test binary re-executed as a helper process.
+func spawnHelper(t *testing.T, mode string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command("sleep", "60")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "GO_HELPER_MODE="+mode)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper process: %v", err)
 	}
+	return cmd
+}
+
+// livePID returns the PID of a still-running helper process. It stands in for
+// the long-lived ship process (the opencode process), whose PID is the one
+// that proves the ship is alive.
+func livePID(t *testing.T) int {
+	t.Helper()
+	cmd := spawnHelper(t, "live")
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
@@ -29,12 +52,12 @@ func spawnLivePID(t *testing.T) int {
 	return cmd.Process.Pid
 }
 
-// deadPID returns the PID of a process that has already exited.
+// deadPID returns the PID of a helper process that has already exited.
 func deadPID(t *testing.T) int {
 	t.Helper()
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("run helper process: %v", err)
+	cmd := spawnHelper(t, "dead")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("helper process did not exit cleanly: %v", err)
 	}
 	return cmd.Process.Pid
 }
@@ -58,7 +81,7 @@ func writeStatusRecord(t *testing.T, b *Bus, agent string, rec StatusRecord) {
 // PID would make the ship look dead.
 func TestDoStatusKeepsLiveShipPID(t *testing.T) {
 	b := newTestBus(t, "TestShip")
-	shipPID := spawnLivePID(t)
+	shipPID := livePID(t)
 	writeStatusRecord(t, b, "TestShip", StatusRecord{
 		Epoch:         time.Now().Unix(),
 		ISO:           time.Now().UTC().Format(time.RFC3339),
@@ -88,7 +111,7 @@ func TestDoStatusKeepsLiveShipPID(t *testing.T) {
 // plugin-liveness and status fields.
 func TestDoInitKeepsLiveShipPIDAndFields(t *testing.T) {
 	b := newTestBus(t, "TestShip")
-	shipPID := spawnLivePID(t)
+	shipPID := livePID(t)
 	writeStatusRecord(t, b, "TestShip", StatusRecord{
 		Epoch:           time.Now().Unix(),
 		ISO:             time.Now().UTC().Format(time.RFC3339),
@@ -128,8 +151,8 @@ func TestDoInitKeepsLiveShipPIDAndFields(t *testing.T) {
 // by the ship process itself is authoritative and replaces the recorded one.
 func TestDoHealthUpdateTakesExplicitPID(t *testing.T) {
 	b := newTestBus(t, "TestShip")
-	oldPID := spawnLivePID(t)
-	newPID := spawnLivePID(t)
+	oldPID := livePID(t)
+	newPID := livePID(t)
 	writeStatusRecord(t, b, "TestShip", StatusRecord{
 		Epoch: time.Now().Unix(),
 		ISO:   time.Now().UTC().Format(time.RFC3339),
@@ -162,7 +185,7 @@ func TestDoHealthUpdateTakesExplicitPID(t *testing.T) {
 // with a live PID is kept.
 func TestActiveStatusRecordsFiltersEndedShip(t *testing.T) {
 	b := newTestBus(t, "TestShip")
-	live := spawnLivePID(t)
+	live := livePID(t)
 	writeStatusRecord(t, b, "Live", StatusRecord{
 		Epoch: time.Now().Unix(),
 		ISO:   time.Now().UTC().Format(time.RFC3339),
