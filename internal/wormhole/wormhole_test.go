@@ -1063,6 +1063,47 @@ func TestParseRejectsInvalidCanonicalEnvelopeSenders(t *testing.T) {
 	}
 }
 
+func TestParseSenderFromConsistency(t *testing.T) {
+	accept := []string{
+		"---\nid: w0-ok-1\nfrom: ChatGPT\nsender: ChatGPT@pegasus\nto: alpha\n---\nbody\n",
+		"---\nid: w0-ok-2\nfrom: ChatGPT@pegasus\nsender: ChatGPT@pegasus\nto: alpha\n---\nbody\n",
+		"---\nid: w0-ok-3\nfrom: ChatGPT@pegasus\nto: alpha\n---\nbody\n",
+	}
+	for _, data := range accept {
+		msg, err := parseMessage([]byte(data))
+		if err != nil {
+			t.Fatalf("expected accept for %q: %v", data, err)
+		}
+		if msg.From != "ChatGPT" || msg.Sender != "ChatGPT@pegasus" {
+			t.Fatalf("unexpected normalized envelope for %q: from=%q sender=%q", data, msg.From, msg.Sender)
+		}
+	}
+
+	// Normal ship-to-ship message without sender must remain unchanged.
+	plain := "---\nid: w0-ok-plain\nfrom: alpha\nto: beta\n---\nbody\n"
+	msg, err := parseMessage([]byte(plain))
+	if err != nil {
+		t.Fatalf("plain ship-to-ship parse: %v", err)
+	}
+	if msg.From != "alpha" || msg.Sender != "" || msg.To != "beta" {
+		t.Fatalf("plain ship-to-ship changed: %+v", msg)
+	}
+
+	reject := []string{
+		"---\nid: w0-bad-1\nfrom: ChatGPT\nsender: Mallory@evil\nto: alpha\n---\nbody\n",
+		"---\nid: w0-bad-2\nfrom: ChatGPT@pegasus\nsender: Mallory@evil\nto: alpha\n---\nbody\n",
+		"---\nid: w0-bad-3\nfrom: ChatGPT\nsender: ChatGPT@pegasus@evil\nto: alpha\n---\nbody\n",
+		"---\nid: w0-bad-4\nfrom: ChatGPT\nsender: @pegasus\nto: alpha\n---\nbody\n",
+		"---\nid: w0-bad-5\nfrom: ChatGPT\nsender: ChatGPT@\nto: alpha\n---\nbody\n",
+		"---\nid: w0-bad-6\nfrom: ChatGPT\nsender: ../evil\nto: alpha\n---\nbody\n",
+	}
+	for _, data := range reject {
+		if _, err := parseMessage([]byte(data)); err == nil {
+			t.Fatalf("expected parse error for %q", data)
+		}
+	}
+}
+
 func TestImportExternalLogicalSenderPreservesReplyAddress(t *testing.T) {
 	remote := setupRemote(t)
 	root := t.TempDir()

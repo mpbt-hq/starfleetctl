@@ -249,13 +249,32 @@ func parseMessage(data []byte) (*Message, error) {
 	// token, so split it into the canonical sender ("ChatGPT") while preserving
 	// the full logical address for reply routing. A plain sender token is left
 	// untouched.
-	canonical, logical, serr := canonicalSender(m.From)
+	origFrom := m.From
+	canonical, logical, serr := canonicalSender(origFrom)
 	if serr != nil {
 		return nil, serr
 	}
-	m.From = canonical
-	if logical != "" && m.Sender == "" {
+	if logical != "" {
+		// origFrom was a logical address (user@domain): if sender is also set it
+		// must fully match that logical address.
+		if m.Sender != "" && m.Sender != logical {
+			return nil, fmt.Errorf("sender %q does not match from %q", m.Sender, origFrom)
+		}
+		m.From = canonical
 		m.Sender = logical
+	} else {
+		// origFrom was a canonical sender token: if sender is set it must be a
+		// logical address whose user part matches the canonical sender.
+		if m.Sender != "" {
+			if !validLogicalAddress(m.Sender) {
+				return nil, fmt.Errorf("invalid or missing sender %q", m.Sender)
+			}
+			user, _, _ := strings.Cut(m.Sender, "@")
+			if user != canonical {
+				return nil, fmt.Errorf("sender %q does not match from %q", m.Sender, canonical)
+			}
+		}
+		m.From = canonical
 	}
 	if err := validateMessage(m); err != nil {
 		return nil, err
