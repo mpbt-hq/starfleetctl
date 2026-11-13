@@ -664,41 +664,84 @@ const logPollTimer = setInterval(async () => {
     }
   }, 3000)
 
-  // Resolve session ID: cache, then the session list (match this ship's
-  // session by title — works without a first turn, unlike session.status()),
-  // then the legacy session.status() fallback.
+  // Resolve the active session ID for THIS ship only.
+  // Prefer an explicitly known session id (set by chat hooks / session events),
+  // then match the ship via session.list() titles. session.status() is used only
+  // as a last resort and never by blindly taking the first entry: it is accepted
+  // only when it yields exactly one session that can be corroborated as this
+  // ship's session (or is unambiguously the sole session). On missing/ambiguous
+  // resolution we return '' and log diagnostics; callers must not mark messages
+  // delivered in that case.
   const resolveSessionId = async (): Promise<string> => {
     if (currentSessionID) return currentSessionID
-    const ship = process.env.STARFLEET_SHIP_ID || ''
+    const ship = aid()
+
+    let listArr: any[] = []
+    let listErr = ''
     try {
       const lr: any = await client.session.list()
-      const arr: any[] = Array.isArray(lr) ? lr : ((lr as any)?.data ?? (lr as any)?.body ?? [])
-      if (ship && Array.isArray(arr)) {
-        const mine = arr
+      listArr = Array.isArray(lr) ? lr : ((lr as any)?.data ?? (lr as any)?.body ?? [])
+      if (!Array.isArray(listArr)) listArr = []
+    } catch (e) {
+      listErr = String(e).slice(0, 120)
+    }
+
+    const mine = ship && Array.isArray(listArr)
+      ? listArr
           .filter((s: any) => s && typeof s.title === 'string' &&
             (s.title === ship || s.title.includes(ship)))
-          .sort((a: any, b: any) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))[0]
-        if (mine?.id) { currentSessionID = mine.id; return currentSessionID }
-      }
-    } catch { /* fall through to status() */ }
+          .sort((a: any, b: any) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))
+      : []
+    if (mine.length === 1 && mine[0]?.id) {
+      currentSessionID = mine[0].id
+      tickLog(`session-resolve ship=${ship}: matched list id=${currentSessionID}`)
+      return currentSessionID
+    }
+    if (mine.length > 1) {
+      tickLog(`session-resolve ship=${ship}: ambiguous list matches=${mine.map((s: any) => s?.id).filter(Boolean).join(',')}`)
+      return ''
+    }
+
+    let statusErr = ''
     try {
       const st = await client.session.status()
       const stBody = st?.body ?? st
       if (stBody && typeof stBody === 'object') {
         const stData = (stBody as any).data ?? stBody
-        const keys = Object.keys(stData)
-        if (keys.length > 0) {
-          currentSessionID = keys[0]
-          const stEntry = stData[keys[0]]
-          if (!currentModel.model) {
-            if (stEntry?.model) currentModel.model = stEntry.model
-            if (stEntry?.modelID) currentModel.model = stEntry.modelID
-            if (stEntry?.providerID) currentModel.server = stEntry.providerID
+        const keys = Object.keys(stData || {})
+        if (keys.length === 1) {
+          const sid = keys[0]
+          const listed = Array.isArray(listArr) ? listArr.find((s: any) => s?.id === sid) : null
+          const titleOk = listed && typeof listed.title === 'string' &&
+            (listed.title === ship || listed.title.includes(ship))
+          // Accept the sole status session only when the session list confirms
+          // it belongs to this ship, or when the list is unavailable/empty so we
+          // cannot contradict it (but never when the list shows other sessions).
+          const listHasOthers = Array.isArray(listArr) && listArr.some((s: any) => s?.id && s.id !== sid)
+          if (titleOk || ((!listed || listArr.length === 0) && !listHasOthers)) {
+            currentSessionID = sid
+            const stEntry = stData[sid]
+            if (!currentModel.model) {
+              if (stEntry?.model) currentModel.model = stEntry.model
+              if (stEntry?.modelID) currentModel.model = stEntry.modelID
+              if (stEntry?.providerID) currentModel.server = stEntry.providerID
+            }
+            tickLog(`session-resolve ship=${ship}: status fallback id=${sid} titleOk=${!!titleOk} listLen=${listArr.length}`)
+            return currentSessionID
           }
-          return currentSessionID
+          tickLog(`session-resolve ship=${ship}: rejected status id=${sid} (not confirmed for ship, listed=${listed ? listed.title || '?' : 'none'})`)
+          return ''
+        }
+        if (keys.length > 1) {
+          tickLog(`session-resolve ship=${ship}: ambiguous status keys=${keys.join(',')}`)
+          return ''
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      statusErr = String(e).slice(0, 120)
+    }
+
+    tickLog(`session-resolve ship=${ship}: no session (listErr=${listErr || '-'} statusErr=${statusErr || '-'} listLen=${listArr.length})`)
     return ''
   }
 
@@ -711,63 +754,76 @@ const logPollTimer = setInterval(async () => {
     if (pollRunning) return
     pollRunning = true
     try {
-      if (!currentSessionID) tickLog(`poll: no session yet (will retry)`)
-      await resolveSessionId()
       const r = bus({ cmd: 'inbox' })
       const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
-      const msgs = [...boot, ...(r.messages || []).filter((m: any) => !submitted.has(m.id))]
+      const inboxMsgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
+      const msgs = [...boot, ...inboxMsgs]
+      const inboxIds = (r.messages || []).map((m: any) => m.id).join(',')
+      if ((r.messages || []).length > 0 || boot.length > 0) {
+        tickLog(`inbox-poll ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inboxIds}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
+      }
       if (msgs.length === 0) return
+
       const injectable: any[] = []
       for (const msg of msgs) {
         appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${msg.text.slice(0, 80)}`)
+        const sidForCmd = await resolveSessionId()
         // handleMessage: type=command → execute, type=ship/user/control → false (inject)
-        if (await handleMessage(msg, client, currentSessionID)) {
-          // Command executed successfully, acknowledge it
-          bus({ cmd: 'seen_mark', id: msg.id })
+        if (await handleMessage(msg, client, sidForCmd)) {
+          // Command executed/accepted by handler: acknowledge it.
+          const sr = bus({ cmd: 'seen_mark', id: msg.id })
           submitted.add(msg.id)
+          tickLog(`handoff-command ship=${aid()} sid=${sidForCmd || '-'} id=${msg.id} seen=${!!sr?.ok}`)
           continue
         }
-        // Not a command: do NOT claim it yet (see below). Claiming
-        // (submitted + seen_mark) before the injection actually succeeded
-        // would strand the directive if promptAsync is rejected — the
-        // turn-start hook skips anything already in `submitted`, so the
-        // message would be marked seen but never delivered.
+        // Not a command: do NOT claim it yet. Claiming (submitted + seen_mark)
+        // before a successful handoff would strand the directive on failure.
         injectable.push(msg)
       }
-      // Inject remaining directives mid-turn as synthetic prompt.
-      // Claim only AFTER a successful injection; on failure the message
-      // stays unclaimed and is retried next poll and, at the latest,
-      // delivered by the turn-start hook (experimental.chat.system.transform).
-      if (injectable.length > 0) {
-        const lines = injectable.map((m: any) =>
-          `Directive ${m.id} from ${m.from}:\n${m.text}`)
-        try {
-          const res = await client.session.promptAsync({
-            path: { id: currentSessionID },
-            body: {
-              parts: [{
-                type: 'text', synthetic: true,
-                text: [
-                  '--- fleet directives (from other ships via comms) ---',
-                  'Process each directive and carry out the requested action.',
-                  '',
-                  ...lines,
-                  '--- end fleet directives ---',
-                ].join('\n'),
-              }],
-            },
-          })
-          if (res && !(res as any).error) {
-            for (const m of injectable) {
-              submitted.add(m.id)
-              bus({ cmd: "seen_mark", id: m.id })
-            }
-          } else {
-            // Stale/foreign session id — drop the cache so the next poll
-            // re-resolves (e.g. after the user switched to another session).
-            currentSessionID = ''
+
+      if (injectable.length === 0) return
+
+      const targetSid = await resolveSessionId()
+      const ids = injectable.map((m: any) => m.id).join(',')
+      if (!targetSid) {
+        tickLog(`handoff-skip ship=${aid()} sid=<missing|ambiguous> ids=[${ids}] reason=no-unique-ship-session`)
+        return
+      }
+
+      const lines = injectable.map((m: any) =>
+        `Directive ${m.id} from ${m.from}:\n${m.text}`)
+      tickLog(`handoff-prompt ship=${aid()} sid=${targetSid} ids=[${ids}] calling=promptAsync`)
+      try {
+        const res = await client.session.promptAsync({
+          path: { id: targetSid },
+          body: {
+            parts: [{
+              type: 'text', synthetic: true,
+              text: [
+                '--- fleet directives (from other ships via comms) ---',
+                'Process each directive and carry out the requested action.',
+                '',
+                ...lines,
+                '--- end fleet directives ---',
+              ].join('\n'),
+            }],
+          },
+        })
+        const resErr = res && (res as any).error
+        if (!resErr) {
+          for (const m of injectable) {
+            submitted.add(m.id)
+            const sr = bus({ cmd: 'seen_mark', id: m.id })
+            tickLog(`handoff-ok ship=${aid()} sid=${targetSid} id=${m.id} seen=${!!sr?.ok} prompt=${JSON.stringify(res).slice(0, 120)}`)
           }
-        } catch { currentSessionID = '' }
+        } else {
+          tickLog(`handoff-fail ship=${aid()} sid=${targetSid} ids=[${ids}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
+          // Treat as unresolved handoff: keep retry-fähig, but drop possibly stale session cache.
+          currentSessionID = ''
+        }
+      } catch (e) {
+        tickLog(`handoff-exception ship=${aid()} sid=${targetSid} ids=[${ids}] error=${String(e).slice(0, 200)}`)
+        currentSessionID = ''
       }
     } finally {
       pollRunning = false
@@ -826,21 +882,32 @@ const logPollTimer = setInterval(async () => {
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
-      // Fetch inbox and inject new directives (skip commands — handled in poll).
+      // Fetch inbox and inject new directives. In this hook we are inside the
+      // current turn's system prompt construction for input.sessionID/currentSessionID;
+      // injecting here hands directives to that session/turn. Mark submitted/seen
+      // only for directives actually injected (or commands executed) in this
+      // confirmed session context so they remain retry-fähig if not handed off.
       const lines: string[] = []
       const r = bus({ cmd: 'inbox' })
-      const pendingMsgs = [...bootBacklog, ...(r.messages || [])]
+      const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
+      const pendingMsgs = [...boot, ...(r.messages || []).filter((m: any) => !submitted.has(m.id))]
+      if ((r.messages || []).length > 0 || boot.length > 0) {
+        tickLog(`inbox-transform ship=${aid()} sid=${currentSessionID || '-'} inbox=[${(r.messages || []).map((m: any) => m.id).join(',')}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
+      }
+      const handoffSid = currentSessionID
       for (const msg of pendingMsgs) {
         if (submitted.has(msg.id)) continue
-        // handleMessage: type=command → execute, type=ship/user/control → false (inject)
-        if (currentSessionID && await handleMessage(msg, client, currentSessionID)) {
-          // Command executed successfully, acknowledge it
-          bus({ cmd: 'seen_mark', id: msg.id })
+        if (handoffSid && await handleMessage(msg, client, handoffSid)) {
+          const sr = bus({ cmd: 'seen_mark', id: msg.id })
           submitted.add(msg.id)
+          tickLog(`handoff-transform-command ship=${aid()} sid=${handoffSid} id=${msg.id} seen=${!!sr?.ok}`)
           continue
         }
-        // Not a command: inject as directive
+        // Non-command directive: hand off by injecting into this turn's system prompt.
         lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
+        submitted.add(msg.id)
+        const sr = bus({ cmd: 'seen_mark', id: msg.id })
+        tickLog(`handoff-transform ship=${aid()} sid=${handoffSid || '-'} id=${msg.id} seen=${!!sr?.ok} mode=system-inject`)
       }
       if (lines.length > 0) {
         output.system.push(

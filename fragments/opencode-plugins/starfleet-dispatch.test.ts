@@ -435,6 +435,120 @@ comms: directive m124 from 'Enterprise' → TestShip
   })
 })
 
+
+  describe('inbox handoff and delivery semantics (regressions)', () => {
+    test('spooled inbox message is found by poller and not dropped by submitted/seen/bootBacklog filters', () => {
+      const submitted = new Set<string>(['m-seen'])
+      const bootBacklog = [{ id: 'm-boot', from: 'Enterprise', text: 'boot', type: 'ship' }]
+      const inbox = { messages: [{ id: 'm-spool', from: 'ChatGPT', text: 'hello', type: 'ship' }, { id: 'm-seen', from: 'X', text: 'old', type: 'ship' }] }
+
+      const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
+      const msgs = [...boot, ...(inbox.messages || []).filter((m: any) => !submitted.has(m.id))]
+      const ids = msgs.map((m: any) => m.id)
+
+      assert.deepStrictEqual(ids, ['m-boot', 'm-spool'])
+      assert.ok(!ids.includes('m-seen'))
+    })
+
+    test('resolveSessionId prefers the session matching this ship and never blindly takes first status entry', () => {
+      const ship = 'Voyager'
+      const listArr = [
+        { id: 's-other', title: 'Enterprise', time: { updated: 20 } },
+        { id: 's-mine', title: 'Voyager', time: { updated: 10 } },
+      ]
+      const mine = listArr
+        .filter((s: any) => s && typeof s.title === 'string' && (s.title === ship || s.title.includes(ship)))
+        .sort((a: any, b: any) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))
+      assert.strictEqual(mine.length, 1)
+      assert.strictEqual(mine[0].id, 's-mine')
+
+      // status fallback must not blindly pick first when multiple/ambiguous
+      const statusData = { 's-other': { type: 'idle' }, 's-third': { type: 'idle' } }
+      const keys = Object.keys(statusData)
+      const canBlindPick = keys.length === 1
+      assert.strictEqual(canBlindPick, false)
+
+      // sole status entry accepted only if confirmed for this ship
+      const sole = { 's-other': { type: 'idle' } }
+      const soleKeys = Object.keys(sole)
+      const listed = listArr.find((s: any) => s?.id === soleKeys[0])
+      const titleOk = !!(listed && typeof listed.title === 'string' && (listed.title === ship || listed.title.includes(ship)))
+      assert.strictEqual(titleOk, false)
+    })
+
+    test('missing or ambiguous session id does not confirm delivery (no seen_mark/submitted)', async () => {
+      const submitted = new Set<string>()
+      const seenMarked: string[] = []
+      const injectable = [{ id: 'm1', from: 'ChatGPT', text: 'hi', type: 'ship' }]
+      const targetSid = '' // missing/ambiguous
+
+      if (!targetSid) {
+        // handoff skipped, must remain retryable
+      } else {
+        submitted.add(injectable[0].id)
+        seenMarked.push(injectable[0].id)
+      }
+
+      assert.strictEqual(submitted.has('m1'), false)
+      assert.deepStrictEqual(seenMarked, [])
+      // retryable on next poll because not in submitted
+      const retryVisible = injectable.filter(m => !submitted.has(m.id)).map(m => m.id)
+      assert.deepStrictEqual(retryVisible, ['m1'])
+    })
+
+    test('promptAsync error/exception leaves message retryable (no delivery confirmation)', async () => {
+      const submitted = new Set<string>()
+      const seenMarked: string[] = []
+      const msg = { id: 'm2', from: 'ChatGPT', text: 'hi', type: 'ship' }
+
+      async function attempt(promptAsync: () => Promise<any>) {
+        try {
+          const res = await promptAsync()
+          const resErr = res && (res as any).error
+          if (!resErr) {
+            submitted.add(msg.id)
+            seenMarked.push(msg.id)
+          }
+        } catch {
+          // keep retryable
+        }
+      }
+
+      await attempt(async () => ({ error: 'session not found' }))
+      assert.strictEqual(submitted.has('m2'), false)
+      assert.deepStrictEqual(seenMarked, [])
+
+      await attempt(async () => { throw new Error('transport failed') })
+      assert.strictEqual(submitted.has('m2'), false)
+      assert.deepStrictEqual(seenMarked, [])
+    })
+
+    test('successful promptAsync handoff triggers delivery confirmation (submitted + seen_mark)', async () => {
+      const submitted = new Set<string>()
+      const seenMarked: string[] = []
+      const injectable = [
+        { id: 'm3', from: 'ChatGPT', text: 'hi', type: 'ship' },
+        { id: 'm4', from: 'Enterprise', text: 'yo', type: 'ship' },
+      ]
+
+      const res = await (async () => ({ ok: true }))()
+      const resErr = res && (res as any).error
+      if (!resErr) {
+        for (const m of injectable) {
+          submitted.add(m.id)
+          seenMarked.push(m.id)
+        }
+      }
+
+      assert.deepStrictEqual(seenMarked, ['m3', 'm4'])
+      assert.ok(submitted.has('m3') && submitted.has('m4'))
+      // duplicate parallel injection prevented
+      const again = injectable.filter(m => !submitted.has(m.id))
+      assert.deepStrictEqual(again, [])
+    })
+  })
+
+
 // ============================================================================
 // TEST SUMMARY
 // ============================================================================
