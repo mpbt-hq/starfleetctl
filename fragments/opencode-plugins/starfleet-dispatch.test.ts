@@ -7,30 +7,6 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
-// Mirrors sessionIdFromArgv() from starfleet-dispatch.ts (pure, no side effects).
-function sessionIdFromArgv(argv: string[]): string {
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    let v = ''
-    if (a === '--session' || a === '-s') v = argv[i + 1] || ''
-    else if (a.startsWith('--session=')) v = a.slice('--session='.length)
-    else continue
-    if (/^ses_[A-Za-z0-9]+$/.test(v)) return v
-  }
-  return ''
-}
-
-// Mirrors sessionIdFromFile() from starfleet-dispatch.ts.
-function sessionIdFromFile(root: string, ship: string): string {
-  try {
-    const v = readFileSync(`${root}/.starfleet-ai/var/ships/${ship}.session`, 'utf8').trim()
-    return /^ses_[A-Za-z0-9]+$/.test(v) ? v : ''
-  } catch { return '' }
-}
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
@@ -518,36 +494,28 @@ comms: directive m124 from 'Enterprise' → TestShip
       assert.strictEqual(mine.length, 2) // ambiguous globally
       assert.strictEqual(resolveSessionId(), 'ses-active-voyager') // still the authoritative active one
 
-      // At process start (before any hook) the id is seeded from the launcher's
-      // `--session` argument, so a restarted ship can deliver immediately.
-      currentSessionID = sessionIdFromArgv(['opencode', '--model', 'cruiser', '--session', 'ses_booted123'])
-      assert.strictEqual(currentSessionID, 'ses_booted123')
-
-      // Without a --session argument (fresh ship) there is still no known id.
-      currentSessionID = sessionIdFromArgv(['opencode', '--prompt', 'hi'])
+      // Before first turn/hook no authoritative id is known -> must not guess or deliver.
+      currentSessionID = ''
       const beforeTurn = () => currentSessionID
       assert.strictEqual(beforeTurn(), '')
     })
 
-    test('sessionIdFromFile reads the launcher-recorded id and rejects garbage', () => {
-      const root = mkdtempSync(join(tmpdir(), 'sf-session-'))
-      const dir = join(root, '.starfleet-ai', 'var', 'ships')
-      mkdirSync(dir, { recursive: true })
-      writeFileSync(join(dir, 'Voyager.session'), 'ses_fromfile123\n')
-      assert.strictEqual(sessionIdFromFile(root, 'Voyager'), 'ses_fromfile123')
-      assert.strictEqual(sessionIdFromFile(root, 'Other'), '')
-      writeFileSync(join(dir, 'Broken.session'), 'not-a-session\n')
-      assert.strictEqual(sessionIdFromFile(root, 'Broken'), '')
+    test('handoff failure keeps the hook-provided session id (ids change, never persist, never drop)', () => {
+      // opencode rotates session ids; the id is learned from hooks and must
+      // survive a failed promptAsync attempt, otherwise every later message is
+      // stuck at reason=no-unique-ship-session until some unrelated turn runs.
+      let currentSessionID = 'ses_live1'
+      const onHandoffFail = () => { /* intentionally keeps currentSessionID */ }
+      onHandoffFail()
+      assert.strictEqual(currentSessionID, 'ses_live1')
+
+      // A rotated session is picked up when the next hook reports a new id.
+      const onChatHook = (sid: string) => { if (sid && sid !== currentSessionID) currentSessionID = sid }
+      onChatHook('ses_live2')
+      assert.strictEqual(currentSessionID, 'ses_live2')
     })
 
-    test('sessionIdFromArgv parses --session, -s and --session= forms only when well-formed', () => {
-      assert.strictEqual(sessionIdFromArgv(['opencode', '--session', 'ses_abc123']), 'ses_abc123')
-      assert.strictEqual(sessionIdFromArgv(['opencode', '-s', 'ses_abc123']), 'ses_abc123')
-      assert.strictEqual(sessionIdFromArgv(['opencode', '--session=ses_abc123']), 'ses_abc123')
-      assert.strictEqual(sessionIdFromArgv(['opencode', '--session', 'not-a-session']), '')
-      assert.strictEqual(sessionIdFromArgv(['opencode', '--session']), '')
-      assert.strictEqual(sessionIdFromArgv([]), '')
-    })
+
 
     test('missing or ambiguous session id does not confirm delivery (no seen_mark/submitted)', async () => {
       const submitted = new Set<string>()

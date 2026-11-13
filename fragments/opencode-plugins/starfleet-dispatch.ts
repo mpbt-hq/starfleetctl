@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.13'
+const PLUGIN_VERSION = '2.5.14'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -15,41 +15,8 @@ const PLUGIN_VERSION = '2.5.13'
 const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 
 const ROOT = process.cwd()
-
-// The ship launcher always resumes a concrete opencode session and records its
-// id in .starfleet-ai/var/ships/<ship>.session (see recordShipSession() in
-// internal/session/launch.go). That id is authoritative for THIS process and is
-// available from process start — long before the first chat hook fires. Seed the
-// session cache from it so the poll path can deliver inbox directives/messages
-// immediately after a restart. Without this, delivery is skipped
-// (reason=no-unique-ship-session) until some turn happens to start and provides
-// the id via a chat hook.
-//
-// The `--session` argv form is only a fallback: opencode may host plugins in a
-// runtime whose process.argv does not carry the launcher args (measured: argv
-// seed alone did not fire in a running ship, the recorded file is authoritative).
-export function sessionIdFromArgv(argv: string[]): string {
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    let v = ''
-    if (a === '--session' || a === '-s') v = argv[i + 1] || ''
-    else if (a.startsWith('--session=')) v = a.slice('--session='.length)
-    else continue
-    if (/^ses_[A-Za-z0-9]+$/.test(v)) return v
-  }
-  return ''
-}
-
-function sessionIdFromFile(root: string, ship: string): string {
-  try {
-    const v = readFileSync(`${root}/.starfleet-ai/var/ships/${ship}.session`, 'utf8').trim()
-    return /^ses_[A-Za-z0-9]+$/.test(v) ? v : ''
-  } catch { return '' }
-}
-
 
 // Generic JSON-RPC to starfleetctl comms dispatch.
 // JSON in via stdin → JSON out. No shell escaping, no text parsing.
@@ -183,7 +150,7 @@ export const plugin = async ({ client, $ }: any) => {
   const bootBacklog: any[] = [] // directives pending at start (acked by init) — must be delivered, not dropped
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
-  let currentSessionID = sessionIdFromArgv(process.argv) || sessionIdFromFile(ROOT, aid())
+  let currentSessionID = ''
   let currentTask = ''
   const hasSwitchedToFallback = { v: false }
 
@@ -679,7 +646,6 @@ const logPollTimer = setInterval(async () => {
 
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
-  if (currentSessionID) tickLog(`session-init ship=${aid()} sid=${currentSessionID} source=${sessionIdFromFile(ROOT, aid()) ? 'file' : 'argv'}`)
   for (const id of (init.seen || [])) { submitted.add(id) }
   // DoInit acks the whole unread inbox and returns it in `messages`; it must
   // still be DELIVERED (the agent never saw it), otherwise every directive
@@ -710,10 +676,9 @@ const logPollTimer = setInterval(async () => {
   // We do NOT pick from session.list()/session.status() by title when multiple
   // sessions exist or when the active id is unknown: that cannot prove which
   // session is the active one for this process and caused ambiguous-resolution
-  // skips. Before the first turn/hook (startup) the id is seeded from the
-  // launcher's `--session` argument (sessionIdFromArgv), which names exactly the
-  // session this process runs; the hooks then keep it current (e.g. after
-  // /clear within a long-lived process).
+  // skips. opencode session ids change over time, so the id is learned ONLY
+  // from chat hooks/events and never persisted; before the first hook nothing
+  // is delivered (the launcher's initial --prompt turn provides it right away).
   const resolveSessionId = async (): Promise<string> => {
     if (currentSessionID) return currentSessionID
     const ship = aid()
@@ -794,12 +759,14 @@ const logPollTimer = setInterval(async () => {
           }
         } else {
           tickLog(`handoff-fail ship=${aid()} sid=${targetSid} ids=[${ids}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
-          // Treat as unresolved handoff: keep retry-fähig, but drop possibly stale session cache.
-          currentSessionID = ''
+          // Keep the known id: opencode session ids change over time, so the
+          // id is only ever learned from chat hooks (never persisted). Dropping
+          // it here made every message undeliverable until the next turn
+          // (handoff-skip reason=no-unique-ship-session). Retries reuse it; a
+          // rotated session is picked up by the next hook.
         }
       } catch (e) {
         tickLog(`handoff-exception ship=${aid()} sid=${targetSid} ids=[${ids}] error=${String(e).slice(0, 200)}`)
-        currentSessionID = ''
       }
     } finally {
       pollRunning = false

@@ -162,7 +162,6 @@ func RunCmd(root string, args []string) int {
 			fmt.Fprintf(os.Stderr, "run: warning: session lookup failed: %v\n", err)
 		}
 	}
-	recordShipSession(root, shipID, sessionID)
 
 	// Load instructions
 	instructionsPath := filepath.Join(root, ".starfleet-ai", "var", "sop.d", "index.md")
