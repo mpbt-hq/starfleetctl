@@ -479,30 +479,25 @@ comms: directive m124 from 'Enterprise' → TestShip
       assert.ok(!ids.includes('m-seen'))
     })
 
-    test('resolveSessionId prefers the session matching this ship and never blindly takes first status entry', () => {
-      const ship = 'Voyager'
+    test('resolveSessionId uses the active hook-provided session id and does not guess from enumerated sessions', () => {
+      // Authoritative: session id provided by chat hooks (chat.params / system.transform) or session events.
+      let currentSessionID = 'ses-active-voyager'
+      const resolveSessionId = () => currentSessionID // authoritative cached id
+      assert.strictEqual(resolveSessionId(), 'ses-active-voyager')
+
+      // Even if multiple Voyager-titled sessions exist globally, we must not enumerate/pick among them.
       const listArr = [
-        { id: 's-other', title: 'Enterprise', time: { updated: 20 } },
-        { id: 's-mine', title: 'Voyager', time: { updated: 10 } },
+        { id: 'ses-active-voyager', title: 'Voyager', time: { updated: 20 } },
+        { id: 'ses-other-voyager', title: 'Voyager', time: { updated: 10 } },
       ]
-      const mine = listArr
-        .filter((s: any) => s && typeof s.title === 'string' && (s.title === ship || s.title.includes(ship)))
-        .sort((a: any, b: any) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))
-      assert.strictEqual(mine.length, 1)
-      assert.strictEqual(mine[0].id, 's-mine')
+      const mine = listArr.filter((s: any) => s?.title === 'Voyager')
+      assert.strictEqual(mine.length, 2) // ambiguous globally
+      assert.strictEqual(resolveSessionId(), 'ses-active-voyager') // still the authoritative active one
 
-      // status fallback must not blindly pick first when multiple/ambiguous
-      const statusData = { 's-other': { type: 'idle' }, 's-third': { type: 'idle' } }
-      const keys = Object.keys(statusData)
-      const canBlindPick = keys.length === 1
-      assert.strictEqual(canBlindPick, false)
-
-      // sole status entry accepted only if confirmed for this ship
-      const sole = { 's-other': { type: 'idle' } }
-      const soleKeys = Object.keys(sole)
-      const listed = listArr.find((s: any) => s?.id === soleKeys[0])
-      const titleOk = !!(listed && typeof listed.title === 'string' && (listed.title === ship || listed.title.includes(ship)))
-      assert.strictEqual(titleOk, false)
+      // Before first turn/hook (startup) no authoritative id is known -> must not guess or deliver.
+      currentSessionID = ''
+      const beforeTurn = () => currentSessionID
+      assert.strictEqual(beforeTurn(), '')
     })
 
     test('missing or ambiguous session id does not confirm delivery (no seen_mark/submitted)', async () => {

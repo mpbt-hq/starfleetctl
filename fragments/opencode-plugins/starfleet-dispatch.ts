@@ -659,92 +659,31 @@ const logPollTimer = setInterval(async () => {
     if (!tuiReady) {
       tuiReady = true
       appLog('info', 'active (fallback)')
-      resolveSessionId().then(() => {
-        if (currentModel.model) {
-          bus({ cmd: 'health', ...currentModel })
-        }
-      })
+      if (currentSessionID && currentModel.model) {
+        bus({ cmd: 'health', ...currentModel })
+      }
     }
   }, 3000)
 
-  // Resolve the active session ID for THIS ship only.
-  // Prefer an explicitly known session id (set by chat hooks / session events),
-  // then match the ship via session.list() titles. session.status() is used only
-  // as a last resort and never by blindly taking the first entry: it is accepted
-  // only when it yields exactly one session that can be corroborated as this
-  // ship's session (or is unambiguously the sole session). On missing/ambiguous
-  // resolution we return '' and log diagnostics; callers must not mark messages
-  // delivered in that case.
+  // Resolve the active session ID for THIS ship.
+  //
+  // Authoritative source: the session id observed from opencode chat lifecycle
+  // hooks/events for the currently executing ship session (chat.params and
+  // experimental.chat.system.transform provide input.sessionID per turn; session
+  // events may provide it at startup). We cache it in currentSessionID and reuse
+  // it for polling/handoff so promptAsync targets the session actually running
+  // this ship, without enumerating/guessing across global sessions.
+  //
+  // We do NOT pick from session.list()/session.status() by title when multiple
+  // sessions exist or when the active id is unknown: that cannot prove which
+  // session is the active one for this process and caused ambiguous-resolution
+  // skips. Before the first turn/hook (startup) there may be no known id yet;
+  // poll must not deliver in that case (transform will inject on the turn once
+  // input.sessionID is available).
   const resolveSessionId = async (): Promise<string> => {
     if (currentSessionID) return currentSessionID
     const ship = aid()
-
-    let listArr: any[] = []
-    let listErr = ''
-    try {
-      const lr: any = await client.session.list()
-      listArr = Array.isArray(lr) ? lr : ((lr as any)?.data ?? (lr as any)?.body ?? [])
-      if (!Array.isArray(listArr)) listArr = []
-    } catch (e) {
-      listErr = String(e).slice(0, 120)
-    }
-
-    const mine = ship && Array.isArray(listArr)
-      ? listArr
-          .filter((s: any) => s && typeof s.title === 'string' &&
-            (s.title === ship || s.title.includes(ship)))
-          .sort((a: any, b: any) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))
-      : []
-    if (mine.length === 1 && mine[0]?.id) {
-      currentSessionID = mine[0].id
-      tickLog(`session-resolve ship=${ship}: matched list id=${currentSessionID}`)
-      return currentSessionID
-    }
-    if (mine.length > 1) {
-      tickLog(`session-resolve ship=${ship}: ambiguous list matches=${mine.map((s: any) => s?.id).filter(Boolean).join(',')}`)
-      return ''
-    }
-
-    let statusErr = ''
-    try {
-      const st = await client.session.status()
-      const stBody = st?.body ?? st
-      if (stBody && typeof stBody === 'object') {
-        const stData = (stBody as any).data ?? stBody
-        const keys = Object.keys(stData || {})
-        if (keys.length === 1) {
-          const sid = keys[0]
-          const listed = Array.isArray(listArr) ? listArr.find((s: any) => s?.id === sid) : null
-          const titleOk = listed && typeof listed.title === 'string' &&
-            (listed.title === ship || listed.title.includes(ship))
-          // Accept the sole status session only when the session list confirms
-          // it belongs to this ship, or when the list is unavailable/empty so we
-          // cannot contradict it (but never when the list shows other sessions).
-          const listHasOthers = Array.isArray(listArr) && listArr.some((s: any) => s?.id && s.id !== sid)
-          if (titleOk || ((!listed || listArr.length === 0) && !listHasOthers)) {
-            currentSessionID = sid
-            const stEntry = stData[sid]
-            if (!currentModel.model) {
-              if (stEntry?.model) currentModel.model = stEntry.model
-              if (stEntry?.modelID) currentModel.model = stEntry.modelID
-              if (stEntry?.providerID) currentModel.server = stEntry.providerID
-            }
-            tickLog(`session-resolve ship=${ship}: status fallback id=${sid} titleOk=${!!titleOk} listLen=${listArr.length}`)
-            return currentSessionID
-          }
-          tickLog(`session-resolve ship=${ship}: rejected status id=${sid} (not confirmed for ship, listed=${listed ? listed.title || '?' : 'none'})`)
-          return ''
-        }
-        if (keys.length > 1) {
-          tickLog(`session-resolve ship=${ship}: ambiguous status keys=${keys.join(',')}`)
-          return ''
-        }
-      }
-    } catch (e) {
-      statusErr = String(e).slice(0, 120)
-    }
-
-    tickLog(`session-resolve ship=${ship}: no session (listErr=${listErr || '-'} statusErr=${statusErr || '-'} listLen=${listArr.length})`)
+    tickLog(`session-resolve ship=${ship}: no active session id (awaiting chat hook/session event)`)
     return ''
   }
 
