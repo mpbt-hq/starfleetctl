@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.11'
+const PLUGIN_VERSION = '2.5.12'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -17,6 +17,25 @@ const APP_LOG_ENABLED = false
 import { execSync } from 'node:child_process'
 
 const ROOT = process.cwd()
+
+// The ship launcher always resumes a concrete opencode session by passing
+// `--session <id>` on the command line (see internal/session/launch.go). That
+// id is authoritative for THIS process and is available from process start —
+// long before the first chat hook fires. Seed the session cache from it so the
+// poll path can deliver inbox directives/messages immediately after a restart.
+// Without this, delivery is skipped (reason=no-unique-ship-session) until some
+// turn happens to start and provides the id via a chat hook.
+export function sessionIdFromArgv(argv: string[]): string {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    let v = ''
+    if (a === '--session' || a === '-s') v = argv[i + 1] || ''
+    else if (a.startsWith('--session=')) v = a.slice('--session='.length)
+    else continue
+    if (/^ses_[A-Za-z0-9]+$/.test(v)) return v
+  }
+  return ''
+}
 
 
 // Generic JSON-RPC to starfleetctl comms dispatch.
@@ -151,7 +170,7 @@ export const plugin = async ({ client, $ }: any) => {
   const bootBacklog: any[] = [] // directives pending at start (acked by init) — must be delivered, not dropped
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
-  let currentSessionID = ''
+  let currentSessionID = sessionIdFromArgv(process.argv)
   let currentTask = ''
   const hasSwitchedToFallback = { v: false }
 
@@ -647,6 +666,7 @@ const logPollTimer = setInterval(async () => {
 
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
+  if (currentSessionID) tickLog(`session-init ship=${aid()} sid=${currentSessionID} source=argv`)
   for (const id of (init.seen || [])) { submitted.add(id) }
   // DoInit acks the whole unread inbox and returns it in `messages`; it must
   // still be DELIVERED (the agent never saw it), otherwise every directive
@@ -677,9 +697,10 @@ const logPollTimer = setInterval(async () => {
   // We do NOT pick from session.list()/session.status() by title when multiple
   // sessions exist or when the active id is unknown: that cannot prove which
   // session is the active one for this process and caused ambiguous-resolution
-  // skips. Before the first turn/hook (startup) there may be no known id yet;
-  // poll must not deliver in that case (transform will inject on the turn once
-  // input.sessionID is available).
+  // skips. Before the first turn/hook (startup) the id is seeded from the
+  // launcher's `--session` argument (sessionIdFromArgv), which names exactly the
+  // session this process runs; the hooks then keep it current (e.g. after
+  // /clear within a long-lived process).
   const resolveSessionId = async (): Promise<string> => {
     if (currentSessionID) return currentSessionID
     const ship = aid()

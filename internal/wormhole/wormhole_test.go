@@ -4446,7 +4446,6 @@ func TestStatusRecordWithoutPIDIsNotActive(t *testing.T) {
 	}
 }
 
-
 func TestParseTolerantEnvelopeFormats(t *testing.T) {
 	canonical := "---\n" +
 		"id: w0-tol-canon\n" +

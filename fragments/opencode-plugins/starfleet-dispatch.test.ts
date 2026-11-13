@@ -8,6 +8,19 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
 
+// Mirrors sessionIdFromArgv() from starfleet-dispatch.ts (pure, no side effects).
+function sessionIdFromArgv(argv: string[]): string {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    let v = ''
+    if (a === '--session' || a === '-s') v = argv[i + 1] || ''
+    else if (a.startsWith('--session=')) v = a.slice('--session='.length)
+    else continue
+    if (/^ses_[A-Za-z0-9]+$/.test(v)) return v
+  }
+  return ''
+}
+
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
 // ============================================================================
@@ -494,10 +507,24 @@ comms: directive m124 from 'Enterprise' → TestShip
       assert.strictEqual(mine.length, 2) // ambiguous globally
       assert.strictEqual(resolveSessionId(), 'ses-active-voyager') // still the authoritative active one
 
-      // Before first turn/hook (startup) no authoritative id is known -> must not guess or deliver.
-      currentSessionID = ''
+      // At process start (before any hook) the id is seeded from the launcher's
+      // `--session` argument, so a restarted ship can deliver immediately.
+      currentSessionID = sessionIdFromArgv(['opencode', '--model', 'cruiser', '--session', 'ses_booted123'])
+      assert.strictEqual(currentSessionID, 'ses_booted123')
+
+      // Without a --session argument (fresh ship) there is still no known id.
+      currentSessionID = sessionIdFromArgv(['opencode', '--prompt', 'hi'])
       const beforeTurn = () => currentSessionID
       assert.strictEqual(beforeTurn(), '')
+    })
+
+    test('sessionIdFromArgv parses --session, -s and --session= forms only when well-formed', () => {
+      assert.strictEqual(sessionIdFromArgv(['opencode', '--session', 'ses_abc123']), 'ses_abc123')
+      assert.strictEqual(sessionIdFromArgv(['opencode', '-s', 'ses_abc123']), 'ses_abc123')
+      assert.strictEqual(sessionIdFromArgv(['opencode', '--session=ses_abc123']), 'ses_abc123')
+      assert.strictEqual(sessionIdFromArgv(['opencode', '--session', 'not-a-session']), '')
+      assert.strictEqual(sessionIdFromArgv(['opencode', '--session']), '')
+      assert.strictEqual(sessionIdFromArgv([]), '')
     })
 
     test('missing or ambiguous session id does not confirm delivery (no seen_mark/submitted)', async () => {
