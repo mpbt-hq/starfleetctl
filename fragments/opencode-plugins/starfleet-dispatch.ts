@@ -267,9 +267,12 @@ export const plugin = async ({ client, $ }: any) => {
 
     switch (msg.type || 'ship') {
       // --- directives: inject as system prompt ---
+      // External/wormhole imports arrive as type "message" and must be treated
+      // as normal injectable directives (never as unknown/already-handled).
       case 'ship':
       case 'user':
-      case 'control': {
+      case 'control':
+      case 'message': {
         // Auto-report: task-commission directives reference the dashboard
         // topic ("(Dashboard-Topic `slug`)"). Adopt it as the current task so
         // the fleet can see what this ship is working on right now.
@@ -438,10 +441,10 @@ export const plugin = async ({ client, $ }: any) => {
         }
       }
 
-      // --- unknown type: log and don't inject ---
+      // --- unknown type: do NOT claim as delivered; leave retry-fähig ---
       default: {
-        tickLog(`unknown message type=${msg.type} from=${msg.from}`)
-        return true
+        tickLog(`unknown message type=${msg.type} from=${msg.from} id=${msg.id} (not delivered)`)
+        return false
       }
     }
   }
@@ -883,11 +886,11 @@ const logPollTimer = setInterval(async () => {
       }
 
       // Fetch inbox and inject new directives. In this hook we are inside the
-      // current turn's system prompt construction for input.sessionID/currentSessionID;
-      // injecting here hands directives to that session/turn. Mark submitted/seen
-      // only for directives actually injected (or commands executed) in this
-      // confirmed session context so they remain retry-fähig if not handed off.
-      const lines: string[] = []
+      // current turn's system prompt construction for the active session/turn;
+      // appending to output.system injects directives into that turn's model
+      // context. Mark submitted/seen only AFTER a directive is actually injected
+      // (or a command executed) in this confirmed session context, so messages
+      // remain retry-fähig if injection is not possible.
       const r = bus({ cmd: 'inbox' })
       const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
       const pendingMsgs = [...boot, ...(r.messages || []).filter((m: any) => !submitted.has(m.id))]
@@ -895,21 +898,33 @@ const logPollTimer = setInterval(async () => {
         tickLog(`inbox-transform ship=${aid()} sid=${currentSessionID || '-'} inbox=[${(r.messages || []).map((m: any) => m.id).join(',')}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
       }
       const handoffSid = currentSessionID
+      const toInject: any[] = []
       for (const msg of pendingMsgs) {
         if (submitted.has(msg.id)) continue
-        if (handoffSid && await handleMessage(msg, client, handoffSid)) {
+        const handled = handoffSid ? await handleMessage(msg, client, handoffSid) : false
+        if (handled) {
+          // Real command executed/accepted in the confirmed session context.
           const sr = bus({ cmd: 'seen_mark', id: msg.id })
           submitted.add(msg.id)
           tickLog(`handoff-transform-command ship=${aid()} sid=${handoffSid} id=${msg.id} seen=${!!sr?.ok}`)
           continue
         }
-        // Non-command directive: hand off by injecting into this turn's system prompt.
-        lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
-        submitted.add(msg.id)
-        const sr = bus({ cmd: 'seen_mark', id: msg.id })
-        tickLog(`handoff-transform ship=${aid()} sid=${handoffSid || '-'} id=${msg.id} seen=${!!sr?.ok} mode=system-inject`)
+        // Injectable directive (ship/user/control/message or unknown): inject only
+        // when we have a confirmed session context for this turn.
+        if (!handoffSid) {
+          tickLog(`handoff-transform-skip ship=${aid()} sid=<missing> id=${msg.id} reason=no-session-context`)
+          continue
+        }
+        toInject.push(msg)
       }
-      if (lines.length > 0) {
+      if (toInject.length > 0) {
+        const lines: string[] = []
+        for (const msg of toInject) {
+          lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
+          submitted.add(msg.id)
+          const sr = bus({ cmd: 'seen_mark', id: msg.id })
+          tickLog(`handoff-transform ship=${aid()} sid=${handoffSid} id=${msg.id} seen=${!!sr?.ok} mode=system-inject`)
+        }
         output.system.push(
           '', '--- fleet directives (from other ships via comms) ---',
           'These are directives received from other ships in the fleet.',
