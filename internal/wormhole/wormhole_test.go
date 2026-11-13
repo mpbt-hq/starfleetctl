@@ -979,6 +979,289 @@ func TestReadOnlyMultiCycleImport(t *testing.T) {
 	}
 }
 
+// ---- external sender identity (ChatGPT@pegasus) --------------------------
+
+func TestParseExternalLogicalSenderRoundtrip(t *testing.T) {
+	data := []byte("---\n" +
+		"id: w0-20261113T1010Z-chatgpt-voyager-post-restart\n" +
+		"from: ChatGPT@pegasus\n" +
+		"to: Voyager\n" +
+		"subject: \"Post-restart Comms delivery test\"\n" +
+		"type: message\n" +
+		"created: \"2026-11-13T10:10:00+01:00\"\n" +
+		"---\n" +
+		"hello\n")
+	msg, err := parseMessage(data)
+	if err != nil {
+		t.Fatalf("parse external logical sender: %v", err)
+	}
+	if msg.From != "ChatGPT" {
+		t.Fatalf("canonical from = %q, want ChatGPT", msg.From)
+	}
+	if msg.Sender != "ChatGPT@pegasus" {
+		t.Fatalf("logical sender = %q, want ChatGPT@pegasus", msg.Sender)
+	}
+	if msg.To != "Voyager" {
+		t.Fatalf("to = %q, want Voyager", msg.To)
+	}
+	if msg.ID != "w0-20261113T1010Z-chatgpt-voyager-post-restart" {
+		t.Fatalf("id = %q", msg.ID)
+	}
+
+	out := string(buildMessageBytes(msg))
+	if !strings.Contains(out, "from: ChatGPT\n") {
+		t.Fatalf("canonical envelope from missing: %s", out)
+	}
+	if !strings.Contains(out, "sender: ChatGPT@pegasus") && !strings.Contains(out, "sender: \"ChatGPT@pegasus\"") {
+		t.Fatalf("logical sender not preserved: %s", out)
+	}
+}
+
+func TestCanonicalSenderNormalization(t *testing.T) {
+	cases := []struct {
+		in      string
+		canon   string
+		logical string
+		ok      bool
+	}{
+		{"ChatGPT", "ChatGPT", "", true},
+		{"ChatGPT@pegasus", "ChatGPT", "ChatGPT@pegasus", true},
+		{"alice@peer.example", "alice", "alice@peer.example", true},
+		{"ChatGPT@pegasus@evil", "", "", false},
+		{"@pegasus", "", "", false},
+		{"ChatGPT@", "", "", false},
+		{"../evil", "", "", false},
+		{"", "", "", false},
+	}
+	for _, tc := range cases {
+		canon, logical, err := canonicalSender(tc.in)
+		if tc.ok {
+			if err != nil {
+				t.Fatalf("%q: unexpected error: %v", tc.in, err)
+			}
+			if canon != tc.canon || logical != tc.logical {
+				t.Fatalf("%q: got (%q,%q), want (%q,%q)", tc.in, canon, logical, tc.canon, tc.logical)
+			}
+		} else if err == nil {
+			t.Fatalf("%q: expected error, got (%q,%q)", tc.in, canon, logical)
+		}
+	}
+}
+
+func TestParseRejectsInvalidCanonicalEnvelopeSenders(t *testing.T) {
+	bad := []string{
+		"---\nid: w0-1\nfrom: ChatGPT@pegasus@evil\nto: alpha\n---\nbody\n",
+		"---\nid: w0-2\nfrom: @pegasus\nto: alpha\n---\nbody\n",
+		"---\nid: w0-3\nfrom: ChatGPT@\nto: alpha\n---\nbody\n",
+		"---\nid: w0-4\nfrom: ../evil\nto: alpha\n---\nbody\n",
+		"---\nid: w0-5\nfrom: ChatGPT\nsender: not-an-address\nto: alpha\n---\nbody\n",
+	}
+	for _, data := range bad {
+		if _, err := parseMessage([]byte(data)); err == nil {
+			t.Fatalf("expected parse error for %q", data)
+		}
+	}
+}
+
+func TestImportExternalLogicalSenderPreservesReplyAddress(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+
+	// Ensure the repository checkout exists so the test can place the incoming
+	// message into the correct spool location before the processing cycle runs.
+	if err := sp.RunCycleForShips(bus, nil); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	msgName := "w0-20261113T1010Z-chatgpt-voyager-post-restart.md"
+	raw := []byte("---\n" +
+		"id: w0-20261113T1010Z-chatgpt-voyager-post-restart\n" +
+		"from: ChatGPT@pegasus\n" +
+		"to: alpha\n" +
+		"subject: \"Post-restart Comms delivery test\"\n" +
+		"type: message\n" +
+		"reply_to: \"\"\n" +
+		"created: \"2026-11-13T10:10:00+01:00\"\n" +
+		"---\n" +
+		"hello from ChatGPT\n")
+
+	if err := sp.ensureLayoutLocked("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	newAbs := sp.abs("alpha", maildirNew, msgName)
+	if err := os.WriteFile(newAbs, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sp.RunCycleForShips(bus, []string{"alpha"}); err != nil {
+		t.Fatalf("RunCycleForShips: %v", err)
+	}
+
+	unseenDir := filepath.Join(bus.MsgDir, "alpha", "unseen")
+	entries, err := os.ReadDir(unseenDir)
+	if err != nil {
+		t.Fatalf("read unseen dir: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, rerr := os.ReadFile(filepath.Join(unseenDir, e.Name()))
+		if rerr != nil {
+			continue
+		}
+		var rec struct {
+			From           string `json:"from"`
+			Target         string `json:"target"`
+			Text           string `json:"text"`
+			ExternalSource string `json:"external_source"`
+			ExternalID     string `json:"external_id"`
+		}
+		if jerr := json.Unmarshal(data, &rec); jerr != nil {
+			continue
+		}
+		if rec.ExternalID == "w0-20261113T1010Z-chatgpt-voyager-post-restart" {
+			found = true
+			if rec.From != "ChatGPT@pegasus" {
+				t.Fatalf("logical reply address lost: from=%q want ChatGPT@pegasus", rec.From)
+			}
+			if rec.Target != "alpha" {
+				t.Fatalf("target=%q want alpha", rec.Target)
+			}
+			if rec.ExternalSource != "relay" {
+				t.Fatalf("external_source=%q want relay", rec.ExternalSource)
+			}
+			if !strings.Contains(rec.Text, "from: ChatGPT@pegasus") {
+				t.Fatalf("original payload must be preserved: %q", rec.Text)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("imported external message not found in unseen inbox")
+	}
+	procAbs := sp.abs("alpha", maildirDone, msgName)
+	if _, err := os.Stat(procAbs); err != nil {
+		t.Fatalf("message must be processed, not failed: %v", err)
+	}
+}
+
+func TestPublishRemoteLogicalSenderPreservesDomain(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	confDir := filepath.Join(root, ".starfleet-ai", "conf")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routing := []byte("comms:\n  routing:\n    local_domain: local\n    domains:\n      - domain: pegasus\n        transport: wormhole\n        repository: relay\n      - domain: andromeda\n        transport: wormhole\n        repository: relay\n")
+	if err := os.WriteFile(filepath.Join(confDir, "comms.yaml"), routing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	InstallCommsTransport()
+	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
+	t.Setenv("STARFLEET_SHIP_ID", "Voyager")
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := bus.Tell("ChatGPT@pegasus", "reply via pegasus", "")
+	if err != nil {
+		t.Fatalf("tell ChatGPT@pegasus: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty transport id")
+	}
+
+	newDir := filepath.Join(MaildirRoot(filepath.Join(root, ".starfleet-ai", "var", "wormholes", "relay")), "ChatGPT", "new")
+	entries, err := os.ReadDir(newDir)
+	if err != nil {
+		t.Fatalf("read published new dir: %v (id=%s)", err, id)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 published message, got %d (%v)", len(entries), dirList(newDir))
+	}
+	data, err := os.ReadFile(filepath.Join(newDir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := parseMessage(data)
+	if err != nil {
+		t.Fatalf("parse published envelope: %v", err)
+	}
+	if msg.From != "Voyager" {
+		t.Fatalf("published envelope from=%q want Voyager", msg.From)
+	}
+	if msg.To != "ChatGPT" {
+		t.Fatalf("published envelope to=%q want ChatGPT", msg.To)
+	}
+	if msg.Sender != "" {
+		t.Fatalf("local ship publish must not set logical sender: %q", msg.Sender)
+	}
+	if !strings.Contains(string(data), "reply via pegasus") {
+		t.Fatalf("published body missing: %s", data)
+	}
+
+	// Another external domain must work by the same principle.
+	id2, err := bus.Tell("Alice@andromeda", "reply via andromeda", "")
+	if err != nil {
+		t.Fatalf("tell Alice@andromeda: %v", err)
+	}
+	if id2 == "" {
+		t.Fatal("empty transport id for andromeda")
+	}
+	newDir2 := filepath.Join(MaildirRoot(filepath.Join(root, ".starfleet-ai", "var", "wormholes", "relay")), "Alice", "new")
+	entries2, err := os.ReadDir(newDir2)
+	if err != nil {
+		t.Fatalf("read andromeda new dir: %v", err)
+	}
+	if len(entries2) != 1 {
+		t.Fatalf("expected 1 andromeda message, got %d", len(entries2))
+	}
+}
+
+func TestNormalShipToShipUnchangedWithLogicalSenderSupport(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := bus.Tell("beta", "hello ship", "")
+	if err != nil {
+		t.Fatalf("ship-to-ship tell: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty id")
+	}
+	if n := countFiles(t, filepath.Join(bus.MsgDir, "beta", "unseen")); n != 1 {
+		t.Fatalf("expected 1 local message, got %d", n)
+	}
+
+	msg := NewMessage("alpha", "beta", "ship", "hello", "")
+	if msg.From != "alpha" || msg.To != "beta" || msg.Sender != "" {
+		t.Fatalf("normal message envelope changed: %+v", msg)
+	}
+	out := string(buildMessageBytes(msg))
+	if strings.Contains(out, "sender:") {
+		t.Fatalf("normal ship-to-ship envelope must not contain sender: %s", out)
+	}
+}
+
 // gitOut runs git and returns its output, failing the test on error.
 func gitOut(t *testing.T, args ...string) string {
 	t.Helper()

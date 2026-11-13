@@ -29,8 +29,13 @@ const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
 // Message is a single Wormhole message.
 type Message struct {
-	ID        string    `yaml:"id"`
-	From      string    `yaml:"from"`
+	ID   string `yaml:"id"`
+	From string `yaml:"from"`
+	// Sender is the logical reply/routing address of the sender when it differs
+	// from the canonical envelope sender (e.g. "ChatGPT@pegasus" for an
+	// external counterparty whose envelope sender is "ChatGPT"). It is preserved
+	// through transport so replies can be routed to the originating domain.
+	Sender    string    `yaml:"sender,omitempty"`
 	To        string    `yaml:"to"`
 	Subject   string    `yaml:"subject,omitempty"`
 	Content   string    `yaml:"content,omitempty"`
@@ -53,6 +58,39 @@ func validToken(s string) bool {
 		return false
 	}
 	return tokenRe.MatchString(s)
+}
+
+// domainRe matches a safe logical routing domain label/host component.
+var domainRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// validLogicalAddress reports whether s is a safe logical sender address of the
+// form user@domain. It is used to preserve the external reply/routing address
+// without allowing it as the canonical envelope sender token.
+func validLogicalAddress(s string) bool {
+	user, domain, ok := strings.Cut(s, "@")
+	if !ok || user == "" || domain == "" {
+		return false
+	}
+	// Exactly one domain separator: user@domain only.
+	if strings.Contains(domain, "@") {
+		return false
+	}
+	return validToken(user) && domainRe.MatchString(domain)
+}
+
+// canonicalSender normalizes an external sender address: "user@domain" is split
+// into the canonical envelope sender "user" and the logical reply/routing
+// address "user@domain". A plain token is returned unchanged as the canonical
+// sender with no logical address.
+func canonicalSender(from string) (canonical, logical string, err error) {
+	if validToken(from) {
+		return from, "", nil
+	}
+	if validLogicalAddress(from) {
+		user, _, _ := strings.Cut(from, "@")
+		return user, from, nil
+	}
+	return "", "", fmt.Errorf("invalid or missing sender %q", from)
 }
 
 // newMessageID returns a globally unique, path-safe message identifier.
@@ -99,6 +137,9 @@ func validateMessage(m *Message) error {
 	if !validToken(m.From) {
 		return fmt.Errorf("invalid or missing sender %q", m.From)
 	}
+	if m.Sender != "" && !validLogicalAddress(m.Sender) {
+		return fmt.Errorf("invalid or missing sender %q", m.Sender)
+	}
 	if !validToken(m.To) {
 		return fmt.Errorf("invalid or missing recipient %q", m.To)
 	}
@@ -119,6 +160,9 @@ func buildMessageBytes(m *Message) []byte {
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "id: %s\n", m.ID)
 	fmt.Fprintf(&b, "from: %s\n", m.From)
+	if m.Sender != "" {
+		fmt.Fprintf(&b, "sender: %s\n", yamlScalar(m.Sender))
+	}
 	fmt.Fprintf(&b, "to: %s\n", m.To)
 	if m.Subject != "" {
 		fmt.Fprintf(&b, "subject: %s\n", yamlScalar(m.Subject))
@@ -199,6 +243,19 @@ func parseMessage(data []byte) (*Message, error) {
 	}
 	if m.Content == "" {
 		m.Content = strings.TrimRight(string(body), "\n")
+	}
+	// Normalize an external logical sender address. "ChatGPT@pegasus" is a
+	// valid logical reply address but not a valid canonical envelope sender
+	// token, so split it into the canonical sender ("ChatGPT") while preserving
+	// the full logical address for reply routing. A plain sender token is left
+	// untouched.
+	canonical, logical, serr := canonicalSender(m.From)
+	if serr != nil {
+		return nil, serr
+	}
+	m.From = canonical
+	if logical != "" && m.Sender == "" {
+		m.Sender = logical
 	}
 	if err := validateMessage(m); err != nil {
 		return nil, err

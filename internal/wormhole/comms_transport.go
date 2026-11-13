@@ -64,7 +64,14 @@ func PublishRemoteMessage(root string, route comms.TransportRoute, msg comms.Out
 	cloneTimeout, _ := time.ParseDuration(cfg.Sync.CloneTimeout)
 	commandTimeout, _ := time.ParseDuration(cfg.Sync.CommandTimeout)
 	sp := newSpool(root, *repo, cfg.Sync.PushRetries, msg.From, cloneTimeout, commandTimeout)
-	wm := NewMessage(msg.From, msg.Target, msg.Type, msg.Text, msg.ReplyTo)
+	canonicalFrom, logicalSender, serr := canonicalSender(msg.From)
+	if serr != nil {
+		return "", serr
+	}
+	wm := NewMessage(canonicalFrom, msg.Target, msg.Type, msg.Text, msg.ReplyTo)
+	if logicalSender != "" {
+		wm.Sender = logicalSender
+	}
 	if err := sp.Publish(wm); err != nil {
 		return "", err
 	}

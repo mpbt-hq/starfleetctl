@@ -562,6 +562,8 @@ func (s *Spool) importLocked(bus *comms.Bus, target string, msg *Message, data [
 	// Bus.PostExternal(source, externalID, from, target, msgType, replyTo, text):
 	//  - source is the stable configured repository identity,
 	//  - externalID is the immutable message id,
+	//  - from is the logical sender address used for replies/routing (falls back
+	//    to the canonical envelope sender when no logical address is present),
 	//  - msgType is the message type (ship/user/control)
 	//  - replyTo is the optional reply target
 	//  - text is the exact original payload bytes (never reconstructed).
@@ -569,7 +571,11 @@ func (s *Spool) importLocked(bus *comms.Bus, target string, msg *Message, data [
 	if msgType == "" {
 		msgType = "ship"
 	}
-	if _, err := bus.PostExternal(s.repo.ID, msg.ID, msg.From, target, msgType, msg.ReplyTo, string(data)); err != nil {
+	fromAddr := msg.From
+	if msg.Sender != "" {
+		fromAddr = msg.Sender
+	}
+	if _, err := bus.PostExternal(s.repo.ID, msg.ID, fromAddr, target, msgType, msg.ReplyTo, string(data)); err != nil {
 		if isPermanentPostExternalError(err) {
 			if ferr := s.failLocked(target, maildirCur, name, fmt.Errorf("permanent import rejection: %w", err)); ferr != nil {
 				*errs = append(*errs, fmt.Errorf("import %s permanently rejected but failed transition incomplete (message not lost): %v; move: %w", msg.ID, err, ferr))
