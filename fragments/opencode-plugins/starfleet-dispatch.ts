@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.12'
+const PLUGIN_VERSION = '2.5.13'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -15,16 +15,22 @@ const PLUGIN_VERSION = '2.5.12'
 const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 const ROOT = process.cwd()
 
-// The ship launcher always resumes a concrete opencode session by passing
-// `--session <id>` on the command line (see internal/session/launch.go). That
-// id is authoritative for THIS process and is available from process start —
-// long before the first chat hook fires. Seed the session cache from it so the
-// poll path can deliver inbox directives/messages immediately after a restart.
-// Without this, delivery is skipped (reason=no-unique-ship-session) until some
-// turn happens to start and provides the id via a chat hook.
+// The ship launcher always resumes a concrete opencode session and records its
+// id in .starfleet-ai/var/ships/<ship>.session (see recordShipSession() in
+// internal/session/launch.go). That id is authoritative for THIS process and is
+// available from process start — long before the first chat hook fires. Seed the
+// session cache from it so the poll path can deliver inbox directives/messages
+// immediately after a restart. Without this, delivery is skipped
+// (reason=no-unique-ship-session) until some turn happens to start and provides
+// the id via a chat hook.
+//
+// The `--session` argv form is only a fallback: opencode may host plugins in a
+// runtime whose process.argv does not carry the launcher args (measured: argv
+// seed alone did not fire in a running ship, the recorded file is authoritative).
 export function sessionIdFromArgv(argv: string[]): string {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -35,6 +41,13 @@ export function sessionIdFromArgv(argv: string[]): string {
     if (/^ses_[A-Za-z0-9]+$/.test(v)) return v
   }
   return ''
+}
+
+function sessionIdFromFile(root: string, ship: string): string {
+  try {
+    const v = readFileSync(`${root}/.starfleet-ai/var/ships/${ship}.session`, 'utf8').trim()
+    return /^ses_[A-Za-z0-9]+$/.test(v) ? v : ''
+  } catch { return '' }
 }
 
 
@@ -170,7 +183,7 @@ export const plugin = async ({ client, $ }: any) => {
   const bootBacklog: any[] = [] // directives pending at start (acked by init) — must be delivered, not dropped
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
-  let currentSessionID = sessionIdFromArgv(process.argv)
+  let currentSessionID = sessionIdFromArgv(process.argv) || sessionIdFromFile(ROOT, aid())
   let currentTask = ''
   const hasSwitchedToFallback = { v: false }
 
@@ -666,7 +679,7 @@ const logPollTimer = setInterval(async () => {
 
   // Init: ack all inbox, load seen, prune stale, set status — one bus call.
   const init = bus({ cmd: 'init', note: 'opencode ship' })
-  if (currentSessionID) tickLog(`session-init ship=${aid()} sid=${currentSessionID} source=argv`)
+  if (currentSessionID) tickLog(`session-init ship=${aid()} sid=${currentSessionID} source=${sessionIdFromFile(ROOT, aid()) ? 'file' : 'argv'}`)
   for (const id of (init.seen || [])) { submitted.add(id) }
   // DoInit acks the whole unread inbox and returns it in `messages`; it must
   // still be DELIVERED (the agent never saw it), otherwise every directive

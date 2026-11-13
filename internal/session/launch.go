@@ -640,6 +640,8 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 			}
 		}
 
+		recordShipSession(root, name, sessionID)
+
 		inner := "cd " + shellQuote(root) + "; "
 		inner += "exec " + shellQuote(resolveClientPath("opencode"))
 		inner += " serve --socket " + shellQuote(opencode.SocketPath(root, name))
@@ -726,6 +728,8 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 				fmt.Fprintf(os.Stderr, "LaunchShip: warning: session lookup failed: %v\n", err)
 			}
 		}
+
+		recordShipSession(root, name, sessionID)
 
 		opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel, o.Class)
 		if err != nil {
@@ -1522,6 +1526,23 @@ func validateModelAvailable(root, model string) error {
 		}
 	}
 	return fmt.Errorf("model %q not found in provider %q (available: %d models) — opencode will fall back to default", model, provider, len(available))
+}
+
+// recordShipSession persists the opencode session id a ship was launched with.
+// Plugins do not reliably see the launcher's argv (opencode may host them in a
+// different runtime), so this file is how a plugin learns the active session id
+// right at process start — including after a restart. Best effort: a failure
+// here only means the plugin falls back to learning the id from chat hooks.
+func recordShipSession(root, ship, sessionID string) {
+	p := filepath.Join(root, ".starfleet-ai", "var", "ships", ship+".session")
+	if sessionID == "" {
+		_ = os.Remove(p)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(p, []byte(sessionID+"\n"), 0o644)
 }
 
 // findLastSessionForShip looks up the most recent opencode session for the given

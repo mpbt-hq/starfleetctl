@@ -7,6 +7,9 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 // Mirrors sessionIdFromArgv() from starfleet-dispatch.ts (pure, no side effects).
 function sessionIdFromArgv(argv: string[]): string {
@@ -19,6 +22,14 @@ function sessionIdFromArgv(argv: string[]): string {
     if (/^ses_[A-Za-z0-9]+$/.test(v)) return v
   }
   return ''
+}
+
+// Mirrors sessionIdFromFile() from starfleet-dispatch.ts.
+function sessionIdFromFile(root: string, ship: string): string {
+  try {
+    const v = readFileSync(`${root}/.starfleet-ai/var/ships/${ship}.session`, 'utf8').trim()
+    return /^ses_[A-Za-z0-9]+$/.test(v) ? v : ''
+  } catch { return '' }
 }
 
 // ============================================================================
@@ -516,6 +527,17 @@ comms: directive m124 from 'Enterprise' → TestShip
       currentSessionID = sessionIdFromArgv(['opencode', '--prompt', 'hi'])
       const beforeTurn = () => currentSessionID
       assert.strictEqual(beforeTurn(), '')
+    })
+
+    test('sessionIdFromFile reads the launcher-recorded id and rejects garbage', () => {
+      const root = mkdtempSync(join(tmpdir(), 'sf-session-'))
+      const dir = join(root, '.starfleet-ai', 'var', 'ships')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'Voyager.session'), 'ses_fromfile123\n')
+      assert.strictEqual(sessionIdFromFile(root, 'Voyager'), 'ses_fromfile123')
+      assert.strictEqual(sessionIdFromFile(root, 'Other'), '')
+      writeFileSync(join(dir, 'Broken.session'), 'not-a-session\n')
+      assert.strictEqual(sessionIdFromFile(root, 'Broken'), '')
     })
 
     test('sessionIdFromArgv parses --session, -s and --session= forms only when well-formed', () => {

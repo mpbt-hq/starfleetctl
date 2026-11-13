@@ -274,3 +274,24 @@ func TestGenerateOpencodeConfigEnabledProviders(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordShipSession(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, ".starfleet-ai", "var", "ships", "TestShip.session")
+
+	recordShipSession(root, "TestShip", "ses_abc123")
+	got, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("session file not written: %v", err)
+	}
+	if string(got) != "ses_abc123\n" {
+		t.Fatalf("session file = %q, want %q", string(got), "ses_abc123\n")
+	}
+
+	// A new/forced-new launch must not leave a stale id behind: plugins would
+	// otherwise target a session that this process no longer runs.
+	recordShipSession(root, "TestShip", "")
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatalf("stale session file still present after empty id (err=%v)", err)
+	}
+}
