@@ -203,25 +203,117 @@ func yamlScalar(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-// splitEnvelope separates the YAML front matter block from the body. The
-// front matter must start and end with a line consisting solely of "---".
+// splitEnvelope separates the YAML front matter block from the body.
+//
+// Canonical form: the front matter starts and ends with a line consisting
+// solely of "---" ("---\n<yaml>\n---\n<body>"). Backward-compatible, bounded
+// tolerance: accept a missing opening "---" delimiter, or a missing closing
+// "---" delimiter, only when the header/body boundary is unambiguous (a blank
+// line after a contiguous leading block of YAML-like "key: ..." header lines).
+// No guessing: if the boundary cannot be determined unambiguously, the message
+// is rejected. The exact bytes are never rewritten on parse; normalization is
+// internal (parseMessage/buildMessageBytes).
 func splitEnvelope(data []byte) (front []byte, body []byte, err error) {
 	text := string(data)
-	if !strings.HasPrefix(text, "---\n") {
-		return nil, nil, fmt.Errorf("message must start with '---' front matter delimiter")
-	}
-	rest := text[len("---\n"):]
-	idx := strings.Index(rest, "\n---\n")
-	if idx < 0 {
-		// A message with an empty body ends with "\n---" on the last line.
+
+	// Canonical (and tolerated-missing-closing): leading front matter delimiter.
+	if strings.HasPrefix(text, "---\n") {
+		rest := text[len("---\n"):]
+		if idx := strings.Index(rest, "\n---\n"); idx >= 0 {
+			return []byte(rest[:idx]), []byte(rest[idx+len("\n---\n"):]), nil
+		}
+		// Canonical message with an empty body ends with "\n---" on the last line.
 		if strings.HasSuffix(rest, "\n---") {
 			return []byte(rest[:len(rest)-len("\n---")]), nil, nil
 		}
+		// Missing closing delimiter: accept only with an unambiguous blank-line
+		// boundary after a contiguous header block.
+		if front, body, ok := splitUnbracketedHeader(rest); ok {
+			return front, body, nil
+		}
 		return nil, nil, fmt.Errorf("message front matter is not terminated by '---'")
 	}
-	front = []byte(rest[:idx])
-	body = []byte(rest[idx+len("\n---\n"):])
-	return front, body, nil
+
+	// Tolerated: missing opening delimiter, only with an unambiguous header/body
+	// boundary (blank line after contiguous header fields at file start).
+	if front, body, ok := splitUnbracketedHeader(text); ok {
+		return front, body, nil
+	}
+	return nil, nil, fmt.Errorf("message must start with '---' front matter delimiter")
+}
+
+// splitUnbracketedHeader splits text into a front matter header and body when,
+// and only when, the boundary is unambiguous: a contiguous block of YAML-like
+// header lines at the very start of text, terminated by a blank line ("\n\n")
+// that separates header from body. A "header line" is a key/value line of the
+// form "key: ..." (or "key:") or a YAML continuation/sequence line belonging to
+// that block (indented, or starting with '-'). This keeps the body from ever
+// being interpreted as header: the first blank line after the initial header
+// block is the boundary, and anything after it (including lines that look like
+// "key: value") is body. Returns ok=false when no such unambiguous split exists.
+func splitUnbracketedHeader(text string) (front []byte, body []byte, ok bool) {
+	// Require a blank-line separator; without it the header/body boundary is
+	// ambiguous (or the message has no body/content separation we may guess at).
+	idx := strings.Index(text, "\n\n")
+	if idx < 0 {
+		return nil, nil, false
+	}
+	header := text[:idx]
+	rest := text[idx+2:] // body follows the separating blank line
+	if header == "" {
+		return nil, nil, false
+	}
+	lines := strings.Split(header, "\n")
+	// The header block must start with a key/value field at column 0.
+	if !isHeaderKeyLine(lines[0]) {
+		return nil, nil, false
+	}
+	for _, line := range lines[1:] {
+		if line == "" {
+			// No embedded blank lines inside the header block; boundary is the
+			// first "\n\n" we split on, but be defensive.
+			return nil, nil, false
+		}
+		if isHeaderKeyLine(line) {
+			continue
+		}
+		// Continuation of a preceding mapping/sequence value (indented) or a
+		// sequence item — still part of the front matter block.
+		if line[0] == ' ' || line[0] == '\t' || line[0] == '-' {
+			continue
+		}
+		// A non-indented, non-key line inside the would-be header means the
+		// block is not a clean header; reject rather than guess.
+		return nil, nil, false
+	}
+	return []byte(header), []byte(rest), true
+}
+
+// isHeaderKeyLine reports whether line is a YAML mapping key/value line at
+// column 0 (e.g. "id: ...", "from:", "reply_to: \"\""). Keys are restricted to
+// identifier-like characters so arbitrary body text is never mistaken for a
+// header field.
+func isHeaderKeyLine(line string) bool {
+	if line == "" {
+		return false
+	}
+	if line[0] == ' ' || line[0] == '\t' || line[0] == '-' || line[0] == '#' {
+		return false
+	}
+	i := 0
+	for i < len(line) {
+		c := line[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+			i++
+			continue
+		}
+		break
+	}
+	if i == 0 {
+		return false
+	}
+	// Must be followed by ':' (key) optionally followed by space/value/end.
+	return i < len(line) && line[i] == ':'
 }
 
 // parseMessage parses an immutable message file strictly. Unknown front-matter

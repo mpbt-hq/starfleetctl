@@ -4445,3 +4445,163 @@ func TestStatusRecordWithoutPIDIsNotActive(t *testing.T) {
 		t.Fatalf("message for a PID-less record must not be imported, got %d", n)
 	}
 }
+
+
+func TestParseTolerantEnvelopeFormats(t *testing.T) {
+	canonical := "---\n" +
+		"id: w0-tol-canon\n" +
+		"from: alpha\n" +
+		"to: beta\n" +
+		"type: ship\n" +
+		"created: 2026-11-13T10:00:00Z\n" +
+		"---\n" +
+		"hello body\n"
+	m, err := parseMessage([]byte(canonical))
+	if err != nil {
+		t.Fatalf("canonical parse: %v", err)
+	}
+	if m.ID != "w0-tol-canon" || m.From != "alpha" || m.To != "beta" || m.Content != "hello body" {
+		t.Fatalf("canonical mismatch: %+v", m)
+	}
+
+	missingOpen := "id: w0-tol-noopen\n" +
+		"from: alpha\n" +
+		"to: beta\n" +
+		"type: ship\n" +
+		"created: 2026-11-13T10:00:00Z\n" +
+		"\n" +
+		"hello body\n"
+	m, err = parseMessage([]byte(missingOpen))
+	if err != nil {
+		t.Fatalf("missing opening delimiter: %v", err)
+	}
+	if m.ID != "w0-tol-noopen" || m.From != "alpha" || m.To != "beta" || m.Content != "hello body" {
+		t.Fatalf("missing opening mismatch: %+v", m)
+	}
+	// Internal normalization: serialized canonical form.
+	out := string(buildMessageBytes(m))
+	if !strings.HasPrefix(out, "---\n") || !strings.Contains(out, "\nid: w0-tol-noopen\n") || !strings.Contains(out, "\n---\nhello body\n") {
+		t.Fatalf("normalization mismatch: %q", out)
+	}
+
+	missingClose := "---\n" +
+		"id: w0-tol-noclose\n" +
+		"from: alpha\n" +
+		"to: beta\n" +
+		"type: ship\n" +
+		"created: 2026-11-13T10:00:00Z\n" +
+		"\n" +
+		"hello body\n"
+	m, err = parseMessage([]byte(missingClose))
+	if err != nil {
+		t.Fatalf("missing closing delimiter: %v", err)
+	}
+	if m.ID != "w0-tol-noclose" || m.Content != "hello body" {
+		t.Fatalf("missing closing mismatch: %+v", m)
+	}
+}
+
+func TestParseTolerantRejectsAmbiguousBoundary(t *testing.T) {
+	cases := []string{
+		// No blank line separating header and body (ambiguous without delimiters).
+		"id: w0-amb-1\nfrom: alpha\nto: beta\nhello body\n",
+		// Missing closing delimiter and no blank-line boundary.
+		"---\nid: w0-amb-2\nfrom: alpha\nto: beta\nhello body\n",
+		// Body starts immediately after header block with no separator line.
+		"id: w0-amb-3\nfrom: alpha\nto: beta\ncreated: 2026-11-13T10:00:00Z\nbody: not-a-header-boundary\n",
+		// First line is not a header key.
+		"hello\nid: w0-amb-4\nfrom: alpha\nto: beta\n\nbody\n",
+		// Original failure mode must still be rejected when boundary is not unambiguous.
+		"not a message\n",
+	}
+	for _, data := range cases {
+		if _, err := parseMessage([]byte(data)); err == nil {
+			t.Fatalf("expected parse error for ambiguous/invalid %q", data)
+		}
+	}
+}
+
+func TestParseTolerantRejectsInvalidOrMissingRequired(t *testing.T) {
+	cases := []string{
+		// Missing required fields.
+		"id: w0-req-1\nfrom: alpha\n\nbody\n",
+		"from: alpha\nto: beta\n\nbody\n",
+		"id: w0-req-3\nfrom: alpha\nto: beta\n\n",
+		// Invalid id/sender/recipient/timestamp still rejected.
+		"id: ../bad\nfrom: alpha\nto: beta\n\nbody\n",
+		"id: w0-bad-from\nfrom: ChatGPT@pegasus@evil\nto: beta\n\nbody\n",
+		"id: w0-bad-to\nfrom: alpha\nto: ../beta\n\nbody\n",
+		"id: w0-bad-ts\nfrom: alpha\nto: beta\ncreated: not-a-time\n\nbody\n",
+	}
+	for _, data := range cases {
+		if _, err := parseMessage([]byte(data)); err == nil {
+			t.Fatalf("expected parse error for %q", data)
+		}
+	}
+}
+
+func TestParseTolerantBodyLinesLookLikeHeaders(t *testing.T) {
+	// Body lines resembling envelope fields must not be interpreted as header.
+	msg := "id: w0-bodylike\n" +
+		"from: alpha\n" +
+		"to: beta\n" +
+		"type: ship\n" +
+		"created: 2026-11-13T10:00:00Z\n" +
+		"\n" +
+		"from: Mallory\n" +
+		"to: Eve\n" +
+		"id: injected\n" +
+		"actual body continues\n"
+	m, err := parseMessage([]byte(msg))
+	if err != nil {
+		t.Fatalf("parse body-like lines: %v", err)
+	}
+	if m.From != "alpha" || m.To != "beta" || m.ID != "w0-bodylike" {
+		t.Fatalf("envelope corrupted by body: %+v", m)
+	}
+	wantBody := "from: Mallory\n" + "to: Eve\n" + "id: injected\n" + "actual body continues"
+	if m.Content != wantBody {
+		t.Fatalf("body mismatch: got %q want %q", m.Content, wantBody)
+	}
+
+	// Same guarantee with canonical front matter.
+	canon := "---\n" +
+		"id: w0-bodylike-c\n" +
+		"from: alpha\n" +
+		"to: beta\n" +
+		"---\n" +
+		"from: Mallory\n"
+	m, err = parseMessage([]byte(canon))
+	if err != nil {
+		t.Fatalf("canonical body-like: %v", err)
+	}
+	if m.From != "alpha" || m.Content != "from: Mallory" {
+		t.Fatalf("canonical envelope/body mismatch: %+v", m)
+	}
+}
+
+func TestParseTolerantSenderAndIDValidationUnchanged(t *testing.T) {
+	// Existing sender/from consistency and message-id validation remain enforced.
+	accept := []string{
+		"id: w0-ok-ext\nfrom: ChatGPT@pegasus\nto: Voyager\ncreated: 2026-11-13T10:00:00Z\n\nhi\n",
+		"id: w0-ok-ext2\nfrom: ChatGPT\nsender: ChatGPT@pegasus\nto: Voyager\ncreated: 2026-11-13T10:00:00Z\n\nhi\n",
+	}
+	for _, data := range accept {
+		m, err := parseMessage([]byte(data))
+		if err != nil {
+			t.Fatalf("expected accept %q: %v", data, err)
+		}
+		if m.From != "ChatGPT" || m.Sender != "ChatGPT@pegasus" {
+			t.Fatalf("unexpected normalized sender: %+v", m)
+		}
+	}
+	reject := []string{
+		"id: w0-bad-s1\nfrom: ChatGPT\nsender: Mallory@evil\nto: Voyager\n\nhi\n",
+		"id: ../escape\nfrom: alpha\nto: beta\n\nhi\n",
+	}
+	for _, data := range reject {
+		if _, err := parseMessage([]byte(data)); err == nil {
+			t.Fatalf("expected reject %q", data)
+		}
+	}
+}
