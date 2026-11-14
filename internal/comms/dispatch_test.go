@@ -4,10 +4,109 @@
 package comms
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// newCommsTestRoot returns a temp workspace root with a git repo so comms.New
+// resolves against it exactly like the CLI does.
+func newCommsTestRoot(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init", "-q")
+	run("git", "config", "user.email", "test@test")
+	run("git", "config", "user.name", "test")
+	return dir
+}
+
+// readStatus reads the comms status record for the given agent.
+func readStatus(t *testing.T, b *Bus, agent string) StatusRecord {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(b.StatusDir, agent+".json"))
+	if err != nil {
+		t.Fatalf("read status for %s: %v", agent, err)
+	}
+	var rec StatusRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("parse status for %s: %v", agent, err)
+	}
+	return rec
+}
+
+func TestDispatchTaskTerminalOutcomes(t *testing.T) {
+	root := newCommsTestRoot(t)
+	os.Setenv("STARFLEET_SHIP_ID", "test-ship")
+	defer os.Unsetenv("STARFLEET_SHIP_ID")
+
+	b, err := New(root)
+	if err != nil {
+		t.Fatalf("comms.New: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		req       dispatchRequest
+		wantState string
+		wantTask  string
+		wantNote  string
+	}{
+		{"set task", dispatchRequest{Task: "task-xyz", TaskAction: "set"}, "working", "task-xyz", ""},
+		{"done", dispatchRequest{Task: "task-xyz", TaskAction: "done"}, "idle", "", "task done: task-xyz"},
+		{"blocked", dispatchRequest{Task: "task-xyz", TaskAction: "blocked"}, "blocked", "", "task blocked: task-xyz"},
+		{"yielded", dispatchRequest{Task: "task-xyz", TaskAction: "yielded"}, "idle", "", "task yielded: task-xyz"},
+		{"clear", dispatchRequest{TaskAction: "clear"}, "idle", "", ""},
+		{"bare (no args)", dispatchRequest{}, "idle", "", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := b.dispatchTask(tc.req)
+			if !resp.OK {
+				t.Fatalf("dispatchTask(%+v) not ok: %s", tc.req, resp.Error)
+			}
+			rec := readStatus(t, b, "test-ship")
+			if rec.State != tc.wantState {
+				t.Errorf("state = %q, want %q", rec.State, tc.wantState)
+			}
+			if rec.Task != tc.wantTask {
+				t.Errorf("task = %q, want %q", rec.Task, tc.wantTask)
+			}
+			if rec.Note != tc.wantNote {
+				t.Errorf("note = %q, want %q", rec.Note, tc.wantNote)
+			}
+		})
+	}
+}
+
+func TestDispatchTaskUnknownActionRejected(t *testing.T) {
+	root := newCommsTestRoot(t)
+	os.Setenv("STARFLEET_SHIP_ID", "test-ship")
+	defer os.Unsetenv("STARFLEET_SHIP_ID")
+
+	b, err := New(root)
+	if err != nil {
+		t.Fatalf("comms.New: %v", err)
+	}
+
+	resp := b.dispatchTask(dispatchRequest{TaskAction: "bogus"})
+	if resp.OK {
+		t.Error("dispatchTask with unknown action should be rejected")
+	}
+	if !strings.Contains(resp.Error, "unknown task action") {
+		t.Errorf("error = %q, want unknown task action hint", resp.Error)
+	}
+}
 
 func TestDecideAction_retryTransient(t *testing.T) {
 	cases := []struct {

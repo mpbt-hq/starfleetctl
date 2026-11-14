@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.14'
+const PLUGIN_VERSION = '2.5.15'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -307,14 +307,31 @@ export const plugin = async ({ client, $ }: any) => {
             return true
           }
           case 'task': {
-            // `task <slug>` — report what we're working on; `task clear` /
-            // `task done` (or bare `task`) — report back to idle.
+            // `task <slug>` — report what we're working on (working state).
+            // `task done <slug>` / `task blocked <slug>` / `task yielded <slug>`
+            // — explicit terminal outcome (idle/blocked/idle, task cleared).
+            // `task clear` / bare `task done` — report back to idle.
             const src = `[command task from=${msg.from}]`
-            if (!args || args === 'clear' || args === 'done') {
+            const parts = args.split(/\s+/)
+            const verb = parts[0]
+            const slug = parts.slice(1).join(' ').trim()
+            if (!args || args === 'clear') {
               currentTask = ''
               bus({ cmd: 'task', task: '', task_clear: true })
               tickLog(`${src}: cleared`)
               toastBus('info', 'starfleet-dispatch', 'Task cleared', 3000)
+            } else if (verb === 'done' && !slug) {
+              // legacy bare `task done` → idle
+              currentTask = ''
+              bus({ cmd: 'task', task: '', task_clear: true })
+              tickLog(`${src}: cleared`)
+              toastBus('info', 'starfleet-dispatch', 'Task cleared', 3000)
+            } else if (verb === 'done' || verb === 'blocked' || verb === 'yielded') {
+              if (!slug) { tickLog(`${src}: ${verb} needs a task slug`); return true }
+              currentTask = ''
+              bus({ cmd: 'task', task: '', task_clear: true, task_action: verb, task_slug: slug })
+              tickLog(`${src}: ${verb} ${slug}`)
+              toastBus('info', 'starfleet-dispatch', `Task ${verb}: ${slug}`, 3000)
             } else {
               currentTask = args
               bus({ cmd: 'task', task: args })

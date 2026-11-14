@@ -56,6 +56,10 @@ type dispatchRequest struct {
 	// task status (cmd: "task")
 	Task      string `json:"task,omitempty"`
 	TaskClear bool   `json:"task_clear,omitempty"`
+
+	// task action: ""/"set" set current task, "done"/"blocked"/"yielded"
+	// terminal outcome (clear current task, report state), "clear" clears it.
+	TaskAction string `json:"task_action,omitempty"`
 }
 
 // dispatchResponse is the JSON returned to the plugin.
@@ -549,12 +553,40 @@ func (b *Bus) dispatchToast(req dispatchRequest) dispatchResponse {
 // live "in Bearbeitung von <ship>" marker on the task.
 func (b *Bus) dispatchTask(req dispatchRequest) dispatchResponse {
 	state := "working"
-	if req.TaskClear || req.Task == "" {
+	task := req.Task
+	taskSet := true
+
+	// Legacy path: task_clear / bare task with no args → clear to idle.
+	if req.TaskClear || (req.TaskAction == "" && req.Task == "") {
 		state = "idle"
+		task = ""
+	} else {
+		switch req.TaskAction {
+		case "", "set":
+			state = "working"
+			task = req.Task
+		case "done", "yielded":
+			state = "idle"
+			task = ""
+		case "blocked":
+			state = "blocked"
+			task = ""
+		case "clear":
+			state = "idle"
+			task = ""
+		default:
+			return dispatchResponse{OK: false, Error: "unknown task action: " + req.TaskAction}
+		}
 	}
-	if err := b.DoStatus(state, "", StatusPatch{
-		Task:    req.Task,
-		TaskSet: true,
+
+	note := ""
+	if req.TaskAction != "" && req.TaskAction != "set" && req.TaskAction != "clear" {
+		note = fmt.Sprintf("task %s: %s", req.TaskAction, req.Task)
+	}
+
+	if err := b.DoStatus(state, note, StatusPatch{
+		Task:    task,
+		TaskSet: taskSet,
 	}); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
