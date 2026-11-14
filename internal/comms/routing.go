@@ -9,6 +9,7 @@ package comms
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -148,7 +149,63 @@ func (b *Bus) resolveTarget(target string) (string, TransportRoute, bool, error)
 	if err != nil {
 		return "", TransportRoute{}, false, err
 	}
-	return rt.resolve(target)
+	localTarget, route, remote, err := rt.resolve(target)
+	if err != nil {
+		return "", TransportRoute{}, false, err
+	}
+	if remote || localTarget == "" {
+		return localTarget, route, remote, nil
+	}
+	// Local recipient: resolve the canonical on-disk ship name
+	// case-insensitively, detecting ambiguous collisions.
+	canonical, err := b.canonicalLocalShip(localTarget)
+	if err != nil {
+		return "", TransportRoute{}, false, err
+	}
+	return canonical, route, remote, nil
+}
+
+// canonicalLocalShip returns the canonical (on-disk) spelling of a local ship
+// name. It resolves case-insensitively against existing mailbox directories
+// under b.MsgDir:
+//
+//   - exact case match returns that name unchanged
+//   - a single case-insensitive match returns the on-disk spelling
+//   - multiple case-insensitive matches (collision) returns an error
+//   - no match returns target unchanged (new ship)
+//
+// It does not rename or create any directories.
+func (b *Bus) canonicalLocalShip(target string) (string, error) {
+	entries, err := os.ReadDir(b.MsgDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return target, nil
+		}
+		return "", err
+	}
+	var ciMatch string
+	ciCount := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == target {
+			return name, nil
+		}
+		if strings.EqualFold(name, target) {
+			ciMatch = name
+			ciCount++
+		}
+	}
+	switch ciCount {
+	case 0:
+		return target, nil
+	case 1:
+		return ciMatch, nil
+	default:
+		return "", fmt.Errorf("comms: ambiguous recipient %q: multiple local ships match case-insensitively", target)
+	}
 }
 
 // publishRemote hands an outbound message to the transport selected by the

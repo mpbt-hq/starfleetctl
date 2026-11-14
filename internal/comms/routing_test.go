@@ -180,3 +180,83 @@ func TestRoutingTableValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestRoutingLocalCaseInsensitiveMatch(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Pre-create a mailbox dir spelled "beta".
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sending to "Beta" should resolve to the existing "beta" mailbox.
+	id, err := b.Tell("Beta", "hello", "")
+	if err != nil {
+		t.Fatalf("case-insensitive local recipient: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty id")
+	}
+	// Must be delivered to the existing "beta" dir, not a new "Beta" dir.
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "beta", "unseen", id+".json")); err != nil {
+		t.Fatalf("message not delivered to existing beta mailbox: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "Beta", "unseen")); !os.IsNotExist(err) {
+		t.Fatalf("new Beta dir created instead of using existing beta: %v", err)
+	}
+}
+
+func TestRoutingLocalCaseAmbiguityError(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Pre-create colliding mailbox dirs.
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "Beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sending to "BETA" must fail with an ambiguity error.
+	_, err := b.Tell("BETA", "hello", "")
+	if err == nil {
+		t.Fatal("expected ambiguity error for colliding ship names")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguity error, got: %v", err)
+	}
+}
+
+func TestRoutingLocalNoMatchNewShip(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// New ship "gamma" has no mailbox yet; use as-is.
+	id, err := b.Tell("gamma", "hello", "")
+	if err != nil {
+		t.Fatalf("new local recipient: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty id")
+	}
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "gamma", "unseen", id+".json")); err != nil {
+		t.Fatalf("message not delivered to new gamma mailbox: %v", err)
+	}
+}
