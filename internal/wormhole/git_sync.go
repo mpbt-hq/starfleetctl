@@ -30,8 +30,6 @@ type GitSyncConfig struct {
 	Branch string `yaml:"branch"`
 	// Enabled toggles this repository on/off. Default: true.
 	Enabled bool `yaml:"enabled"`
-	// Access is read-only or read-write. Default: read-write.
-	Access string `yaml:"access"`
 	// PushRetries is the number of push retries after a non-fast-forward race.
 	PushRetries int `yaml:"push_retries"`
 	// CloneTimeout is the timeout for git clone operations. Zero means no timeout.
@@ -83,19 +81,11 @@ func (g *GitSync) Remote() string { return g.config.Remote }
 // Branch returns the target branch.
 func (g *GitSync) Branch() string { return g.config.Branch }
 
-// Access returns the access mode.
-func (g *GitSync) Access() string { return g.config.Access }
-
 // CloneDir returns the repository checkout path (mail/ lives below this).
 func (g *GitSync) CloneDir() string { return g.cloneDir }
 
 // LockFile returns the repository-scoped lock path shared by all writers.
 func (g *GitSync) LockFile() string { return g.lockFile }
-
-// readOnly reports whether this repository must not be written/pushed.
-func (g *GitSync) readOnly() bool {
-	return g.config.Access == "read-only"
-}
 
 // Lock acquires the single repository-scoped writer lock. Every git operation
 // on this checkout (sync, publish, claim, processed/failed transition) must be
@@ -130,26 +120,20 @@ func (g *GitSync) Sync() (*SyncResult, error) {
 		return result, err
 	}
 	result.AfterSHA = g.currentHEAD()
-	if g.readOnly() {
-		result.Action = "fetched"
-	} else {
-		result.Action = "pushed"
-	}
+	result.Action = "pushed"
 	result.Duration = time.Since(start)
 	return result, nil
 }
 
 // SyncLocked performs ensure-clone, dirty-transition recovery, fetch, rebase
-// and (read-write only) push. Caller must hold the repository lock.
-// For read-only repos, local Maildir transitions are committed to keep the
-// working tree clean for rebase, but not pushed to the remote.
+// and push. Caller must hold the repository lock.
+// Local Maildir transitions are committed to keep the working tree clean for rebase.
 func (g *GitSync) SyncLocked() error {
 	if err := g.EnsureCloneLocked(); err != nil {
 		return err
 	}
-	// Always recover dirty mail state before rebasing, regardless of access mode.
-	// For read-only repos, this commits local Maildir transitions so rebase can
-	// proceed with a clean working tree, but the commits are not pushed.
+	// Always recover dirty mail state before rebasing. Local Maildir
+	// transitions are committed to keep the working tree clean for rebase.
 	if err := g.commitDirtyMailLocked(); err != nil {
 		return fmt.Errorf("recover dirty mail state: %w", err)
 	}
@@ -414,8 +398,8 @@ func (g *GitSync) rebaseLocked() error {
 	// rename detection misfires when a local claim commit empties new/ and
 	// is replayed onto a remote commit that added another file into new/ —
 	// it infers a directory rename new/→cur/ and conflicts on every new
-	// remote message. This hits read-only repositories (whose lifecycle
-	// commits exist only locally and are rebased on every sync).
+	// remote message. Local lifecycle commits exist only until pushed and are
+	// rebased on every sync.
 	// -X no-renames disables rename following; -c merge.directoryRenames=false
 	// disables directory rename detection (not covered by -X no-renames).
 	out, err := g.gitLocked("-c", "merge.directoryRenames=false",
@@ -441,9 +425,6 @@ func isNonFastForward(out []byte) bool {
 // rebases and retries (bounded). It never force-pushes and never discards
 // local commits; a rebase conflict leaves the local commits intact.
 func (g *GitSync) pushLocked() error {
-	if g.readOnly() {
-		return nil
-	}
 	retries := g.config.PushRetries
 	if retries < 0 {
 		retries = 0

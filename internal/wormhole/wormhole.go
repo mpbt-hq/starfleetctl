@@ -72,15 +72,6 @@ func DefaultConfig() *config.WormholesConfig {
 	}
 }
 
-// validateAccessMode checks that access is "read-only" or "read-write".
-func validateAccessMode(access string) error {
-	switch access {
-	case "", "read-only", "read-write":
-		return nil
-	default:
-		return fmt.Errorf("invalid access mode %q: must be read-only or read-write", access)
-	}
-}
 
 // validateInitialScan checks that initial_scan is "baseline" or "replay".
 func validateInitialScan(scan string) error {
@@ -142,9 +133,6 @@ func ValidateConfig(cfg *config.WormholesConfig) error {
 		}
 		seenIDs[repo.ID] = true
 
-		if err := validateAccessMode(repo.Access); err != nil {
-			return fmt.Errorf("repositories[%d] %q: %w", i, repo.ID, err)
-		}
 		if err := validateInitialScan(repo.Incoming.InitialScan); err != nil {
 			return fmt.Errorf("repositories[%d] %q: incoming.initial_scan: %w", i, repo.ID, err)
 		}
@@ -240,10 +228,10 @@ var allKnownKeys = map[string]map[string]bool{
 		"interval": true, "startup_sync": true, "clone_timeout": true, "command_timeout": true, "push_retries": true,
 	},
 	"wormholes.repositories": {
-		"id": true, "remote": true, "branch": true, "enabled": true, "access": true, "incoming": true,
+		"id": true, "remote": true, "branch": true, "enabled": true, "incoming": true,
 	},
 	"wormholes.repositories[]": {
-		"id": true, "remote": true, "branch": true, "enabled": true, "access": true, "incoming": true,
+		"id": true, "remote": true, "branch": true, "enabled": true, "incoming": true,
 	},
 	"wormholes.repositories[].incoming": {
 		"enabled": true, "initial_scan": true,
