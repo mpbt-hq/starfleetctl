@@ -260,3 +260,106 @@ comms:
 		t.Fatalf("message not delivered to new gamma mailbox: %v", err)
 	}
 }
+
+func TestRoutingLocalMixedCaseAtLOCAL(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Pre-create a mailbox dir spelled "beta".
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sending to "BeTa@LOCAL" should resolve to the existing "beta" mailbox.
+	id, err := b.Tell("BeTa@LOCAL", "hello", "")
+	if err != nil {
+		t.Fatalf("mixed-case @LOCAL recipient: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty id")
+	}
+	// Must be delivered to the existing "beta" dir.
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "beta", "unseen", id+".json")); err != nil {
+		t.Fatalf("message not delivered to existing beta mailbox: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "BeTa", "unseen")); !os.IsNotExist(err) {
+		t.Fatalf("new BeTa dir created instead of using existing beta: %v", err)
+	}
+}
+
+func TestRoutingRemoteThroughTransportWithCollidingLocal(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Pre-create colliding local mailboxes spelled "bob" and "Bob".
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "bob", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "Bob", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bobBefore := countJSONInDir(t, filepath.Join(b.MsgDir, "bob", "unseen"))
+	bobBefore += countJSONInDir(t, filepath.Join(b.MsgDir, "Bob", "unseen"))
+
+	var got OutboundMessage
+	var gotRoute TransportRoute
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		gotRoute = route
+		got = msg
+		return "ext-456", nil
+	})
+
+	// Remote recipient with colliding local mailboxes must still go to transport.
+	id, err := b.Tell("BOB@peer.example", "remote hello", "")
+	if err != nil {
+		t.Fatalf("remote send with colliding local mailbox: %v", err)
+	}
+	if id != "ext-456" {
+		t.Fatalf("returned id = %q, want transport id", id)
+	}
+	if gotRoute.Transport != "fake-route" || gotRoute.Repository != "relay" || gotRoute.Domain != "peer.example" {
+		t.Fatalf("unexpected route: %+v", gotRoute)
+	}
+	if got.Target != "BOB" || got.From != "alpha" || got.Text != "remote hello" {
+		t.Fatalf("unexpected outbound message: %+v", got)
+	}
+	// Must NOT write into either local mailbox.
+	bobAfter := countJSONInDir(t, filepath.Join(b.MsgDir, "bob", "unseen"))
+	bobAfter += countJSONInDir(t, filepath.Join(b.MsgDir, "Bob", "unseen"))
+	if bobAfter != bobBefore {
+		t.Fatalf("remote message written into local mailbox: %d json before, %d after", bobBefore, bobAfter)
+	}
+}
+
+// countJSONInDir counts .json files in dir (returns 0 if dir does not exist).
+func countJSONInDir(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatalf("read dir %q: %v", dir, err)
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			n++
+		}
+	}
+	return n
+}
