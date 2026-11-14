@@ -183,7 +183,6 @@ func newSpool(root string, repo config.RepositoryConfig, pushRetries int, ship s
 			Remote:         repo.Remote,
 			Branch:         repo.Branch,
 			Enabled:        true,
-			Access:         repo.Access,
 			PushRetries:    pushRetries,
 			CloneTimeout:   cloneTimeout,
 			CommandTimeout: commandTimeout,
@@ -212,9 +211,8 @@ func (s *Spool) rel(target, state, name string) string {
 
 // RunCycle syncs the repository and (when requested) processes the bound
 // ship's mailbox under the single repository-scoped writer lock.
-// For read-only repositories, sync still fetches remote changes and processes
-// the mailbox locally; lifecycle transitions are committed locally (never
-// pushed — pushLocked is a no-op for read-only repositories).
+// Sync fetches remote changes and processes the mailbox; lifecycle transitions
+// are committed locally and pushed to the remote.
 func (s *Spool) runOnce(bus *comms.Bus, process bool) error {
 	lock, err := s.git.Lock(60 * time.Second)
 	if err != nil {
@@ -303,11 +301,8 @@ func (s *Spool) Publish(msg *Message) error {
 	}
 	defer lock.Close()
 
-	if s.git.readOnly() {
-		return fmt.Errorf("repository %q is read-only", s.repo.ID)
-	}
 	if err := s.git.SyncLocked(); err != nil {
-		return err
+		return fmt.Errorf("sync: %w", err)
 	}
 
 	data := buildMessageBytes(msg)
@@ -345,8 +340,7 @@ func (s *Spool) Publish(msg *Message) error {
 
 // processLocked processes the local ship's mailbox. Caller holds the lock.
 // Lifecycle transitions are always committed locally (so the working tree is
-// never left dirty); for read-only repositories the commit is simply not
-// pushed, which pushLocked enforces.
+// never left dirty) and pushed to the remote.
 func (s *Spool) processLocked(bus *comms.Bus) error {
 	target := s.ship
 	if !validToken(target) {
@@ -388,8 +382,7 @@ func (s *Spool) processLocked(bus *comms.Bus) error {
 // Per W0-129/W0-134: initial_scan can be "baseline" or "replay".
 // - baseline: mark all existing messages as processed without importing (establish baseline)
 // - replay: import all existing messages normally
-// The baseline transition is committed locally; for read-only repositories it
-// is not pushed (pushLocked enforces this).
+// The baseline transition is committed locally and pushed to the remote.
 func (s *Spool) performInitialScanLocked(bus *comms.Bus, target string) error {
 	mode := s.repo.Incoming.InitialScan
 	if mode == "" {
@@ -483,7 +476,7 @@ func (s *Spool) processNewLocked(bus *comms.Bus, target string, errs *[]error) e
 			continue
 		}
 		// The claim must be durably committed before any import is attempted.
-		// (For read-only repositories this commits locally without pushing.)
+		// The commit is pushed to the remote.
 		rels := []string{s.rel(target, maildirNew, name), s.rel(target, maildirCur, name)}
 		if err := s.git.CommitAndPushLocked(rels, "wormhole: claim "+msg.ID); err != nil {
 			*errs = append(*errs, fmt.Errorf("claim %s not committed (kept in cur/): %w", msg.ID, err))
@@ -522,8 +515,7 @@ func (s *Spool) processCurLocked(bus *comms.Bus, target string, errs *[]error) e
 			continue
 		}
 		// Re-assert the claim durably before importing: this also recovers a
-		// crash between the local rename and the claim commit. (Committed
-		// locally without pushing for read-only repositories.)
+		// crash between the local rename and the claim commit. The commit is pushed.
 		rels := []string{s.rel(target, maildirNew, name), s.rel(target, maildirCur, name)}
 		if err := s.git.CommitAndPushLocked(rels, "wormhole: claim "+msg.ID); err != nil {
 			*errs = append(*errs, fmt.Errorf("resume claim %s not committed: %w", msg.ID, err))
@@ -556,8 +548,8 @@ func (s *Spool) parseForTarget(data []byte, name, target string) (*Message, erro
 // error leaves the message recoverable in cur/ (no arbitrary retry cap). A
 // permanent import error is moved to failed/ with a durable, traceable reason;
 // if moving to failed/ itself errors the message must not be lost (it remains
-// in cur/ or failed/). The processed transition is always committed locally;
-// for read-only repositories it is not pushed (pushLocked enforces this).
+// in cur/ or failed/). The processed transition is always committed locally
+// and pushed to the remote.
 func (s *Spool) importLocked(bus *comms.Bus, target string, msg *Message, data []byte, name string, errs *[]error) {
 	// Bus.PostExternal(source, externalID, from, target, msgType, replyTo, text):
 	//  - source is the stable configured repository identity,
@@ -607,7 +599,6 @@ func isPermanentPostExternalError(err error) bool {
 
 // failLocked moves a permanently malformed/rejected message to failed/ together
 // with a durable diagnostic file, then commits+pushes both exact paths.
-// For read-only repositories the transition is committed locally without pushing.
 func (s *Spool) failLocked(target, fromState, name string, reason error) error {
 	srcAbs := s.abs(target, fromState, name)
 	failedDir := filepath.Join(s.targetDir(target), maildirFailed)

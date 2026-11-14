@@ -280,8 +280,6 @@ type RepositoryConfig struct {
 	Branch string `yaml:"branch"`
 	// Enabled toggles this repository on/off. Default: true.
 	Enabled *bool `yaml:"enabled"`
-	// Access is read-only or read-write. Default: read-write.
-	Access string `yaml:"access"`
 	// Incoming controls message import from this repository.
 	Incoming IncomingConfig `yaml:"incoming"`
 }
