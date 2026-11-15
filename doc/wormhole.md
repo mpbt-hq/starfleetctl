@@ -71,7 +71,6 @@ Each repository entry:
 | `remote` | string | yes | Git remote URL (SSH/HTTPS) |
 | `branch` | string | yes | Git branch to track (e.g., `main`) |
 | `enabled` | bool | no | Enable/disable repo (default: true) |
-| `access` | string | no | `read-only` or `read-write` (default: read-write) |
 | `incoming.enabled` | bool | no | Enable incoming message processing (default: true) |
 | `incoming.initial_scan` | string | no | `baseline` or `replay` (default: `baseline`) |
 
@@ -87,11 +86,10 @@ wormholes:
     command_timeout: "30s"
     push_retries: 3
   repositories:
-    - id: relay
-      remote: "ssh://git@example.com/relay.git"
-      branch: "main"
-      access: read-write
-      incoming:
+     - id: relay
+       remote: "ssh://git@example.com/relay.git"
+       branch: "main"
+       incoming:
         enabled: true
         initial_scan: baseline
 ```
@@ -107,7 +105,7 @@ The wormhole uses **Git Maildir spool** for message transport:
    - Fetch + rebase remote changes
    - For every local ship: claim messages in `new/` → move to `cur/`
    - Import via `Bus.PostExternal()` → Comms inbox
-   - Move `cur/` → `processed/` on success, or `failed/` on permanent failure
+    - Move `cur/` → `processed/` on success, or `failed/` on permanent failure (with a durable `.reason` diagnostic)
 4. **At-least-once delivery**: Claims prevent duplicate processing; crashes between claim and import leave message in `cur/` for retry
 
 ### Central multi-ship cycle
@@ -218,20 +216,12 @@ Called from flagship's `services.AutostartConfigured()` if `wormholes.enabled: t
 - **Startup sync failure**: fatal — RunLoop records `status: error` + reason in the state file and exits non-zero
 - **Process crash**: dead worker detected via recorded instance liveness check
 - **Maildir crash recovery**: `commitDirtyMailLocked()` recovers uncommitted lifecycle moves (new→cur, cur→processed, baseline moves)
+- **Failed transition crash safety**: the `.reason` diagnostic is written durably into `failed/` (fsync + atomic rename + dir fsync, staged via the git-excluded `mail/.tmp/`) BEFORE the message itself is moved there, so `failed/` never contains a message without its diagnostic. A crash after the reason write but before the move leaves the message in its previous state and the next cycle repeats the transition deterministically; a crash after the move but before the commit is recovered by `commitDirtyMailLocked()`, which commits `.md` and `.reason` together. If the diagnostic itself cannot be written, the message stays where it is and is never lost.
 - **Import crash**: Messages stay in `cur/` (re-claimed on restart via `processCurLocked`)
 - **Initial scan crash**: a crash mid baseline move (partial rename, nothing committed, no marker) is recovered on the next cycle — the dirty move is committed, the scan finishes, nothing pre-existing is imported
 - **Duplicate prevention**: `PostExternal` deduplicates via `source+externalID+payloadSHA`
 - **ID reservation**: CommsID is reserved via `nextID()` BEFORE external record creation, eliminating crash window where a record could exist without an ID
 - **Initial scan state**: Persisted in the clone-local state dir per repo/ship
-
-## Read-Only Repositories
-
-Repositories with `access: read-only`:
-- Fetch remote changes normally
-- Process mailbox locally (claim, import, move to processed/failed)
-- **Skip all pushes** — the remote is never advanced by the read-only client
-- Local Maildir transitions are committed locally on every cycle (working tree stays clean) but never pushed
-- Local-only lifecycle commits are rebased onto new remote history with rename detection disabled (`-X no-renames` + `merge.directoryRenames=false`), so a remote-side publish into `new/` cannot be misread as a directory rename
 
 ## Comms Metadata Preservation
 
@@ -266,7 +256,6 @@ comms:
 - **Single-writer per repo**: Repository lock serializes all Git operations
 - **At-least-once delivery**: Crash between claim and seen_mark may cause re-delivery
 - **No consumer groups**: Each ship has its own mailbox; no competing consumers
-- **Read-only repos**: Can import but not publish messages
 - **No attachments**: Messages with attachments are rejected with explicit error
 - **Daemon tests require git remote**: Full lifecycle tests need a proper git remote
 

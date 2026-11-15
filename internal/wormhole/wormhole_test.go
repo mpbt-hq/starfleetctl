@@ -4352,3 +4352,278 @@ func TestParseTolerantSenderAndIDValidationUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// ---- W0-134: crash-safe failed/ transition ---------------------------------
+
+// writeUndeliverable places a message that can never be imported into the
+// given mailbox: it is addressed to a different ship, so the recipient check
+// rejects it permanently and the spool must move it to failed/.
+func writeUndeliverable(t *testing.T, sp *Spool, target string) *Message {
+	t.Helper()
+	msg := NewMessage("beta", "gamma", "ship", "undeliverable payload", "")
+	dir := filepath.Join(sp.git.CloneDir(), "mail", target, maildirNew)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, msg.ID+".md"), buildMessageBytes(msg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return msg
+}
+
+// TestFailedTransitionReasonWriteFailureKeepsMessage verifies that a failure
+// while writing the durable .reason diagnostic leaves the message untouched:
+// the message is neither moved to failed/ (where it would have no diagnostic)
+// nor lost.
+func TestFailedTransitionReasonWriteFailureKeepsMessage(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	msg := writeUndeliverable(t, sp, "alpha")
+	name := msg.ID + ".md"
+
+	// Block the diagnostic destination: a directory cannot be replaced by the
+	// diagnostic file, so writing the .reason fails.
+	failedDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirFailed)
+	if err := os.MkdirAll(failedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(failedDir, name+".reason"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sp.runOnce(bus, true); err == nil {
+		t.Fatal("expected the failed transition to report the diagnostic write error")
+	}
+
+	newPath := filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirNew, name)
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("message must remain in new/ when the diagnostic cannot be written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(failedDir, name)); !os.IsNotExist(err) {
+		t.Fatal("message must not appear in failed/ without its diagnostic")
+	}
+	if remoteHas(t, remote, "mail/alpha/failed/"+name) {
+		t.Fatal("failed transition must not be pushed when the diagnostic is missing")
+	}
+}
+
+// TestFailedTransitionCrashAfterReasonWriteRecovers verifies the recovery path
+// for a crash between the durable diagnostic write and the move into failed/:
+// the message is still in its previous state and the next cycle repeats the
+// transition deterministically, ending with message + diagnostic committed and
+// pushed.
+func TestFailedTransitionCrashAfterReasonWriteRecovers(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	msg := writeUndeliverable(t, sp, "alpha")
+	name := msg.ID + ".md"
+
+	// Simulate a crash right after the diagnostic became durable, before the
+	// message was moved into failed/.
+	failedDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirFailed)
+	if err := os.MkdirAll(failedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	diag := "message: " + name + "\nmailbox: alpha\nfrom: new\nfailed_at: " + time.Now().UTC().Format(time.RFC3339) + "\nreason: simulated crash before move\n"
+	if err := os.WriteFile(filepath.Join(failedDir, name+".reason"), []byte(diag), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sp.runOnce(bus, true); err != nil {
+		t.Fatalf("recovery cycle: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(failedDir, name)); err != nil {
+		t.Fatalf("message must end up in failed/: %v", err)
+	}
+	reason, err := os.ReadFile(filepath.Join(failedDir, name+".reason"))
+	if err != nil {
+		t.Fatalf("diagnostic missing: %v", err)
+	}
+	if !strings.Contains(string(reason), "recipient") {
+		t.Fatalf("diagnostic must carry the permanent reason, got: %s", reason)
+	}
+	if !remoteHas(t, remote, "mail/alpha/failed/"+name) {
+		t.Fatal("recovered failed transition was not pushed")
+	}
+	if !remoteHas(t, remote, "mail/alpha/failed/"+name+".reason") {
+		t.Fatal("recovered diagnostic was not pushed")
+	}
+	if remoteHas(t, remote, "mail/alpha/new/"+name) {
+		t.Fatal("stale new/ entry survived the failed transition")
+	}
+}
+
+// TestFailedTransitionCrashAfterMoveRecovers verifies the recovery path for a
+// crash between the move into failed/ and the commit: the next sync commits the
+// dirty transition (message + diagnostic) and pushes it.
+func TestFailedTransitionCrashAfterMoveRecovers(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	msg := writeUndeliverable(t, sp, "alpha")
+	name := msg.ID + ".md"
+
+	// Simulate a crash right after the move into failed/, before the commit.
+	failedDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirFailed)
+	if err := os.MkdirAll(failedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	diag := "message: " + name + "\nmailbox: alpha\nfrom: new\nfailed_at: " + time.Now().UTC().Format(time.RFC3339) + "\nreason: simulated crash before commit\n"
+	if err := os.WriteFile(filepath.Join(failedDir, name+".reason"), []byte(diag), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(
+		filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirNew, name),
+		filepath.Join(failedDir, name)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Recovery sync: no processing, just the dirty-transition recovery.
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("recovery sync: %v", err)
+	}
+
+	if !remoteHas(t, remote, "mail/alpha/failed/"+name) {
+		t.Fatal("interrupted failed transition was not recovered and pushed")
+	}
+	if !remoteHas(t, remote, "mail/alpha/failed/"+name+".reason") {
+		t.Fatal("interrupted diagnostic was not recovered and pushed")
+	}
+	if remoteHas(t, remote, "mail/alpha/new/"+name) {
+		t.Fatal("stale new/ entry survived recovery")
+	}
+}
+
+// TestPostExternalCrashRecoveryImportsExactlyOnce verifies the integrated
+// path: a message published through the spool is claimed, imported through
+// Bus.PostExternal and moved to processed/ exactly once - even when the daemon
+// crashed between the claim rename and the import.
+func TestPostExternalCrashRecoveryImportsExactlyOnce(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
+	msg := NewMessage("beta", "alpha", "ship", "integrated crash recovery", "")
+	if err := sender.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// Simulate a crash right after the claim rename, before the import.
+	newAbs := filepath.Join(sender.git.CloneDir(), "mail", "alpha", maildirNew, msg.ID+".md")
+	curAbs := filepath.Join(sender.git.CloneDir(), "mail", "alpha", maildirCur, msg.ID+".md")
+	if err := os.MkdirAll(filepath.Dir(curAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(newAbs, curAbs); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	// Exactly one comms message, carrying the external identity and the
+	// original payload bytes.
+	unseenDir := filepath.Join(bus.MsgDir, "alpha", "unseen")
+	entries, err := os.ReadDir(unseenDir)
+	if err != nil {
+		t.Fatalf("read unseen dir: %v", err)
+	}
+	seen := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		seen++
+		data, rerr := os.ReadFile(filepath.Join(unseenDir, e.Name()))
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		var rec struct {
+			From           string `json:"from"`
+			Target         string `json:"target"`
+			Text           string `json:"text"`
+			ExternalSource string `json:"external_source"`
+			ExternalID     string `json:"external_id"`
+		}
+		if jerr := json.Unmarshal(data, &rec); jerr != nil {
+			t.Fatalf("unreadable comms record: %v", jerr)
+		}
+		if rec.ExternalID != msg.ID {
+			t.Fatalf("external_id=%q want %q", rec.ExternalID, msg.ID)
+		}
+		if rec.ExternalSource != cfg.Repositories[0].ID {
+			t.Fatalf("external_source=%q want %q", rec.ExternalSource, cfg.Repositories[0].ID)
+		}
+		if rec.Target != "alpha" {
+			t.Fatalf("target=%q want alpha", rec.Target)
+		}
+		if !strings.Contains(rec.Text, "integrated crash recovery") {
+			t.Fatalf("original payload must be preserved, got: %q", rec.Text)
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("expected exactly 1 comms message after recovery, got %d", seen)
+	}
+
+	// The message is processed locally and on the remote, and nowhere else.
+	procAbs := filepath.Join(sender.git.CloneDir(), "mail", "alpha", maildirDone, msg.ID+".md")
+	if _, err := os.Stat(procAbs); err != nil {
+		t.Fatalf("message must be processed after recovery: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sender.git.CloneDir(), "mail", "alpha", maildirFailed, msg.ID+".md")); !os.IsNotExist(err) {
+		t.Fatal("message must not be moved to failed/ after a successful import")
+	}
+	if !remoteHas(t, remote, "mail/alpha/processed/"+msg.ID+".md") {
+		t.Fatal("processed transition was not pushed")
+	}
+	if remoteHas(t, remote, "mail/alpha/new/"+msg.ID+".md") {
+		t.Fatal("stale new/ entry survived recovery")
+	}
+}

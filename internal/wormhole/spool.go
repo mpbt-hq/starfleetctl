@@ -12,7 +12,9 @@
 // BEFORE importing it through Bus.PostExternal. Only after a confirmed import
 // is it moved cur -> processed. Transient failures leave the message in cur/
 // for recovery; permanently malformed messages move to failed/ with a durable
-// diagnostic. Every transition is its own exact-path commit + push.
+// diagnostic (the .reason file is made durable BEFORE the message is moved, so
+// failed/ never contains a message without its diagnostic). Every transition is
+// its own exact-path commit + push.
 package wormhole
 
 import (
@@ -20,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -597,8 +600,65 @@ func isPermanentPostExternalError(err error) bool {
 	return comms.IsPermanentPostExternalError(err)
 }
 
+// syncDir fsyncs a directory so that renames/creations inside it become durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open dir %s: %w", dir, err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("fsync dir %s: %w", dir, err)
+	}
+	return nil
+}
+
+// writeFileDurableLocked writes data to a temp file inside the spool staging
+// dir (mail/.tmp/, git-excluded via .git/info/exclude), fsyncs the file,
+// atomically renames it to dst and fsyncs the destination directory. A crash
+// can therefore never leave a partial or missing file at dst.
+func (s *Spool) writeFileDurableLocked(dst string, data []byte, perm os.FileMode) error {
+	tmpDir := filepath.Join(s.mailRoot(), mailTmpName)
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", mailTmpName, err)
+	}
+	tmp := filepath.Join(tmpDir, "."+strconv.FormatInt(time.Now().UnixNano(), 10)+"."+strconv.Itoa(os.Getpid())+".tmp")
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("fsync temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("atomic rename: %w", err)
+	}
+	return syncDir(filepath.Dir(dst))
+}
+
 // failLocked moves a permanently malformed/rejected message to failed/ together
-// with a durable diagnostic file, then commits+pushes both exact paths.
+// with a durable diagnostic file, then commits+pushes all exact paths.
+//
+// Crash safety: the .reason diagnostic is written durably into failed/ BEFORE
+// the message itself is moved there, so a crash can never leave a message in
+// failed/ without its .reason. A crash after the reason write but before the
+// rename leaves the message in its previous state; the next cycle repeats the
+// transition deterministically. A crash after the rename but before the commit
+// is recovered by commitDirtyMailLocked on the next sync, which commits .md and
+// .reason together. If the reason write itself fails, the message stays in its
+// current state and is never lost.
 func (s *Spool) failLocked(target, fromState, name string, reason error) error {
 	srcAbs := s.abs(target, fromState, name)
 	failedDir := filepath.Join(s.targetDir(target), maildirFailed)
@@ -612,16 +672,22 @@ func (s *Spool) failLocked(target, fromState, name string, reason error) error {
 		dstName = fmt.Sprintf("%s.failed-%d.md", base, time.Now().UnixNano())
 	}
 	dstAbs := filepath.Join(failedDir, dstName)
-	if err := os.Rename(srcAbs, dstAbs); err != nil {
-		return fmt.Errorf("move %s to failed/: %w", name, err)
-	}
 
 	diagName := dstName + ".reason"
 	diagAbs := filepath.Join(failedDir, diagName)
 	diag := fmt.Sprintf("message: %s\nmailbox: %s\nfrom: %s\nfailed_at: %s\nreason: %v\n",
 		dstName, target, fromState, time.Now().UTC().Format(time.RFC3339), reason)
-	if err := os.WriteFile(diagAbs, []byte(diag), 0o644); err != nil {
+	// Durable diagnostic first: once the message lands in failed/ the reason is
+	// guaranteed to be there as well.
+	if err := s.writeFileDurableLocked(diagAbs, []byte(diag), 0o644); err != nil {
 		return fmt.Errorf("write failure diagnostic: %w", err)
+	}
+
+	if err := os.Rename(srcAbs, dstAbs); err != nil {
+		return fmt.Errorf("move %s to failed/: %w", name, err)
+	}
+	if err := syncDir(failedDir); err != nil {
+		return fmt.Errorf("fsync failed/: %w", err)
 	}
 
 	rels := []string{
