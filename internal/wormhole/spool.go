@@ -333,13 +333,11 @@ func (s *Spool) Publish(msg *Message) error {
 	if err := s.ensureLayoutLocked(msg.To); err != nil {
 		return err
 	}
-	tmpDir := filepath.Join(s.mailRoot(), mailTmpName)
-	tmp := filepath.Join(tmpDir, fmt.Sprintf("%s.%d", msg.ID, time.Now().UnixNano()))
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("write temp message: %w", err)
-	}
-	if err := renameDurableLocked(tmp, abs); err != nil {
-		os.Remove(tmp)
+	// Durable write: temp file in the git-excluded staging dir, fsync of the
+	// file CONTENT before the rename, atomic rename, fsync of source and
+	// destination directory. A crash can therefore never publish a partial
+	// or zero-length message file.
+	if err := s.writeFileDurableLocked(abs, data, 0o644); err != nil {
 		return fmt.Errorf("atomic publish: %w", err)
 	}
 	return s.git.CommitAndPushLocked([]string{rel}, "wormhole: publish "+msg.ID)
@@ -608,17 +606,26 @@ func isPermanentPostExternalError(err error) bool {
 // platform or filesystem does not support fsync on directories at all. Such a
 // failure must not fail a lifecycle transition: durability then degrades to
 // the platform's guarantees, but the transition itself stays valid. Real I/O
-// errors (EIO and friends) are still reported.
+// errors (EIO and friends) are still reported. EBADF is deliberately NOT
+// treated as unsupported: an invalid descriptor is a bug in our own code and
+// must stay a hard error instead of silently skipping the fsync.
 func isDirSyncUnsupported(err error) bool {
 	var errno syscall.Errno
 	if !errors.As(err, &errno) {
 		return false
 	}
 	switch errno {
-	case syscall.EINVAL, syscall.EOPNOTSUPP, syscall.ENOSYS, syscall.EPERM, syscall.EBADF:
+	case syscall.EINVAL, syscall.ENOSYS, syscall.EPERM:
+		// EINVAL: some platforms (e.g. macOS) reject fsync on a directory
+		// fd; ENOSYS: not implemented; EPERM: some network filesystems
+		// refuse directory fsync.
 		return true
 	}
-	return false
+	// EOPNOTSUPP and ENOTSUP denote the same capability but are distinct
+	// errno values on some platforms (and identical on Linux, where a
+	// duplicate case or map key would not compile). Compare them separately
+	// so the classification stays portable.
+	return errno == syscall.EOPNOTSUPP || errno == syscall.ENOTSUP
 }
 
 // syncDir fsyncs a directory so that renames/creations inside it become

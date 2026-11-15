@@ -4739,9 +4739,9 @@ func TestDirSyncUnsupportedClassification(t *testing.T) {
 	unsupported := []error{
 		os.NewSyscallError("fsync", syscall.EINVAL),
 		os.NewSyscallError("fsync", syscall.EOPNOTSUPP),
+		os.NewSyscallError("fsync", syscall.ENOTSUP),
 		os.NewSyscallError("fsync", syscall.ENOSYS),
 		os.NewSyscallError("fsync", syscall.EPERM),
-		os.NewSyscallError("fsync", syscall.EBADF),
 		&os.PathError{Op: "fsync", Path: "/x", Err: syscall.EINVAL},
 	}
 	for _, err := range unsupported {
@@ -4752,6 +4752,10 @@ func TestDirSyncUnsupportedClassification(t *testing.T) {
 	fatal := []error{
 		os.NewSyscallError("fsync", syscall.EIO),
 		os.NewSyscallError("fsync", syscall.ENOENT),
+		// EBADF is an invalid descriptor: a bug in our own code, NOT a
+		// platform capability. It must stay fatal so the missing fsync is
+		// never silently swallowed.
+		os.NewSyscallError("fsync", syscall.EBADF),
 		fmt.Errorf("plain error"),
 	}
 	for _, err := range fatal {
@@ -4845,5 +4849,38 @@ func TestFailedTransitionLeavesNoStagingFiles(t *testing.T) {
 	tmpDir := filepath.Join(sp.git.CloneDir(), "mail", mailTmpName)
 	if entries := dirList(tmpDir); len(entries) != 0 {
 		t.Fatalf("no staging leftovers expected after failed transition, got %v", entries)
+	}
+}
+
+// TestPublishDurableWrite verifies that Publish goes through the durable
+// write path (staging temp file + fsync of the file content + atomic rename +
+// dir fsync): the published file holds exactly the envelope bytes and no
+// staging files are left behind.
+func TestPublishDurableWrite(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "beta")
+	repo := cfg.Repositories[0]
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sender := newSpool(root, repo, cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
+
+	msg := NewMessage("beta", "alpha", "message", "durable publish\npayload", "")
+	if err := sender.Publish(msg); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	clone := sender.git.CloneDir()
+	abs := filepath.Join(clone, "mail", "alpha", maildirNew, msg.ID+".md")
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		t.Fatalf("published message missing: %v", err)
+	}
+	if want := string(buildMessageBytes(msg)); string(data) != want {
+		t.Fatalf("published bytes differ from envelope bytes:\n got: %q\nwant: %q", data, want)
+	}
+	tmpDir := filepath.Join(clone, "mail", mailTmpName)
+	if entries := dirList(tmpDir); len(entries) != 0 {
+		t.Fatalf("staging dir must be empty after publish, got %v", entries)
 	}
 }
