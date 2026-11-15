@@ -19,11 +19,13 @@ package wormhole
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/metux/starfleetctl/internal/comms"
@@ -286,7 +288,9 @@ func (s *Spool) ensureLayoutLocked(target string) error {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	return nil
+	// Drop leftovers of a crashed publish/failed transition. The repository
+	// lock is held by the caller, so the staging dir cannot be in use.
+	return s.cleanupStagingLocked()
 }
 
 // Publish writes one immutable message into mail/<to>/new/<id>, commits exactly
@@ -334,7 +338,7 @@ func (s *Spool) Publish(msg *Message) error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("write temp message: %w", err)
 	}
-	if err := os.Rename(tmp, abs); err != nil {
+	if err := renameDurableLocked(tmp, abs); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("atomic publish: %w", err)
 	}
@@ -417,7 +421,7 @@ func (s *Spool) performInitialScanLocked(bus *comms.Bus, target string) error {
 			name := e.Name()
 			newAbs := s.abs(target, maildirNew, name)
 			procAbs := s.abs(target, maildirDone, name)
-			if err := os.Rename(newAbs, procAbs); err != nil {
+			if err := renameDurableLocked(newAbs, procAbs); err != nil {
 				return fmt.Errorf("baseline move %s: %w", name, err)
 			}
 			rels = append(rels, s.rel(target, maildirNew, name), s.rel(target, maildirDone, name))
@@ -474,7 +478,7 @@ func (s *Spool) processNewLocked(bus *comms.Bus, target string, errs *[]error) e
 			}
 			continue
 		}
-		if err := os.Rename(newAbs, curAbs); err != nil {
+		if err := renameDurableLocked(newAbs, curAbs); err != nil {
 			*errs = append(*errs, fmt.Errorf("claim %s: %w", msg.ID, err))
 			continue
 		}
@@ -582,7 +586,7 @@ func (s *Spool) importLocked(bus *comms.Bus, target string, msg *Message, data [
 	}
 	curAbs := s.abs(target, maildirCur, name)
 	procAbs := s.abs(target, maildirDone, name)
-	if err := os.Rename(curAbs, procAbs); err != nil {
+	if err := renameDurableLocked(curAbs, procAbs); err != nil {
 		*errs = append(*errs, fmt.Errorf("processed move %s: %w", msg.ID, err))
 		return
 	}
@@ -600,7 +604,26 @@ func isPermanentPostExternalError(err error) bool {
 	return comms.IsPermanentPostExternalError(err)
 }
 
-// syncDir fsyncs a directory so that renames/creations inside it become durable.
+// isDirSyncUnsupported reports whether a directory-fsync failure means the
+// platform or filesystem does not support fsync on directories at all. Such a
+// failure must not fail a lifecycle transition: durability then degrades to
+// the platform's guarantees, but the transition itself stays valid. Real I/O
+// errors (EIO and friends) are still reported.
+func isDirSyncUnsupported(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	switch errno {
+	case syscall.EINVAL, syscall.EOPNOTSUPP, syscall.ENOSYS, syscall.EPERM, syscall.EBADF:
+		return true
+	}
+	return false
+}
+
+// syncDir fsyncs a directory so that renames/creations inside it become
+// durable. Where directory fsync is unsupported, the call degrades to a no-op
+// (see isDirSyncUnsupported).
 func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
@@ -608,7 +631,28 @@ func syncDir(dir string) error {
 	}
 	defer d.Close()
 	if err := d.Sync(); err != nil {
+		if isDirSyncUnsupported(err) {
+			return nil
+		}
 		return fmt.Errorf("fsync dir %s: %w", dir, err)
+	}
+	return nil
+}
+
+// renameDurableLocked atomically renames src to dst and fsyncs BOTH the
+// source and the destination directory, so the rename survives a crash on
+// either side (the file can neither vanish nor resurrect in its old place).
+// Where directory fsync is unsupported, durability degrades to the platform's
+// guarantees instead of failing the transition.
+func renameDurableLocked(src, dst string) error {
+	if err := os.Rename(src, dst); err != nil {
+		return err
+	}
+	if err := syncDir(filepath.Dir(dst)); err != nil {
+		return fmt.Errorf("fsync destination dir of %s: %w", dst, err)
+	}
+	if err := syncDir(filepath.Dir(src)); err != nil {
+		return fmt.Errorf("fsync source dir of %s: %w", src, err)
 	}
 	return nil
 }
@@ -641,11 +685,41 @@ func (s *Spool) writeFileDurableLocked(dst string, data []byte, perm os.FileMode
 		os.Remove(tmp)
 		return fmt.Errorf("close temp file: %w", err)
 	}
-	if err := os.Rename(tmp, dst); err != nil {
+	if err := renameDurableLocked(tmp, dst); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("atomic rename: %w", err)
 	}
-	return syncDir(filepath.Dir(dst))
+	return nil
+}
+
+// cleanupStagingLocked removes leftover staging files in mail/.tmp/, i.e.
+// files of a publish or failed transition that crashed mid-write. The caller
+// holds the repository lock, so no other writer can own the staging dir at
+// this moment. The staging dir is git-excluded, so leftovers never enter a
+// commit; this only bounds their disk usage.
+func (s *Spool) cleanupStagingLocked() error {
+	tmpDir := filepath.Join(s.mailRoot(), mailTmpName)
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", mailTmpName, err)
+	}
+	removed := false
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(tmpDir, e.Name())); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove staging file %s: %w", e.Name(), err)
+		}
+		removed = true
+	}
+	if !removed {
+		return nil
+	}
+	return syncDir(tmpDir)
 }
 
 // failLocked moves a permanently malformed/rejected message to failed/ together
@@ -655,10 +729,15 @@ func (s *Spool) writeFileDurableLocked(dst string, data []byte, perm os.FileMode
 // the message itself is moved there, so a crash can never leave a message in
 // failed/ without its .reason. A crash after the reason write but before the
 // rename leaves the message in its previous state; the next cycle repeats the
-// transition deterministically. A crash after the rename but before the commit
-// is recovered by commitDirtyMailLocked on the next sync, which commits .md and
+// transition deterministically. The rename itself is fsynced on BOTH sides
+// (source and destination directory), so a crash can neither resurrect the
+// message in its old state nor lose it from failed/; where directory fsync is
+// unsupported by the platform/filesystem this degrades to a no-op instead of
+// failing the transition. A crash after the rename but before the commit is
+// recovered by commitDirtyMailLocked on the next sync, which commits .md and
 // .reason together. If the reason write itself fails, the message stays in its
-// current state and is never lost.
+// current state and is never lost. Leftover staging files in the git-excluded
+// mail/.tmp/ are removed at the start of every locked cycle.
 func (s *Spool) failLocked(target, fromState, name string, reason error) error {
 	srcAbs := s.abs(target, fromState, name)
 	failedDir := filepath.Join(s.targetDir(target), maildirFailed)
@@ -683,11 +762,8 @@ func (s *Spool) failLocked(target, fromState, name string, reason error) error {
 		return fmt.Errorf("write failure diagnostic: %w", err)
 	}
 
-	if err := os.Rename(srcAbs, dstAbs); err != nil {
+	if err := renameDurableLocked(srcAbs, dstAbs); err != nil {
 		return fmt.Errorf("move %s to failed/: %w", name, err)
-	}
-	if err := syncDir(failedDir); err != nil {
-		return fmt.Errorf("fsync failed/: %w", err)
 	}
 
 	rels := []string{

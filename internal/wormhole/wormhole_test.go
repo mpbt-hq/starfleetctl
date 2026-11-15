@@ -873,7 +873,7 @@ func TestInitialScanCrashAfterMoveBeforeMarker(t *testing.T) {
 	if n := countFiles(t, bus.MsgDir); n != 1 {
 		t.Fatalf("post-recovery message must be imported exactly once, got %d", n)
 	}
-	}
+}
 
 func TestParseExternalLogicalSenderRoundtrip(t *testing.T) {
 	data := []byte("---\n" +
@@ -1584,125 +1584,138 @@ func countJSONFiles(dir string) int {
 	return n
 }
 
-// TestLargePayloadRoundtripPreservesBytes tests that a large payload (>= 50 KiB)
-// is correctly transported through the full wormhole pipeline: Publish → Git-Maildir → Import → Comms.
-// The payload is deterministic so we can verify it arrives intact.
-func TestLargePayloadRoundtripPreservesBytes(t *testing.T) {
+// testCommsRecord is the on-disk comms message record shape used by tests.
+type testCommsRecord struct {
+	ID             string `json:"id"`
+	From           string `json:"from"`
+	Target         string `json:"target"`
+	Text           string `json:"text"`
+	ReplyTo        string `json:"reply_to,omitempty"`
+	Type           string `json:"type,omitempty"`
+	ExternalSource string `json:"external_source,omitempty"`
+	ExternalID     string `json:"external_id,omitempty"`
+}
+
+// readCommsRecords reads all comms records of one ship's mailbox (all states).
+// Missing directories are fine and simply contribute no records.
+func readCommsRecords(t *testing.T, bus *comms.Bus, ship string) []testCommsRecord {
 	t.Helper()
+	var out []testCommsRecord
+	base := filepath.Join(bus.MsgDir, ship)
+	_ = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".json") {
+			return nil
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Fatalf("read %s: %v", path, rerr)
+		}
+		var rec testCommsRecord
+		if jerr := json.Unmarshal(data, &rec); jerr != nil {
+			t.Fatalf("unmarshal %s: %v", path, jerr)
+		}
+		out = append(out, rec)
+		return nil
+	})
+	return out
+}
+
+// TestLargePayloadRoundtripPreservesBytes tests that a large payload (>= 50 KiB)
+// is transported through the full wormhole pipeline byte-for-byte:
+// Publish -> Git-Maildir -> Import -> Comms record. A repeated processing
+// cycle must be idempotent: no second Comms record, same CommsID, same bytes.
+func TestLargePayloadRoundtripPreservesBytes(t *testing.T) {
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
 
-	// Ensure the wormhole directory structure exists.
 	if err := EnsureDir(root); err != nil {
 		t.Fatalf("EnsureDir failed: %v", err)
 	}
 
-	// Create a deterministic payload with at least 50 KiB content.
+	// Deterministic payload with at least 50 KiB of valid UTF-8 text.
+	//
+	// The Comms record stores the payload as a JSON string, and Go's JSON
+	// encoder replaces invalid UTF-8 bytes with U+FFFD. Byte-exact
+	// roundtrip is therefore defined for UTF-8 payloads (the realistic case
+	// for chat traffic); binary payloads are lossy at the Comms record
+	// layer, not in the wormhole transport itself.
 	const largePayloadSize = 51200 // 50 KiB
-	payload := make([]byte, largePayloadSize)
-	// Fill with a known pattern so we can verify roundtrip.
-	for i := range payload {
-		payload[i] = byte(i % 256)
+	var sb strings.Builder
+	for i := 0; sb.Len() < largePayloadSize; i++ {
+		fmt.Fprintf(&sb, "line %06d: the quick brown fox jumps over the lazy dog\n", i)
 	}
-	// Ensure trailing newline for the wormhole message format.
-	payload = append(payload, '\n')
+	payload := []byte(sb.String())
 
-	// Build a wormhole message with the large payload.
 	msg := NewMessage("alpha", "beta", "test", string(payload), "")
 	msg.ID = "large-payload-test-" + time.Now().Format("20060102T150405Z")
 	msg.From = "alpha"
 	msg.To = "beta"
+	wantBytes := buildMessageBytes(msg)
 
-	// Step 1: Publish from alpha to beta using alpha's spool.
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	senderSpool := newSpool(root, cfg.Repositories[0], 3, "alpha", cloneTimeout, commandTimeout)
 	if err := senderSpool.Publish(msg); err != nil {
 		t.Fatalf("publish failed: %v", err)
 	}
-
-	// Debug: check if message file exists in local working tree
-	msgPath := filepath.Join(senderSpool.git.CloneDir(), "mail", "beta", "new", msg.ID+".md")
-	if _, err := os.Stat(msgPath); err != nil {
-		t.Logf("Message file NOT found at %s: %v", msgPath, err)
-	} else {
-		t.Logf("Message file found at %s", msgPath)
+	if !remoteHas(t, remote, "mail/beta/new/"+msg.ID+".md") {
+		t.Fatal("published message was not pushed to the remote")
 	}
 
-	// Verify the message was pushed to the remote git repo.
-	deadline := time.Now().Add(10 * time.Second)
-	var pushed bool
-	for time.Now().Before(deadline) {
-		pushed = remoteHas(t, remote, "mail/beta/new/"+msg.ID+".md") ||
-			remoteHas(t, remote, "mail/beta/cur/"+msg.ID+".md") ||
-			remoteHas(t, remote, "mail/beta/processed/"+msg.ID+".md")
-		if pushed {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	if !pushed {
-		t.Fatalf("spool did not push claimed message %s to remote", msg.ID)
-	}
-
-	// Step 2: Import into Comms for beta (the recipient).
-	// Set STARFLEET_SHIP_ID to beta so the bus operates as beta.
 	t.Setenv("STARFLEET_SHIP_ID", "beta")
-	defer t.Setenv("STARFLEET_SHIP_ID", "")
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Import into Comms for beta.
-	t.Logf("Calling processPendingMessages for beta...")
+	// First cycle: claim + import + processed.
 	if err := processPendingMessages(root); err != nil {
 		t.Fatalf("processPendingMessages: %v", err)
 	}
-	t.Logf("processPendingMessages returned successfully")
 
-	// Check if message file was moved from new/ to cur/ or processed/
-	msgPathNew := filepath.Join(senderSpool.git.CloneDir(), "mail", "beta", "new", msg.ID+".md")
-	msgPathCur := filepath.Join(root, ".starfleet-ai", "var", "wormholes", "relay", "mail", "beta", "cur", msg.ID+".md")
-	msgPathProc := filepath.Join(root, ".starfleet-ai", "var", "wormholes", "relay", "mail", "beta", "processed", msg.ID+".md")
-	if _, err := os.Stat(msgPathNew); err == nil {
-		t.Logf("Message still in new/")
-	} else {
-		t.Logf("Message NOT in new/")
+	procAbs := filepath.Join(senderSpool.git.CloneDir(), "mail", "beta", maildirDone, msg.ID+".md")
+	if _, err := os.Stat(procAbs); err != nil {
+		t.Fatalf("message must be in processed/ after the first cycle: %v", err)
 	}
-	if _, err := os.Stat(msgPathCur); err == nil {
-		t.Logf("Message found in cur/")
-	} else {
-		t.Logf("Message NOT in cur/")
-	}
-	if _, err := os.Stat(msgPathProc); err == nil {
-		t.Logf("Message found in processed/")
-	} else {
-		t.Logf("Message NOT in processed/")
+	if !remoteHas(t, remote, "mail/beta/processed/"+msg.ID+".md") {
+		t.Fatal("processed transition was not pushed")
 	}
 
-	// Check the inbox via disk scan (matches existing test patterns).
-	// Check the inbox via disk scan (matches existing test patterns).
-	deadline = time.Now().Add(10 * time.Second)
-	importedBefore := 0
-	for time.Now().Before(deadline) {
-		importedBefore = countJSONFiles(filepath.Join(root, ".starfleet-ai", "var", "comms", "msgs", "beta", "unseen")) +
-			countJSONFiles(filepath.Join(root, ".starfleet-ai", "var", "comms", "msgs", "beta", "cur")) +
-			countJSONFiles(filepath.Join(root, ".starfleet-ai", "var", "comms", "msgs", "beta", "processed"))
-		time.Sleep(200 * time.Millisecond)
-		if importedBefore > 0 {
-			break
-		}
+	// Exactly one Comms record, carrying the exact original bytes.
+	records := readCommsRecords(t, bus, "beta")
+	if len(records) != 1 {
+		t.Fatalf("expected exactly 1 comms record, got %d", len(records))
 	}
-	t.Logf("importedBefore = %d", importedBefore)
-	// Process again.
+	rec := records[0]
+	if rec.ExternalSource != cfg.Repositories[0].ID {
+		t.Fatalf("external_source=%q, want %q", rec.ExternalSource, cfg.Repositories[0].ID)
+	}
+	if rec.ExternalID != msg.ID {
+		t.Fatalf("external_id=%q, want %q", rec.ExternalID, msg.ID)
+	}
+	if len(rec.Text) < largePayloadSize {
+		t.Fatalf("payload truncated: got %d bytes, want >= %d", len(rec.Text), largePayloadSize)
+	}
+	if rec.Text != string(wantBytes) {
+		t.Fatalf("imported payload is not byte-identical: got %d bytes, want %d bytes", len(rec.Text), len(wantBytes))
+	}
+	firstID := rec.ID
+
+	// Second cycle: idempotent - no new record, same CommsID, same bytes.
 	if err := processPendingMessages(root); err != nil {
 		t.Fatalf("second processPendingMessages: %v", err)
 	}
-	importedAfter := countJSONFiles(filepath.Join(root, ".starfleet-ai", "var", "comms", "msgs", "beta", "unseen")) +
-		countJSONFiles(filepath.Join(root, ".starfleet-ai", "var", "comms", "msgs", "beta", "seen"))
-	if importedAfter <= importedBefore {
-		t.Fatalf("repeated import did not create new messages: %d -> %d", importedBefore, importedAfter)
+	records2 := readCommsRecords(t, bus, "beta")
+	if len(records2) != 1 {
+		t.Fatalf("repeated cycle must not duplicate the comms record: got %d records, want 1", len(records2))
 	}
-
-	t.Logf("Large payload roundtrip test passed: %d bytes", largePayloadSize)
+	if records2[0].ID != firstID {
+		t.Fatalf("repeated cycle changed the CommsID: %q -> %q", firstID, records2[0].ID)
+	}
+	if records2[0].Text != string(wantBytes) {
+		t.Fatal("repeated cycle changed the payload bytes")
+	}
 }
 
 // ---- daemon lifecycle process tests ----------------------------------------
@@ -4625,5 +4638,212 @@ func TestPostExternalCrashRecoveryImportsExactlyOnce(t *testing.T) {
 	}
 	if remoteHas(t, remote, "mail/alpha/new/"+msg.ID+".md") {
 		t.Fatal("stale new/ entry survived recovery")
+	}
+}
+
+// TestPostImportCrashRecoveryCompletesProcessedTransition covers the crash
+// window between a successful PostExternal import and the cur/ -> processed/
+// transition: the restart must not create a second Comms record, must keep the
+// same external identity and the exact payload bytes, and must finally reach
+// the durable processed state.
+func TestPostImportCrashRecoveryCompletesProcessedTransition(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	msg := NewMessage("beta", "alpha", "ship", "post-import crash window", "")
+	raw := buildMessageBytes(msg)
+
+	// Place the message and perform a complete claim (new/ -> cur/, committed
+	// and pushed), like a normal processing cycle would.
+	newDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirNew)
+	curDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirCur)
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(curDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newDir, msg.ID+".md"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameDurableLocked(filepath.Join(newDir, msg.ID+".md"), filepath.Join(curDir, msg.ID+".md")); err != nil {
+		t.Fatal(err)
+	}
+	rels := []string{sp.rel("alpha", maildirNew, msg.ID+".md"), sp.rel("alpha", maildirCur, msg.ID+".md")}
+	if err := sp.git.CommitAndPushLocked(rels, "wormhole: claim "+msg.ID); err != nil {
+		t.Fatalf("claim commit: %v", err)
+	}
+
+	// The import succeeds ...
+	commsID, err := bus.PostExternal(sp.repo.ID, msg.ID, "beta", "alpha", "ship", "", string(raw))
+	if err != nil {
+		t.Fatalf("PostExternal: %v", err)
+	}
+	if commsID == "" {
+		t.Fatal("PostExternal returned an empty CommsID")
+	}
+	// ... and the daemon dies before cur/ -> processed/.
+
+	// Restart: the next cycle replays the import and must not duplicate it.
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	records := readCommsRecords(t, bus, "alpha")
+	if len(records) != 1 {
+		t.Fatalf("expected exactly 1 comms record after recovery, got %d", len(records))
+	}
+	rec := records[0]
+	if rec.ID != commsID {
+		t.Fatalf("CommsID changed during recovery: %q -> %q", commsID, rec.ID)
+	}
+	if rec.ExternalSource != sp.repo.ID {
+		t.Fatalf("external_source=%q, want %q", rec.ExternalSource, sp.repo.ID)
+	}
+	if rec.ExternalID != msg.ID {
+		t.Fatalf("external_id=%q, want %q", rec.ExternalID, msg.ID)
+	}
+	if rec.Text != string(raw) {
+		t.Fatal("payload bytes changed during recovery")
+	}
+
+	// Durable processed state, locally and on the remote.
+	if _, err := os.Stat(filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirDone, msg.ID+".md")); err != nil {
+		t.Fatalf("message must reach processed/ after recovery: %v", err)
+	}
+	if !remoteHas(t, remote, "mail/alpha/processed/"+msg.ID+".md") {
+		t.Fatal("processed transition was not pushed after recovery")
+	}
+	if _, err := os.Stat(filepath.Join(curDir, msg.ID+".md")); !os.IsNotExist(err) {
+		t.Fatal("message must not remain in cur/ after recovery")
+	}
+}
+
+// TestDirSyncUnsupportedClassification verifies that directory-fsync failures
+// which only mean "not supported on this platform/filesystem" are tolerated,
+// while real I/O errors are not.
+func TestDirSyncUnsupportedClassification(t *testing.T) {
+	unsupported := []error{
+		os.NewSyscallError("fsync", syscall.EINVAL),
+		os.NewSyscallError("fsync", syscall.EOPNOTSUPP),
+		os.NewSyscallError("fsync", syscall.ENOSYS),
+		os.NewSyscallError("fsync", syscall.EPERM),
+		os.NewSyscallError("fsync", syscall.EBADF),
+		&os.PathError{Op: "fsync", Path: "/x", Err: syscall.EINVAL},
+	}
+	for _, err := range unsupported {
+		if !isDirSyncUnsupported(err) {
+			t.Errorf("isDirSyncUnsupported(%v) = false, want true", err)
+		}
+	}
+	fatal := []error{
+		os.NewSyscallError("fsync", syscall.EIO),
+		os.NewSyscallError("fsync", syscall.ENOENT),
+		fmt.Errorf("plain error"),
+	}
+	for _, err := range fatal {
+		if isDirSyncUnsupported(err) {
+			t.Errorf("isDirSyncUnsupported(%v) = true, want false", err)
+		}
+	}
+	// On the test host (linux) directory fsync is supported and must succeed.
+	if err := syncDir(t.TempDir()); err != nil {
+		t.Fatalf("syncDir on a real directory must succeed on linux: %v", err)
+	}
+}
+
+// TestStagingCleanupRemovesLeftovers verifies that leftover staging files in
+// the git-excluded mail/.tmp/ are removed at the start of a locked cycle,
+// while real spool content is untouched.
+func TestStagingCleanupRemovesLeftovers(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	clone := sp.git.CloneDir()
+	tmpDir := filepath.Join(clone, "mail", mailTmpName)
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(tmpDir, ".123.456.tmp")
+	if err := os.WriteFile(stale, []byte("leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Real spool content that must NOT be touched.
+	newDir := filepath.Join(clone, "mail", "alpha", maildirNew)
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(newDir, "keep.md")
+	if err := os.WriteFile(keep, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sp.ensureLayoutLocked("alpha"); err != nil {
+		t.Fatalf("ensureLayoutLocked: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("stale staging file must be removed")
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("real spool content must be untouched: %v", err)
+	}
+	if entries := dirList(tmpDir); len(entries) != 0 {
+		t.Fatalf("staging dir must be empty after cleanup, got %v", entries)
+	}
+}
+
+// TestFailedTransitionLeavesNoStagingFiles verifies that a completed failed/
+// transition does not leave staging files behind in mail/.tmp/.
+func TestFailedTransitionLeavesNoStagingFiles(t *testing.T) {
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+	if err := sp.runOnce(nil, false); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	msg := writeUndeliverable(t, sp, "alpha")
+	if err := sp.runOnce(bus, true); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	failedDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", maildirFailed)
+	if _, err := os.Stat(filepath.Join(failedDir, msg.ID+".md")); err != nil {
+		t.Fatalf("message must be in failed/: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(failedDir, msg.ID+".md.reason")); err != nil {
+		t.Fatalf("diagnostic must be in failed/: %v", err)
+	}
+	tmpDir := filepath.Join(sp.git.CloneDir(), "mail", mailTmpName)
+	if entries := dirList(tmpDir); len(entries) != 0 {
+		t.Fatalf("no staging leftovers expected after failed transition, got %v", entries)
 	}
 }
