@@ -279,7 +279,9 @@ comms:
 
 ```bash
 # Run all wormhole tests
-go test ./internal/wormhole/... -count=1 -timeout 120s
+# 300s: the 89 git-integration tests take ~92-120s depending on machine load;
+# a 120s timeout is a knife-edge (measured FAIL at 120.039s under load).
+go test ./internal/wormhole/... -count=1 -timeout 300s
 
 # Run specific test
 go test ./internal/wormhole/... -run TestPublishProcessLifecycle -v
