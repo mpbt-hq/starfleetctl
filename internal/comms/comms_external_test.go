@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -1400,5 +1401,191 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 		t.Fatal("expected temporary/infrastructure error")
 	} else if IsPermanentPostExternalError(err) {
 		t.Fatalf("temporary infrastructure error must not be permanent, got: %v", err)
+	}
+}
+
+// TestPostExternalOutboxRecord tests that sending a remote message via
+// postAs creates a local outbox record with the transport external ID, so
+// replies can be correlated via ExternalID without a second session.
+func TestPostExternalOutboxRecord(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STARFLEET_SHIP_ID", "Voyager")
+	b, err := New(root)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	// Configure a remote routing domain so Tell sends through the wormhole transport.
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: pegasus
+        transport: wormhole
+        repository: fleet-comms
+`)
+
+	// Register a remote transport that returns a stable wormhole message ID.
+	gotRoute := TransportRoute{}
+	gotMsg := OutboundMessage{}
+	RegisterRemoteTransport("wormhole", func(r string, route TransportRoute, msg OutboundMessage) (string, error) {
+		gotRoute = route
+		gotMsg = msg
+		return "w0-20261114-abcd1234", nil
+	})
+
+	id, err := b.Tell("ChatGPT@pegasus", "hello wormhole", "")
+	if err != nil {
+		t.Fatalf("Tell failed: %v", err)
+	}
+	if id == "" {
+		t.Fatal("Tell returned empty ID")
+	}
+
+	// The outbox record must exist addressed to the sender (b.ShipID = Voyager).
+	// Its file name is the local comms id, not the transport id, so the record
+	// is located through its external identity.
+	unseenDir := filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen")
+	entries, err := os.ReadDir(unseenDir)
+	if err != nil {
+		t.Fatalf("read outbox dir: %v", err)
+	}
+	var rec msgRecord
+	found := false
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, rerr := os.ReadFile(filepath.Join(unseenDir, e.Name()))
+		if rerr != nil {
+			t.Fatalf("read outbox record: %v", rerr)
+		}
+		var candidate msgRecord
+		if jerr := json.Unmarshal(data, &candidate); jerr != nil {
+			t.Fatalf("unmarshal outbox record: %v", jerr)
+		}
+		if candidate.ExternalSource == "fleet-comms" && candidate.ExternalID == "w0-20261114-abcd1234" {
+			rec = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("outbox record not found")
+	}
+	if rec.From != b.ShipID {
+		t.Errorf("rec.From = %q, want %q", rec.From, b.ShipID)
+	}
+	if rec.Target != b.ShipID {
+		t.Errorf("rec.Target = %q, want %q", rec.Target, b.ShipID)
+	}
+	if rec.ExternalSource != "fleet-comms" {
+		t.Errorf("rec.ExternalSource = %q, want %q", rec.ExternalSource, "fleet-comms")
+	}
+	if rec.ExternalID != "w0-20261114-abcd1234" {
+		t.Errorf("rec.ExternalID = %q, want %q", rec.ExternalID, "w0-20261114-abcd1234")
+	}
+	if gotRoute.Repository != "fleet-comms" {
+		t.Errorf("route.Repository = %q, want %q", gotRoute.Repository, "fleet-comms")
+	}
+	// The routing table resolves the remote address to its local part; the
+	// domain travels in the route, the wormhole mailbox is mail/ChatGPT/.
+	if gotMsg.Target != "ChatGPT" {
+		t.Errorf("gotMsg.Target = %q, want %q", gotMsg.Target, "ChatGPT")
+	}
+	if gotMsg.Text != "hello wormhole" {
+		t.Errorf("gotMsg.Text = %q, want %q", gotMsg.Text, "hello wormhole")
+	}
+}
+
+// TestPostExternalReplyCorrelation tests that a reply arriving via PostExternal
+// is correlated with the local outbox record of the original message exactly
+// once: the reply carries its own external id and references the original
+// message through reply_to.
+func TestPostExternalReplyCorrelation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STARFLEET_SHIP_ID", "Voyager")
+	b, err := New(root)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: pegasus
+        transport: wormhole-test
+        repository: fleet-comms
+`)
+
+	const outboundID = "w0-20261114-abcd1234"
+	RegisterRemoteTransport("wormhole-test", func(r string, route TransportRoute, msg OutboundMessage) (string, error) {
+		return outboundID, nil
+	})
+
+	if _, err := b.Tell("ChatGPT@pegasus", "hello wormhole", ""); err != nil {
+		t.Fatalf("Tell failed: %v", err)
+	}
+
+	// The reply arrives with its own external id and references the original
+	// message through reply_to.
+	const replyID = "w0-20261115-reply5678"
+	replyCommsID, err := b.PostExternal("fleet-comms", replyID, "ChatGPT@pegasus", "Voyager", "ship", outboundID, "hello from ChatGPT")
+	if err != nil {
+		t.Fatalf("PostExternal failed: %v", err)
+	}
+	if replyCommsID == "" {
+		t.Fatal("PostExternal returned empty ID")
+	}
+
+	unseenDir := filepath.Join(b.MsgDir, fsafe(b.ShipID), "unseen")
+	entries, err := os.ReadDir(unseenDir)
+	if err != nil {
+		t.Fatalf("read unseen dir: %v", err)
+	}
+	replies := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, rerr := os.ReadFile(filepath.Join(unseenDir, e.Name()))
+		if rerr != nil {
+			t.Fatalf("read record: %v", rerr)
+		}
+		var rec msgRecord
+		if jerr := json.Unmarshal(data, &rec); jerr != nil {
+			t.Fatalf("unmarshal record: %v", jerr)
+		}
+		if rec.ExternalID != replyID {
+			continue
+		}
+		replies++
+		if rec.ReplyTo != outboundID {
+			t.Errorf("rec.ReplyTo = %q, want %q", rec.ReplyTo, outboundID)
+		}
+		if rec.ExternalSource != "fleet-comms" {
+			t.Errorf("rec.ExternalSource = %q, want %q", rec.ExternalSource, "fleet-comms")
+		}
+		if rec.From != "ChatGPT@pegasus" {
+			t.Errorf("rec.From = %q, want %q", rec.From, "ChatGPT@pegasus")
+		}
+		if rec.Text != "hello from ChatGPT" {
+			t.Errorf("rec.Text = %q, want %q", rec.Text, "hello from ChatGPT")
+		}
+	}
+	if replies != 1 {
+		t.Fatalf("expected exactly 1 reply record, got %d", replies)
+	}
+
+	// Republishing the same reply must not create a second copy.
+	again, err := b.PostExternal("fleet-comms", replyID, "ChatGPT@pegasus", "Voyager", "ship", outboundID, "hello from ChatGPT")
+	if err != nil {
+		t.Fatalf("repeated PostExternal failed: %v", err)
+	}
+	if again != replyCommsID {
+		t.Fatalf("repeated PostExternal returned %q, want %q", again, replyCommsID)
 	}
 }
