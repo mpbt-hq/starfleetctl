@@ -3,8 +3,6 @@
 package comms
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -185,10 +183,118 @@ func TestRoutingTableValidation(t *testing.T) {
 	}
 }
 
-// TestRoutingRemoteIdempotentRetryBeforePublish verifies that if the process
-// crashes before the remote publish, a retry with the same content does not
-// publish twice — it reuses the pending outbox record and publishes once.
-func TestRoutingRemoteIdempotentRetryBeforePublish(t *testing.T) {
+func TestRoutingLocalCaseInsensitiveMatch(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Pre-create a mailbox dir spelled "beta".
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sending to "Beta" should resolve to the existing "beta" mailbox.
+	id, err := b.Tell("Beta", "hello", "")
+	if err != nil {
+		t.Fatalf("case-insensitive local recipient: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty id")
+	}
+	// Must be delivered to the existing "beta" dir, not a new "Beta" dir.
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "beta", "unseen", id+".json")); err != nil {
+		t.Fatalf("message not delivered to existing beta mailbox: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "Beta", "unseen")); !os.IsNotExist(err) {
+		t.Fatalf("new Beta dir created instead of using existing beta: %v", err)
+	}
+}
+
+func TestRoutingLocalCaseAmbiguityError(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Pre-create colliding mailbox dirs.
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "Beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sending to "BETA" must fail with an ambiguity error.
+	_, err := b.Tell("BETA", "hello", "")
+	if err == nil {
+		t.Fatal("expected ambiguity error for colliding ship names")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguity error, got: %v", err)
+	}
+}
+
+func TestRoutingLocalNoMatchNewShip(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// New ship "gamma" has no mailbox yet; use as-is.
+	id, err := b.Tell("gamma", "hello", "")
+	if err != nil {
+		t.Fatalf("new local recipient: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty id")
+	}
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "gamma", "unseen", id+".json")); err != nil {
+		t.Fatalf("message not delivered to new gamma mailbox: %v", err)
+	}
+}
+
+func TestRoutingLocalMixedCaseAtLOCAL(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Pre-create a mailbox dir spelled "beta".
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "beta", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sending to "BeTa@LOCAL" should resolve to the existing "beta" mailbox.
+	id, err := b.Tell("BeTa@LOCAL", "hello", "")
+	if err != nil {
+		t.Fatalf("mixed-case @LOCAL recipient: %v", err)
+	}
+	if id == "" {
+		t.Fatal("empty id")
+	}
+	// Must be delivered to the existing "beta" dir.
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "beta", "unseen", id+".json")); err != nil {
+		t.Fatalf("message not delivered to existing beta mailbox: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "BeTa", "unseen")); !os.IsNotExist(err) {
+		t.Fatalf("new BeTa dir created instead of using existing beta: %v", err)
+	}
+}
+
+func TestRoutingRemoteThroughTransportWithCollidingLocal(t *testing.T) {
 	root := t.TempDir()
 	writeCommsConfig(t, root, `
 comms:
@@ -201,47 +307,107 @@ comms:
 `)
 	b := newRoutingTestBus(t, root)
 
-	publishCount := 0
+	// Pre-create colliding local mailboxes spelled "bob" and "Bob".
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "bob", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b.MsgDir, "Bob", "unseen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bobBefore := countJSONInDir(t, filepath.Join(b.MsgDir, "bob", "unseen"))
+	bobBefore += countJSONInDir(t, filepath.Join(b.MsgDir, "Bob", "unseen"))
+
+	var got OutboundMessage
+	var gotRoute TransportRoute
 	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
-		publishCount++
-		return "ext-123", nil
+		gotRoute = route
+		got = msg
+		return "ext-456", nil
 	})
 
-	// First send - should publish and create pending record
-	id1, err := b.Tell("bob@peer.example", "hello world", "")
+	// Remote recipient with colliding local mailboxes must still go to transport.
+	id, err := b.Tell("BOB@peer.example", "remote hello", "")
+	if err != nil {
+		t.Fatalf("remote send with colliding local mailbox: %v", err)
+	}
+	if id != "ext-456" {
+		t.Fatalf("returned id = %q, want transport id", id)
+	}
+	if gotRoute.Transport != "fake-route" || gotRoute.Repository != "relay" || gotRoute.Domain != "peer.example" {
+		t.Fatalf("unexpected route: %+v", gotRoute)
+	}
+	if got.Target != "BOB" || got.From != "alpha" || got.Text != "remote hello" {
+		t.Fatalf("unexpected outbound message: %+v", got)
+	}
+	// Must NOT write into either local mailbox.
+	bobAfter := countJSONInDir(t, filepath.Join(b.MsgDir, "bob", "unseen"))
+	bobAfter += countJSONInDir(t, filepath.Join(b.MsgDir, "Bob", "unseen"))
+	if bobAfter != bobBefore {
+		t.Fatalf("remote message written into local mailbox: %d json before, %d after", bobBefore, bobAfter)
+	}
+}
+
+// countJSONInDir counts .json files in dir (returns 0 if dir does not exist).
+func countJSONInDir(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatalf("read dir %q: %v", dir, err)
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestOutboxIdempotentRetrySameContent(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	callCount := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callCount++
+		return fmt.Sprintf("ext-%d", callCount), nil
+	})
+
+	// First send
+	id1, err := b.Tell("bob@peer.example", "hello world", "corr-1")
 	if err != nil {
 		t.Fatalf("first send: %v", err)
 	}
-	if id1 != "ext-123" {
-		t.Fatalf("first send id = %q, want transport id", id1)
-	}
-	if publishCount != 1 {
-		t.Fatalf("publishCount = %d after first send, want 1", publishCount)
+	if id1 != "ext-1" {
+		t.Fatalf("first id = %q, want ext-1", id1)
 	}
 
-	// Simulate retry with SAME content (new bus instance, same root).
-	// The first send completed fully (publish + local update with ExternalID).
-	// The retry should find the complete record and return the transport ID
-	// WITHOUT calling publish again.
-	b2 := newRoutingTestBus(t, root)
-	publishCount = 0
-	id2, err := b2.Tell("bob@peer.example", "hello world", "")
+	// Second send with identical content - should reuse same transport ID
+	id2, err := b.Tell("bob@peer.example", "hello world", "corr-1")
 	if err != nil {
-		t.Fatalf("retry send: %v", err)
+		t.Fatalf("second send: %v", err)
 	}
-	if id2 != "ext-123" {
-		t.Fatalf("retry send id = %q, want same transport id", id2)
+	if id2 != "ext-1" {
+		t.Fatalf("second id = %q, want ext-1 (idempotent)", id2)
 	}
-	// With completed record, retry returns cached transport ID without re-publishing.
-	if publishCount != 0 {
-		t.Fatalf("publishCount = %d on retry, want 0 (no duplicate publish)", publishCount)
+	if callCount != 1 {
+		t.Fatalf("transport called %d times, want 1", callCount)
 	}
 }
 
-// TestRoutingRemoteRetryAfterPublishFailure verifies that if the remote
-// publish fails, the local pending record remains and a retry will
-// attempt the publish again.
-func TestRoutingRemoteRetryAfterPublishFailure(t *testing.T) {
+func TestOutboxDifferentDestinationSameText(t *testing.T) {
 	root := t.TempDir()
 	writeCommsConfig(t, root, `
 comms:
@@ -254,117 +420,176 @@ comms:
 `)
 	b := newRoutingTestBus(t, root)
 
-	// Use a shared counter so both first attempt and retry use the same logic
-	// First call fails, second call succeeds
-	totalAttempts := 0
+	callCount := 0
 	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
-		totalAttempts++
-		if totalAttempts == 1 {
+		callCount++
+		return fmt.Sprintf("ext-%d", callCount), nil
+	})
+
+	// Send to bob
+	id1, err := b.Tell("bob@peer.example", "hello world", "corr-1")
+	if err != nil {
+		t.Fatalf("send to bob: %v", err)
+	}
+
+	// Send same text to alice - MUST produce different hash and different transport call
+	id2, err := b.Tell("alice@peer.example", "hello world", "corr-1")
+	if err != nil {
+		t.Fatalf("send to alice: %v", err)
+	}
+
+	if id1 == id2 {
+		t.Fatalf("different destinations produced same id: %s", id1)
+	}
+	if callCount != 2 {
+		t.Fatalf("transport called %d times, want 2 (different destinations)", callCount)
+	}
+}
+
+func TestOutboxRetryAfterSeen(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	callCount := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callCount++
+		return fmt.Sprintf("ext-%d", callCount), nil
+	})
+
+	// First send
+	id1, err := b.Tell("bob@peer.example", "retry test", "corr-1")
+	if err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+	if id1 != "ext-1" {
+		t.Fatalf("first id = %q, want ext-1", id1)
+	}
+
+	// Simulate the message being acked/moved to seen/ by directly calling ack
+	// We need to find the outbox record ID (the hash-based ID) to ack it
+	// The outbox record is in the sender's (alpha) unseen/ dir
+	entries, err := os.ReadDir(filepath.Join(b.MsgDir, "alpha", "unseen"))
+	if err != nil {
+		t.Fatalf("read unseen: %v", err)
+	}
+	var outboxID string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			data, _ := os.ReadFile(filepath.Join(b.MsgDir, "alpha", "unseen", e.Name()))
+			var rec msgRecord
+			if json.Unmarshal(data, &rec) == nil && rec.ExternalID == "ext-1" {
+				outboxID = rec.ID
+				break
+			}
+		}
+	}
+	if outboxID == "" {
+		t.Fatal("could not find outbox record for ext-1")
+	}
+
+	// Move to seen/ (simulate ack/delivery)
+	if err := b.ackMessage(outboxID); err != nil {
+		t.Fatalf("ack outbox record: %v", err)
+	}
+
+	// Now retry sending same content - should find the seen record and reuse ext-1
+	id2, err := b.Tell("bob@peer.example", "retry test", "corr-1")
+	if err != nil {
+		t.Fatalf("retry send: %v", err)
+	}
+	if id2 != "ext-1" {
+		t.Fatalf("retry id = %q, want ext-1 (idempotent after seen)", id2)
+	}
+	if callCount != 1 {
+		t.Fatalf("transport called %d times, want 1 (reused after seen)", callCount)
+	}
+}
+
+func TestOutboxPublishFailureRetries(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	callCount := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callCount++
+		if callCount == 1 {
 			return "", fmt.Errorf("simulated transport failure")
 		}
-		return "ext-success", nil
+		return "ext-2", nil
 	})
 
-	// First attempt: publish fails
-	_, err := b.Tell("bob@peer.example", "hello world", "")
-	if err == nil || !strings.Contains(err.Error(), "simulated transport failure") {
-		t.Fatalf("first send should fail: %v", err)
+	// First send - transport fails
+	_, err := b.Tell("bob@peer.example", "failure test", "corr-1")
+	if err == nil {
+		t.Fatal("first send should have failed")
 	}
-	if totalAttempts != 1 {
-		t.Fatalf("totalAttempts = %d after first failure, want 1", totalAttempts)
+	if callCount != 1 {
+		t.Fatalf("transport called %d times on first attempt", callCount)
 	}
 
-	// Second attempt (retry): publish succeeds
-	b2 := newRoutingTestBus(t, root)
-	id2, err := b2.Tell("bob@peer.example", "hello world", "")
+	// Pending record should exist in alpha/unseen/
+	entries, err := os.ReadDir(filepath.Join(b.MsgDir, "alpha", "unseen"))
 	if err != nil {
-		t.Fatalf("retry send: %v", err)
+		t.Fatalf("read unseen: %v", err)
 	}
-	if id2 != "ext-success" {
-		t.Fatalf("retry send id = %q, want success transport id", id2)
+	found := false
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			data, _ := os.ReadFile(filepath.Join(b.MsgDir, "alpha", "unseen", e.Name()))
+			var rec msgRecord
+			if json.Unmarshal(data, &rec) == nil && rec.ExternalID == "" && rec.ExternalHash != "" {
+				found = true
+				break
+			}
+		}
 	}
-	if totalAttempts != 2 {
-		t.Fatalf("totalAttempts = %d on retry, want 2", totalAttempts)
+	if !found {
+		t.Fatal("pending outbox record not found after transport failure")
 	}
-}
 
-// TestRoutingRemoteRetryWithPendingRecord verifies that if a pending record
-// exists (ExternalID empty), a retry will call publish again.
-// This simulates a crash AFTER publish but BEFORE local update with transport ID.
-// NOTE: Without transport-level idempotency key, this WILL cause a duplicate
-// remote publish if the first publish actually succeeded. This is the
-// documented fundamental limitation.
-func TestRoutingRemoteRetryWithPendingRecord(t *testing.T) {
-	root := t.TempDir()
-	writeCommsConfig(t, root, `
-comms:
-  routing:
-    local_domain: local
-    domains:
-      - domain: peer.example
-        transport: fake-route
-        repository: relay
-`)
-
-	// Manually create a pending outbox record (simulating crash after publish,
-	// before local update with transport ID).
-	b := newRoutingTestBus(t, root)
-	hash := sha256.Sum256([]byte("hello world"))
-	outID := hex.EncodeToString(hash[:])
-	pending := msgRecord{
-		ID:             outID,
-		Epoch:          now(),
-		ISO:            isots(),
-		From:           "alpha",
-		Target:         "alpha",
-		Text:           "hello world",
-		Type:           "ship",
-		ExternalSource: "relay",
-		ExternalID:     "", // pending - no transport ID yet
-		ExternalHash:   hex.EncodeToString(hash[:]),
-	}
-	data, err := json.Marshal(pending)
+	// Second send - transport succeeds
+	id2, err := b.Tell("bob@peer.example", "failure test", "corr-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("second send: %v", err)
 	}
-	path, err := b.mfile(outID, "alpha")
-	if err != nil {
-		t.Fatal(err)
+	if id2 != "ext-2" {
+		t.Fatalf("second id = %q, want ext-2", id2)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		t.Fatal(err)
+	if callCount != 2 {
+		t.Fatalf("transport called %d times, want 2", callCount)
 	}
 
-	// Now retry with same content - should find pending record and re-publish
-	attempt := 0
-	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
-		attempt++
-		return "ext-retry", nil
-	})
-
-	b2 := newRoutingTestBus(t, root)
-	id2, err := b2.Tell("bob@peer.example", "hello world", "")
+	// Record should now have ExternalID = ext-2
+	entries, err = os.ReadDir(filepath.Join(b.MsgDir, "alpha", "unseen"))
 	if err != nil {
-		t.Fatalf("retry send: %v", err)
+		t.Fatalf("read unseen after success: %v", err)
 	}
-	if id2 != "ext-retry" {
-		t.Fatalf("retry send id = %q, want transport id", id2)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			data, _ := os.ReadFile(filepath.Join(b.MsgDir, "alpha", "unseen", e.Name()))
+			var rec msgRecord
+			if json.Unmarshal(data, &rec) == nil && rec.ExternalID == "ext-2" {
+				return // success
+			}
+		}
 	}
-	// With pending record (no ExternalID), we re-publish to get the transport ID
-	if attempt != 1 {
-		t.Fatalf("attempt = %d on retry with pending record, want 1", attempt)
-	}
-
-	// Verify the record now has ExternalID
-	updated, err := b2.findOutboxByHash("alpha", hash[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated == nil || updated.ExternalID != "ext-retry" {
-		t.Fatalf("record not updated with transport ID: %+v", updated)
-	}
+	t.Fatal("updated outbox record with transport ID not found")
 }

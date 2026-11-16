@@ -147,8 +147,14 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 	// Resolve the recipient through the Comms routing table before touching
 	// the local bus. Remote recipients are handed to their transport via the
 	// same normal send path as local ones.
+	var (
+		localTarget string
+		route       TransportRoute
+		remote      bool
+	)
 	if target != "all" {
-		localTarget, route, remote, err := b.resolveTarget(target)
+		var err error
+		localTarget, route, remote, err = b.resolveTarget(target)
 		if err != nil {
 			return "", err
 		}
@@ -165,8 +171,11 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 
 			// Write a durable pending outbox record BEFORE remote publish so
 			// retries reuse the same operation ID and don't publish twice.
-			// The ID is a deterministic hash of the message content.
-			hash := sha256.Sum256([]byte(clean(summary)))
+			// The ID is a deterministic hash of the message content INCLUDING
+			// destination, domain, type, and reply_to to avoid collisions
+			// between different messages with identical text.
+			hashInput := fmt.Sprintf("%s|%s|%s|%s|%s", clean(summary), localTarget, route.Domain, msgType, replyTo)
+			hash := sha256.Sum256([]byte(hashInput))
 			outID := hex.EncodeToString(hash[:])
 
 			// Check if we already have an outbox record for this content
@@ -179,6 +188,12 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 				// Already published and recorded - return existing transport ID.
 				return existing.ExternalID, nil
 			}
+
+			lock, err := b.lockBus()
+			if err != nil {
+				return "", err
+			}
+			defer lock.Close()
 
 			// Write pending outbox record BEFORE remote publish.
 			pending := msgRecord{
@@ -202,7 +217,7 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 			if err != nil {
 				return "", err
 			}
-			// Atomic write: temp file, fsync, rename.
+			// Atomic write: temp file, fsync, rename, fsync directory.
 			tmp := path + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
 			if err := os.WriteFile(tmp, data, 0o644); err != nil {
 				os.Remove(tmp)
@@ -257,8 +272,9 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 				return "", err
 			}
 			return transportID, nil
+		} else {
+			target = localTarget
 		}
-		target = localTarget
 	}
 
 	lock, err := b.lockBus()
@@ -266,6 +282,7 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 		return "", err
 	}
 	defer lock.Close()
+
 	id, err := b.nextID()
 	if err != nil {
 		return "", err
@@ -1204,6 +1221,50 @@ func (b *Bus) DoPrune() error {
 	return nil
 }
 
+// findOutboxByHash searches for an existing outbox record with the given
+// content hash. It searches both unseen/ and seen/ directories (and legacy
+// flat paths) to handle the case where a message was already delivered and
+// moved to seen/ before a retry occurs.
+// Returns the record if found, nil if not found.
+func (b *Bus) findOutboxByHash(from string, hash []byte) (*msgRecord, error) {
+	hashStr := hex.EncodeToString(hash)
+
+	// Search order: unseen/, seen/, legacy flat
+	dirs := []string{
+		filepath.Join(b.MsgDir, fsafe(from), "unseen"),
+		filepath.Join(b.MsgDir, fsafe(from), "seen"),
+		b.MsgDir,
+	}
+
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var rec msgRecord
+			if err := json.Unmarshal(data, &rec); err != nil {
+				continue
+			}
+			if rec.ExternalHash == hashStr {
+				return &rec, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // removeMsgCopies deletes every on-disk copy of message id for recipient
 // target: the legacy flat file, plus the per-target unseen/ and seen/ copies.
 // Returns true if at least one file was removed.
@@ -1421,39 +1482,6 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64, onPoll ...func
 		}
 		time.Sleep(5 * time.Second)
 	}
-}
-
-// findOutboxByHash searches for an outbox record (message addressed to the
-// sender with ExternalHash matching the given hash). Used for idempotent
-// retry detection in postAs remote sends.
-func (b *Bus) findOutboxByHash(from string, hash []byte) (*msgRecord, error) {
-	hashHex := hex.EncodeToString(hash)
-	targetDir := filepath.Join(b.MsgDir, fsafe(from), "unseen")
-	entries, err := os.ReadDir(targetDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		path := filepath.Join(targetDir, e.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var rec msgRecord
-		if err := json.Unmarshal(data, &rec); err != nil {
-			continue
-		}
-		if rec.ExternalHash == hashHex && rec.From == from && rec.Target == from {
-			return &rec, nil
-		}
-	}
-	return nil, nil
 }
 
 // usageErr is a sentinel error type whose message is already fully-formatted
