@@ -162,13 +162,101 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 			if msgType == "" {
 				msgType = "ship"
 			}
-			return b.publishRemote(route, OutboundMessage{
+
+			// Write a durable pending outbox record BEFORE remote publish so
+			// retries reuse the same operation ID and don't publish twice.
+			// The ID is a deterministic hash of the message content.
+			hash := sha256.Sum256([]byte(clean(summary)))
+			outID := hex.EncodeToString(hash[:])
+
+			// Check if we already have an outbox record for this content
+			// (retry scenario: same content, same session).
+			existing, err := b.findOutboxByHash(from, hash[:])
+			if err != nil {
+				return "", err
+			}
+			if existing != nil && existing.ExternalID != "" {
+				// Already published and recorded - return existing transport ID.
+				return existing.ExternalID, nil
+			}
+
+			// Write pending outbox record BEFORE remote publish.
+			pending := msgRecord{
+				ID:             outID,
+				Epoch:          now(),
+				ISO:            isots(),
+				From:           from,
+				Target:         from,
+				Text:           clean(summary),
+				Type:           msgType,
+				ReplyTo:        replyTo,
+				ExternalSource: route.Repository,
+				ExternalID:     "", // pending - will be filled after remote publish
+				ExternalHash:   hex.EncodeToString(hash[:]),
+			}
+			data, err := json.Marshal(pending)
+			if err != nil {
+				return "", err
+			}
+			path, err := b.mfile(outID, from)
+			if err != nil {
+				return "", err
+			}
+			// Atomic write: temp file, fsync, rename.
+			tmp := path + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
+			if err := os.WriteFile(tmp, data, 0o644); err != nil {
+				os.Remove(tmp)
+				return "", err
+			}
+			if err := syncFile(tmp); err != nil {
+				os.Remove(tmp)
+				return "", err
+			}
+			if err := os.Rename(tmp, path); err != nil {
+				os.Remove(tmp)
+				return "", err
+			}
+			if err := syncDir(filepath.Dir(path)); err != nil {
+				return "", err
+			}
+
+			// Now call remote publish.
+			transportID, err := b.publishRemote(route, OutboundMessage{
 				From:    from,
 				Target:  localTarget,
 				Text:    clean(summary),
 				Type:    msgType,
 				ReplyTo: replyTo,
 			})
+			if err != nil {
+				// Local pending record remains; retry will find it and retry publish.
+				return "", err
+			}
+
+			// Update local record with transport ID.
+			pending.ExternalID = transportID
+			data, err = json.Marshal(pending)
+			if err != nil {
+				return "", err
+			}
+			// Atomic update.
+			tmp = path + ".tmp." + strconv.FormatInt(time.Now().UnixNano(), 10)
+			if err := os.WriteFile(tmp, data, 0o644); err != nil {
+				os.Remove(tmp)
+				return "", err
+			}
+			if err := syncFile(tmp); err != nil {
+				os.Remove(tmp)
+				return "", err
+			}
+			if err := os.Rename(tmp, path); err != nil {
+				os.Remove(tmp)
+				return "", err
+			}
+			if err := syncDir(filepath.Dir(path)); err != nil {
+				return "", err
+			}
+			return transportID, nil
 		}
 		target = localTarget
 	}
@@ -1333,6 +1421,39 @@ func (b *Bus) AskAndWait(question, ctrl string, timeoutSec int64, onPoll ...func
 		}
 		time.Sleep(5 * time.Second)
 	}
+}
+
+// findOutboxByHash searches for an outbox record (message addressed to the
+// sender with ExternalHash matching the given hash). Used for idempotent
+// retry detection in postAs remote sends.
+func (b *Bus) findOutboxByHash(from string, hash []byte) (*msgRecord, error) {
+	hashHex := hex.EncodeToString(hash)
+	targetDir := filepath.Join(b.MsgDir, fsafe(from), "unseen")
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(targetDir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var rec msgRecord
+		if err := json.Unmarshal(data, &rec); err != nil {
+			continue
+		}
+		if rec.ExternalHash == hashHex && rec.From == from && rec.Target == from {
+			return &rec, nil
+		}
+	}
+	return nil, nil
 }
 
 // usageErr is a sentinel error type whose message is already fully-formatted

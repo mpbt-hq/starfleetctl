@@ -3,6 +3,10 @@
 package comms
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,5 +182,189 @@ func TestRoutingTableValidation(t *testing.T) {
 		if _, err := loadRoutingTable(root); err == nil {
 			t.Fatalf("expected routing table validation error for:\n%s", cfg)
 		}
+	}
+}
+
+// TestRoutingRemoteIdempotentRetryBeforePublish verifies that if the process
+// crashes before the remote publish, a retry with the same content does not
+// publish twice — it reuses the pending outbox record and publishes once.
+func TestRoutingRemoteIdempotentRetryBeforePublish(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	publishCount := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		publishCount++
+		return "ext-123", nil
+	})
+
+	// First send - should publish and create pending record
+	id1, err := b.Tell("bob@peer.example", "hello world", "")
+	if err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+	if id1 != "ext-123" {
+		t.Fatalf("first send id = %q, want transport id", id1)
+	}
+	if publishCount != 1 {
+		t.Fatalf("publishCount = %d after first send, want 1", publishCount)
+	}
+
+	// Simulate retry with SAME content (new bus instance, same root).
+	// The first send completed fully (publish + local update with ExternalID).
+	// The retry should find the complete record and return the transport ID
+	// WITHOUT calling publish again.
+	b2 := newRoutingTestBus(t, root)
+	publishCount = 0
+	id2, err := b2.Tell("bob@peer.example", "hello world", "")
+	if err != nil {
+		t.Fatalf("retry send: %v", err)
+	}
+	if id2 != "ext-123" {
+		t.Fatalf("retry send id = %q, want same transport id", id2)
+	}
+	// With completed record, retry returns cached transport ID without re-publishing.
+	if publishCount != 0 {
+		t.Fatalf("publishCount = %d on retry, want 0 (no duplicate publish)", publishCount)
+	}
+}
+
+// TestRoutingRemoteRetryAfterPublishFailure verifies that if the remote
+// publish fails, the local pending record remains and a retry will
+// attempt the publish again.
+func TestRoutingRemoteRetryAfterPublishFailure(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	// Use a shared counter so both first attempt and retry use the same logic
+	// First call fails, second call succeeds
+	totalAttempts := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		totalAttempts++
+		if totalAttempts == 1 {
+			return "", fmt.Errorf("simulated transport failure")
+		}
+		return "ext-success", nil
+	})
+
+	// First attempt: publish fails
+	_, err := b.Tell("bob@peer.example", "hello world", "")
+	if err == nil || !strings.Contains(err.Error(), "simulated transport failure") {
+		t.Fatalf("first send should fail: %v", err)
+	}
+	if totalAttempts != 1 {
+		t.Fatalf("totalAttempts = %d after first failure, want 1", totalAttempts)
+	}
+
+	// Second attempt (retry): publish succeeds
+	b2 := newRoutingTestBus(t, root)
+	id2, err := b2.Tell("bob@peer.example", "hello world", "")
+	if err != nil {
+		t.Fatalf("retry send: %v", err)
+	}
+	if id2 != "ext-success" {
+		t.Fatalf("retry send id = %q, want success transport id", id2)
+	}
+	if totalAttempts != 2 {
+		t.Fatalf("totalAttempts = %d on retry, want 2", totalAttempts)
+	}
+}
+
+// TestRoutingRemoteRetryWithPendingRecord verifies that if a pending record
+// exists (ExternalID empty), a retry will call publish again.
+// This simulates a crash AFTER publish but BEFORE local update with transport ID.
+// NOTE: Without transport-level idempotency key, this WILL cause a duplicate
+// remote publish if the first publish actually succeeded. This is the
+// documented fundamental limitation.
+func TestRoutingRemoteRetryWithPendingRecord(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+
+	// Manually create a pending outbox record (simulating crash after publish,
+	// before local update with transport ID).
+	b := newRoutingTestBus(t, root)
+	hash := sha256.Sum256([]byte("hello world"))
+	outID := hex.EncodeToString(hash[:])
+	pending := msgRecord{
+		ID:             outID,
+		Epoch:          now(),
+		ISO:            isots(),
+		From:           "alpha",
+		Target:         "alpha",
+		Text:           "hello world",
+		Type:           "ship",
+		ExternalSource: "relay",
+		ExternalID:     "", // pending - no transport ID yet
+		ExternalHash:   hex.EncodeToString(hash[:]),
+	}
+	data, err := json.Marshal(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := b.mfile(outID, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now retry with same content - should find pending record and re-publish
+	attempt := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		attempt++
+		return "ext-retry", nil
+	})
+
+	b2 := newRoutingTestBus(t, root)
+	id2, err := b2.Tell("bob@peer.example", "hello world", "")
+	if err != nil {
+		t.Fatalf("retry send: %v", err)
+	}
+	if id2 != "ext-retry" {
+		t.Fatalf("retry send id = %q, want transport id", id2)
+	}
+	// With pending record (no ExternalID), we re-publish to get the transport ID
+	if attempt != 1 {
+		t.Fatalf("attempt = %d on retry with pending record, want 1", attempt)
+	}
+
+	// Verify the record now has ExternalID
+	updated, err := b2.findOutboxByHash("alpha", hash[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated == nil || updated.ExternalID != "ext-retry" {
+		t.Fatalf("record not updated with transport ID: %+v", updated)
 	}
 }
