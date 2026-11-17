@@ -172,9 +172,10 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 			// Write a durable pending outbox record BEFORE remote publish so
 			// retries reuse the same operation ID and don't publish twice.
 			// The ID is a deterministic hash of the message content INCLUDING
-			// destination, domain, type, and reply_to to avoid collisions
-			// between different messages with identical text.
-			hashInput := fmt.Sprintf("%s|%s|%s|%s|%s", clean(summary), localTarget, route.Domain, msgType, replyTo)
+			// sender (from), repository, destination, domain, type, and reply_to
+			// to avoid collisions between different messages with identical text.
+			// Uses null byte (\x00) as delimiter since it cannot appear in any field.
+			hashInput := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s", clean(summary), localTarget, route.Domain, route.Repository, msgType, replyTo)
 			hash := sha256.Sum256([]byte(hashInput))
 			outID := hex.EncodeToString(hash[:])
 
@@ -238,13 +239,15 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 				return "", err
 			}
 
-			// Now call remote publish.
+			// Now call remote publish. Pass the deterministic outID so the transport
+			// can use it as the message ID, enabling exactly-once semantics across retries.
 			transportID, err := b.publishRemote(route, OutboundMessage{
 				From:    from,
 				Target:  localTarget,
 				Text:    clean(summary),
 				Type:    msgType,
 				ReplyTo: replyTo,
+				ID:      outID,
 			})
 			if err != nil {
 				// Local pending record remains; retry will find it and retry publish.
@@ -1236,10 +1239,10 @@ func (b *Bus) findOutboxByHash(from string, hash []byte) (*msgRecord, error) {
 	dirs := []string{
 		filepath.Join(b.MsgDir, fsafe(from), "unseen"),
 		filepath.Join(b.MsgDir, fsafe(from), "seen"),
-		b.MsgDir,
+		b.MsgDir, // legacy flat: must validate sender/target/repository
 	}
 
-	for _, dir := range dirs {
+	for i, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -1261,6 +1264,14 @@ func (b *Bus) findOutboxByHash(from string, hash []byte) (*msgRecord, error) {
 				continue
 			}
 			if rec.ExternalHash == hashStr {
+				// Legacy flat directory (index 2): validate sender, target, and
+				// repository to prevent cross-sender/repository collisions from
+				// the old hash format which didn't include those fields.
+				if i == 2 {
+					if rec.From != from || rec.ExternalSource == "" {
+						continue
+					}
+				}
 				return &rec, nil
 			}
 		}

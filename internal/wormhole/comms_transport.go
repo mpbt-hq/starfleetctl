@@ -72,6 +72,11 @@ func PublishRemoteMessage(root string, route comms.TransportRoute, msg comms.Out
 	if logicalSender != "" {
 		wm.Sender = logicalSender
 	}
+	// If the caller provided a deterministic outbox ID, use it as the message ID.
+	// This enables exactly-once semantics across retries.
+	if msg.ID != "" {
+		wm.ID = msg.ID
+	}
 	if err := sp.Publish(wm); err != nil {
 		return "", err
 	}

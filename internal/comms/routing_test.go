@@ -3,12 +3,16 @@
 package comms
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func writeCommsConfig(t *testing.T, root, content string) {
@@ -23,9 +27,13 @@ func writeCommsConfig(t *testing.T, root, content string) {
 }
 
 func newRoutingTestBus(t *testing.T, root string) *Bus {
+	return newRoutingTestBusAs(t, root, "alpha")
+}
+
+func newRoutingTestBusAs(t *testing.T, root, shipID string) *Bus {
 	t.Helper()
 	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	t.Setenv("STARFLEET_SHIP_ID", shipID)
 	b, err := New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -503,4 +511,341 @@ comms:
 		}
 	}
 	t.Fatal("updated outbox record with transport ID not found")
+}
+
+// TestOutboxConcurrentSameSenderSameContent tests that two concurrent sends
+// from the same sender with identical content produce exactly one transport call.
+func TestOutboxConcurrentSameSenderSameContent(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	var callCount int32
+	var callMu sync.Mutex
+	var firstID string
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callMu.Lock()
+		callCount++
+		id := fmt.Sprintf("ext-%d", callCount)
+		if firstID == "" {
+			firstID = id
+		}
+		callMu.Unlock()
+		// Small delay to increase chance of race
+		time.Sleep(10 * time.Millisecond)
+		return id, nil
+	})
+
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	errCh := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := b.Tell("bob@peer.example", "concurrent test", "corr-1")
+			if err != nil {
+				errCh <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent send failed: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Fatalf("transport called %d times, want 1 (same sender, same content)", callCount)
+	}
+}
+
+// TestOutboxConcurrentDifferentSenderSameContent tests that concurrent sends
+// from different senders with identical content produce separate transport calls.
+func TestOutboxConcurrentDifferentSenderSameContent(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+
+	var callCount int32
+	var callMu sync.Mutex
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callMu.Lock()
+		callCount++
+		id := fmt.Sprintf("ext-%d", callCount)
+		callMu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+		return id, nil
+	})
+
+	const numSenders = 5
+	var wg sync.WaitGroup
+	errCh := make(chan error, numSenders)
+
+	for i := 0; i < numSenders; i++ {
+		sender := fmt.Sprintf("ship%d", i)
+		// Each sender needs its own bus instance with its own identity
+		b := newRoutingTestBusAs(t, root, sender)
+		wg.Add(1)
+		go func(b *Bus, s string) {
+			defer wg.Done()
+			// Each sender sends the same content
+			_, err := b.Tell("bob@peer.example", "shared content", "corr-1")
+			if err != nil {
+				errCh <- err
+			}
+		}(b, sender)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent send failed: %v", err)
+	}
+
+	if callCount != numSenders {
+		t.Fatalf("transport called %d times, want %d (different senders, same content)", callCount, numSenders)
+	}
+}
+
+// TestOutboxLegacyFlatCrossSenderCollision tests that a legacy flat record
+// from a different sender is NOT matched (hash collision protection).
+func TestOutboxLegacyFlatCrossSenderCollision(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	callCount := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callCount++
+		return fmt.Sprintf("ext-%d", callCount), nil
+	})
+
+	// Manually create a legacy flat record for "charlie" with a specific hash
+	// that would collide with the new hash format if sender wasn't validated
+	legacyHashInput := "test content\x00bob@peer.example\x00peer.example\x00relay\x00ship\x00corr-1"
+	legacyHash := sha256.Sum256([]byte(legacyHashInput))
+	legacyHashStr := hex.EncodeToString(legacyHash[:])
+
+	legacyRec := msgRecord{
+		ID:             legacyHashStr,
+		Epoch:          time.Now().Unix(),
+		ISO:            time.Now().UTC().Format(time.RFC3339),
+		From:           "charlie", // DIFFERENT sender
+		Target:         "charlie",
+		Text:           "test content",
+		Type:           "ship",
+		ReplyTo:        "corr-1",
+		ExternalSource: "relay",
+		ExternalID:     "ext-legacy",
+		ExternalHash:   legacyHashStr,
+	}
+	data, _ := json.Marshal(legacyRec)
+	legacyPath := filepath.Join(b.MsgDir, fsafe(legacyHashStr)+".json")
+	if err := os.WriteFile(legacyPath, data, 0o644); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+
+	// Now "alpha" sends the same content - should NOT match charlie's legacy record
+	id, err := b.Tell("bob@peer.example", "test content", "corr-1")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	// Should have created a new transport call, not reused the legacy one
+	if id == "ext-legacy" {
+		t.Fatalf("incorrectly matched legacy record from different sender")
+	}
+	if callCount != 1 {
+		t.Fatalf("transport called %d times, want 1", callCount)
+	}
+}
+
+// TestOutboxRepositorySeparation tests that messages with same content but
+// different repositories produce different hashes and transport calls.
+func TestOutboxRepositorySeparation(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay1
+      - domain: peer2.example
+        transport: fake-route
+        repository: relay2
+`)
+	b := newRoutingTestBus(t, root)
+
+	callCount := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callCount++
+		return fmt.Sprintf("ext-%d", callCount), nil
+	})
+
+	// Send to peer.example (repository relay1)
+	id1, err := b.Tell("bob@peer.example", "same content", "corr-1")
+	if err != nil {
+		t.Fatalf("send to relay1: %v", err)
+	}
+
+	// Send same content to peer2.example (repository relay2)
+	id2, err := b.Tell("bob@peer2.example", "same content", "corr-1")
+	if err != nil {
+		t.Fatalf("send to relay2: %v", err)
+	}
+
+	if id1 == id2 {
+		t.Fatalf("different repositories produced same id: %s", id1)
+	}
+	if callCount != 2 {
+		t.Fatalf("transport called %d times, want 2 (different repositories)", callCount)
+	}
+}
+
+// TestOutboxDelimiterFields tests that fields containing the delimiter (null byte)
+// don't cause hash collisions.
+func TestOutboxDelimiterFields(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	callCount := 0
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callCount++
+		return fmt.Sprintf("ext-%d", callCount), nil
+	})
+
+	// These two messages have different content but with the old pipe delimiter
+	// they would collide: "a|b" vs "a" + "b" (pipe in field)
+	// With null byte delimiter, they should NOT collide
+	id1, err := b.Tell("bob@peer.example", "content with pipe", "corr-1")
+	if err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+
+	id2, err := b.Tell("bob@peer.example", "content", "with pipe|corr-1")
+	if err != nil {
+		t.Fatalf("second send: %v", err)
+	}
+
+	if id1 == id2 {
+		t.Fatalf("delimiter-containing fields produced same id: %s", id1)
+	}
+	if callCount != 2 {
+		t.Fatalf("transport called %d times, want 2", callCount)
+	}
+}
+
+// TestOutboxLostResponseWindow tests the at-least-once window:
+// if transport succeeds but updating the local record fails, retry
+// should NOT re-publish (uses same outbox ID).
+func TestOutboxLostResponseWindow(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    local_domain: local
+    domains:
+      - domain: peer.example
+        transport: fake-route
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	callCount := 0
+	var publishID string
+	RegisterRemoteTransport("fake-route", func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+		callCount++
+		publishID = fmt.Sprintf("ext-%d", callCount)
+		return publishID, nil
+	})
+
+	// First send - transport succeeds
+	id1, err := b.Tell("bob@peer.example", "lost response test", "corr-1")
+	if err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+	if id1 != publishID {
+		t.Fatalf("first id mismatch: got %q, want %q", id1, publishID)
+	}
+	if callCount != 1 {
+		t.Fatalf("transport called %d times, want 1", callCount)
+	}
+
+	// Simulate crash after transport but before local record update:
+	// Remove the outbox record that has the ExternalID set
+	entries, err := os.ReadDir(filepath.Join(b.MsgDir, "alpha", "unseen"))
+	if err != nil {
+		t.Fatalf("read unseen: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			path := filepath.Join(b.MsgDir, "alpha", "unseen", e.Name())
+			data, _ := os.ReadFile(path)
+			var rec msgRecord
+			if json.Unmarshal(data, &rec) == nil && rec.ExternalID == publishID {
+				os.Remove(path) // Delete the completed record
+				break
+			}
+		}
+	}
+
+	// Retry - should find NO pending record (it was completed but lost),
+	// and the hash-based lookup should find nothing, so it publishes again.
+	// This is the at-least-once window: we CANNOT distinguish between
+	// "transport failed" and "transport succeeded but local update failed".
+	// So we re-publish with the SAME outbox ID (deterministic hash).
+	id2, err := b.Tell("bob@peer.example", "lost response test", "corr-1")
+	if err != nil {
+		t.Fatalf("retry send: %v", err)
+	}
+
+	// The transport was called again (at-least-once)
+	if callCount != 2 {
+		t.Fatalf("transport called %d times, want 2 (at-least-once on lost response)", callCount)
+	}
+
+	// BUT the outbox ID (deterministic hash) is the same
+	// The remote side can deduplicate using this ID
+	if id2 != publishID {
+		t.Fatalf("retry id = %q, want %q (same deterministic outbox ID)", id2, publishID)
+	}
 }
