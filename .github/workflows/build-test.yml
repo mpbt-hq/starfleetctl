@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright © 2026 Enrico Weigelt, metux IT consult
+
+# Minimal build/test CI for every branch and PR, so that any exact head
+# (including work/* review branches) gets a check-runs result.
+name: build-test
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # go.mod declares "go 1.22" — test that minimum plus current stable.
+        go: ["1.22.x", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - run: go build ./...
+      - run: go vet ./...
+      # -timeout 300s: the wormhole suite alone needs ~120-168s under load
+      # (89 sequential git-integration tests); a tight timeout flakes.
+      # The git identity env is required: the wormhole tests exercise real
+      # git commit/rebase/push against temp repos, and the production rebase
+      # path (internal/wormhole/git_sync.go rebaseLocked) has no -c user.*
+      # fallback, so a runner without a global git identity would fail with
+      # "Committer identity unknown" (observed: run 43992956445).
+      - run: go test ./... -count=1 -timeout 300s
+        env:
+          GIT_AUTHOR_NAME: starfleetctl CI
+          GIT_AUTHOR_EMAIL: ci@starfleetctl.local
+          GIT_COMMITTER_NAME: starfleetctl CI
+          GIT_COMMITTER_EMAIL: ci@starfleetctl.local
