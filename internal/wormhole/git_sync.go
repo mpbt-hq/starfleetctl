@@ -323,6 +323,9 @@ func (g *GitSync) currentHEAD() string {
 // depend on the host locale. A pre-existing LC_ALL entry is removed first:
 // duplicate entries resolve to the first occurrence, which would otherwise
 // shadow the override.
+// Also sets a fixed committer/author identity so git operations (commit,
+// rebase, merge) work on hosts without a global git config (bare CI runners,
+// minimal containers).
 func gitCommandEnv(extra ...string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
@@ -331,7 +334,9 @@ func gitCommandEnv(extra ...string) []string {
 		}
 		env = append(env, kv)
 	}
-	env = append(env, "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
+	env = append(env, "LC_ALL=C", "GIT_TERMINAL_PROMPT=0",
+		"GIT_AUTHOR_NAME=starfleetctl", "GIT_AUTHOR_EMAIL=starfleetctl@localhost",
+		"GIT_COMMITTER_NAME=starfleetctl", "GIT_COMMITTER_EMAIL=starfleetctl@localhost")
 	return append(env, extra...)
 }
 
