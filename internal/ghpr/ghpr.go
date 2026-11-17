@@ -260,21 +260,25 @@ type PRInfo struct {
 
 // getPRInfo fetches PR metadata from GitHub API.
 func getPRInfo(repoSlug, prNum string) (*PRInfo, error) {
+	// Note: the field list must only contain fields supported by the oldest
+	// gh version in use (2.46.0 here). "baseRepository" was added in a later
+	// gh release and makes `gh pr view --json` fail with "Unknown JSON field",
+	// which broke `github pr merge` entirely. The base repo is the repoSlug
+	// we query, so it is filled in below instead.
 	out, err := runGH("pr", "view", prNum, "-R", repoSlug,
-		"--json", "number,baseRefName,headRefName,headRefOid,mergeable,state,labels,baseRepository")
+		"--json", "number,baseRefName,headRefName,headRefOid,mergeable,state,labels")
 	if err != nil {
 		return nil, err
 	}
 
 	var info struct {
-		Number      int                            `json:"number"`
-		BaseRefName string                         `json:"baseRefName"`
-		HeadRefName string                         `json:"headRefName"`
-		HeadRefOID  string                         `json:"headRefOid"`
-		Mergeable   string                         `json:"mergeable"`
-		State       string                         `json:"state"`
-		Labels      []struct{ Name string }        `json:"labels"`
-		BaseRepo    struct{ NameWithOwner string } `json:"baseRepository"`
+		Number      int                     `json:"number"`
+		BaseRefName string                  `json:"baseRefName"`
+		HeadRefName string                  `json:"headRefName"`
+		HeadRefOID  string                  `json:"headRefOid"`
+		Mergeable   string                  `json:"mergeable"`
+		State       string                  `json:"state"`
+		Labels      []struct{ Name string } `json:"labels"`
 	}
 	if err := json.Unmarshal(out, &info); err != nil {
 		return nil, err
@@ -293,7 +297,7 @@ func getPRInfo(repoSlug, prNum string) (*PRInfo, error) {
 		Mergeable: info.Mergeable,
 		State:     info.State,
 		Labels:    labels,
-		BaseRepo:  info.BaseRepo.NameWithOwner,
+		BaseRepo:  repoSlug,
 	}, nil
 }
 
