@@ -21,7 +21,7 @@ func TestPostExternal(t *testing.T) {
 	}
 
 	// Test basic post
-	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -69,12 +69,12 @@ func TestPostExternalIdempotent(t *testing.T) {
 		t.Fatalf("New failed: %v", err)
 	}
 
-	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
 
-	id2, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id2, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed on second call: %v", err)
 	}
@@ -103,12 +103,12 @@ func TestPostExternalHashMismatch(t *testing.T) {
 		t.Fatalf("New failed: %v", err)
 	}
 
-	_, err = b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "message 1")
+	_, err = b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "message 1")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
 
-	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "message 2"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "message 2"); err == nil {
 		t.Fatal("PostExternal should fail with changed payload")
 	}
 }
@@ -122,13 +122,13 @@ func TestPostExternalResumption(t *testing.T) {
 	}
 
 	// First call creates the record but doesn't complete (simulate crash)
-	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
 
 	// Second call with same source/externalID/text should resume and return same ID
-	id2, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id2, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed on resume: %v", err)
 	}
@@ -147,19 +147,19 @@ func TestPostExternalInvalidKey(t *testing.T) {
 	}
 
 	// Empty source
-	if _, err := b.PostExternal("", "W0-001", "ShipA", "ShipB", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("", "W0-001", "ShipA", "ShipB", "test"); err == nil {
 		t.Error("PostExternal should reject empty source")
 	}
 	// Empty externalID
-	if _, err := b.PostExternal("fleet-comms", "", "ShipA", "ShipB", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "", "ShipA", "ShipB", "test"); err == nil {
 		t.Error("PostExternal should reject empty externalID")
 	}
 	// Path traversal in source
-	if _, err := b.PostExternal("../../etc/passwd", "W0-001", "ShipA", "ShipB", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("../../etc/passwd", "W0-001", "ShipA", "ShipB", "test"); err == nil {
 		t.Error("PostExternal should reject path traversal in source")
 	}
 	// Path traversal in externalID
-	if _, err := b.PostExternal("fleet-comms", "../../etc/passwd", "ShipA", "ShipB", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "../../etc/passwd", "ShipA", "ShipB", "test"); err == nil {
 		t.Error("PostExternal should reject path traversal in externalID")
 	}
 }
@@ -308,7 +308,7 @@ func TestPostExternalBroadcast(t *testing.T) {
 		}
 	}
 
-	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "broadcast message")
+	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "broadcast message")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestExternalRecordPersistAcrossRestart(t *testing.T) {
 		t.Fatalf("New failed: %v", err)
 	}
 
-	id, err := bus.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id, err := bus.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -363,23 +363,23 @@ func TestPostExternalRejection(t *testing.T) {
 	}
 
 	// Empty source
-	if _, err := b.PostExternal("", "W0-001", "ShipA", "ShipB", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("", "W0-001", "ShipA", "ShipB", "test"); err == nil {
 		t.Error("PostExternal should reject empty source")
 	}
 	// Empty externalID
-	if _, err := b.PostExternal("fleet-comms", "", "ShipA", "ShipB", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "", "ShipA", "ShipB", "test"); err == nil {
 		t.Error("PostExternal should reject empty externalID")
 	}
 	// Empty from
-	if _, err := b.PostExternal("fleet-comms", "W0-001", "", "ShipB", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-001", "", "ShipB", "test"); err == nil {
 		t.Error("PostExternal should reject empty from")
 	}
 	// Empty target
-	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "", "ship", "", "test"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "", "test"); err == nil {
 		t.Error("PostExternal should reject empty target")
 	}
 	// Empty text
-	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", ""); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", ""); err == nil {
 		t.Error("PostExternal should reject empty text")
 	}
 }
@@ -393,7 +393,7 @@ func TestExternalRecordPersistence(t *testing.T) {
 		t.Fatalf("New failed: %v", err)
 	}
 
-	id, err := bus.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id, err := bus.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestPostExternalCrashAfterIDReservation(t *testing.T) {
 	}
 
 	// First call completes normally - establishes baseline
-	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "message 1")
+	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "message 1")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestPostExternalCrashAfterIDReservation(t *testing.T) {
 	}
 
 	// This should get the next ID (m0006) and create the record normally
-	id2, err := b.PostExternal("fleet-comms", "W0-002", "ShipA", "ShipB", "ship", "", "message 2")
+	id2, err := b.PostExternal("fleet-comms", "W0-002", "ShipA", "ShipB", "message 2")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestPostExternalCrashAfterIDReservation(t *testing.T) {
 	}
 
 	// Verify W0-001 still works (idempotent)
-	id1b, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "message 1")
+	id1b, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "message 1")
 	if err != nil {
 		t.Fatalf("PostExternal resume failed: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestPostExternalCrashAfterRecordCreationNoCommsID(t *testing.T) {
 	writeExternalRecordFile(t, b, rec)
 
 	// PostExternal should detect missing CommsID, reserve one, and continue
-	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed to recover: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestPostExternalCrashAfterRecordCreationNoCommsID(t *testing.T) {
 	}
 
 	// Second call should be idempotent
-	id2, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "test message")
+	id2, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "test message")
 	if err != nil {
 		t.Fatalf("second PostExternal failed: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestPostExternalCrashDuringRecipientResolution(t *testing.T) {
 	writeExternalRecordFile(t, b, rec)
 
 	// PostExternal should resolve recipients and publish to all
-	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "test message")
+	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed to recover: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestPostExternalCrashDuringRecipientPublish(t *testing.T) {
 	}
 
 	// PostExternal should resume and publish to ShipB and ShipC only
-	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "test message")
+	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed to resume: %v", err)
 	}
@@ -771,7 +771,7 @@ func TestPostExternalCrashAfterAllPublishedBeforeComplete(t *testing.T) {
 	}
 
 	// PostExternal should see all recipients published and mark complete
-	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "test message"); err != nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "test message"); err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
 
@@ -808,7 +808,7 @@ func TestPostExternalFullRestartSimulation(t *testing.T) {
 		}
 	}
 
-	id1, err := bus1.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "restart test")
+	id1, err := bus1.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "restart test")
 	if err != nil {
 		t.Fatalf("PostExternal phase 1 failed: %v", err)
 	}
@@ -820,7 +820,7 @@ func TestPostExternalFullRestartSimulation(t *testing.T) {
 	}
 
 	// Phase 3: Resume - should complete publishing to all ships
-	id2, err := bus2.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "restart test")
+	id2, err := bus2.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "restart test")
 	if err != nil {
 		t.Fatalf("PostExternal phase 3 failed: %v", err)
 	}
@@ -873,7 +873,7 @@ func TestPostExternalConcurrentCalls(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "concurrent test")
+			id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "concurrent test")
 			if err != nil {
 				errs <- err
 				return
@@ -970,7 +970,7 @@ func TestPostExternalIDReservationCrashAfterSeq(t *testing.T) {
 	}
 
 	// First successful call to establish baseline
-	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "message 1")
+	id1, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "message 1")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -981,7 +981,7 @@ func TestPostExternalIDReservationCrashAfterSeq(t *testing.T) {
 	writeSeqFile(t, b, 5)
 
 	// This should get the next ID (m0006) and create the record normally
-	id2, err := b.PostExternal("fleet-comms", "W0-002", "ShipA", "ShipB", "ship", "", "message 2")
+	id2, err := b.PostExternal("fleet-comms", "W0-002", "ShipA", "ShipB", "message 2")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -990,7 +990,7 @@ func TestPostExternalIDReservationCrashAfterSeq(t *testing.T) {
 	}
 
 	// Verify W0-001 still works (idempotent)
-	id1b, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "ship", "", "message 1")
+	id1b, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "ShipB", "message 1")
 	if err != nil {
 		t.Fatalf("PostExternal resume failed: %v", err)
 	}
@@ -1036,7 +1036,7 @@ func TestPostExternalCrashAfterSeqBeforeExternalRecord(t *testing.T) {
 	writeExternalRecordDirect(t, b, rec)
 
 	// PostExternal should detect existing record with CommsID, resolve recipients, and complete
-	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "test message")
+	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed to recover: %v", err)
 	}
@@ -1123,7 +1123,7 @@ func TestPostExternalCrashDuringRecipientPublishResumed(t *testing.T) {
 	}
 
 	// PostExternal should resume and publish to ShipB and ShipC only
-	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "test message")
+	id, err := b.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "test message")
 	if err != nil {
 		t.Fatalf("PostExternal failed to resume: %v", err)
 	}
@@ -1172,7 +1172,7 @@ func TestPostExternalFullRestartSimulationWithLostSeq(t *testing.T) {
 		}
 	}
 
-	id1, err := bus1.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "restart test")
+	id1, err := bus1.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "restart test")
 	if err != nil {
 		t.Fatalf("PostExternal phase 1 failed: %v", err)
 	}
@@ -1184,7 +1184,7 @@ func TestPostExternalFullRestartSimulationWithLostSeq(t *testing.T) {
 	}
 
 	// Phase 3: Resume - should complete publishing to all ships
-	id2, err := bus2.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "ship", "", "restart test")
+	id2, err := bus2.PostExternal("fleet-comms", "W0-001", "ShipA", "all", "restart test")
 	if err != nil {
 		t.Fatalf("PostExternal phase 3 failed: %v", err)
 	}
@@ -1240,7 +1240,7 @@ func TestPostExternalNoDuplicateIDWithExternalRecord(t *testing.T) {
 
 	// Now call PostExternal for a DIFFERENT message with the same ID reservation path
 	// The ID m0005 should NOT be reused because it's already in an external record
-	id, err := b.PostExternal("fleet-comms", "W0-006", "ShipA", "ShipB", "ship", "", "another message")
+	id, err := b.PostExternal("fleet-comms", "W0-006", "ShipA", "ShipB", "another message")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -1271,7 +1271,7 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 		{"empty from", "fleet-comms", "W0-rf", "", "ShipB", "payload"},
 		{"empty target", "fleet-comms", "W0-rf", "ShipA", "", "payload"},
 	} {
-		if _, err := b.PostExternal(tc.source, tc.externalID, tc.from, tc.target, "ship", "", tc.text); err == nil {
+		if _, err := b.PostExternal(tc.source, tc.externalID, tc.from, tc.target, tc.text); err == nil {
 			t.Fatalf("%s: expected error", tc.name)
 		} else if !IsPermanentPostExternalError(err) {
 			t.Fatalf("%s must be permanent, got: %v", tc.name, err)
@@ -1289,7 +1289,7 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 		{"slash in externalID", "fleet-comms", "W0/inv"},
 		{"space in externalID", "fleet-comms", "W0 inv"},
 	} {
-		if _, err := b.PostExternal(tc.source, tc.externalID, "ShipA", "ShipB", "ship", "", "payload"); err == nil {
+		if _, err := b.PostExternal(tc.source, tc.externalID, "ShipA", "ShipB", "payload"); err == nil {
 			t.Fatalf("%s: expected error", tc.name)
 		} else if !IsPermanentPostExternalError(err) {
 			t.Fatalf("%s must be permanent, got: %v", tc.name, err)
@@ -1297,24 +1297,24 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 	}
 
 	// Empty text (permanent).
-	if _, err := b.PostExternal("fleet-comms", "W0-empty", "ShipA", "ShipB", "ship", "", ""); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-empty", "ShipA", "ShipB", ""); err == nil {
 		t.Fatal("expected empty-text error")
 	} else if !IsPermanentPostExternalError(err) {
 		t.Fatalf("empty text must be permanent, got: %v", err)
 	}
 
 	// Hash mismatch: same external ID, different payload (permanent).
-	if _, err := b.PostExternal("fleet-comms", "W0-hash", "ShipA", "ShipB", "ship", "", "payload-1"); err != nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-hash", "ShipA", "ShipB", "payload-1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := b.PostExternal("fleet-comms", "W0-hash", "ShipA", "ShipB", "ship", "", "payload-2"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-hash", "ShipA", "ShipB", "payload-2"); err == nil {
 		t.Fatal("expected hash mismatch")
 	} else if !IsPermanentPostExternalError(err) {
 		t.Fatalf("hash mismatch must be permanent, got: %v", err)
 	}
 
 	// Existing recipient copy mismatch (permanent): published message file differs.
-	if _, err := b.PostExternal("fleet-comms", "W0-rcpt", "ShipA", "ShipB", "ship", "", "ok"); err != nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-rcpt", "ShipA", "ShipB", "ok"); err != nil {
 		t.Fatalf("seed rcpt: %v", err)
 	}
 	lock, err := b.lockBus()
@@ -1334,7 +1334,7 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 	if err := os.WriteFile(msgPath, []byte(`{"id":"`+rec.CommsID+`","text":"tampered"}`), 0o644); err != nil {
 		t.Fatalf("tamper recipient copy: %v", err)
 	}
-	if _, err := b.PostExternal("fleet-comms", "W0-rcpt", "ShipA", "ShipB", "ship", "", "ok"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-rcpt", "ShipA", "ShipB", "ok"); err == nil {
 		t.Fatal("expected recipient copy mismatch")
 	} else if !IsPermanentPostExternalError(err) {
 		t.Fatalf("recipient copy mismatch must be permanent, got: %v", err)
@@ -1351,7 +1351,7 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 	if err := os.WriteFile(corruptPath, []byte("{not-json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.PostExternal("fleet-comms", "W0-corrupt", "ShipA", "ShipB", "ship", "", "payload"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-corrupt", "ShipA", "ShipB", "payload"); err == nil {
 		t.Fatal("expected corrupt external record error")
 	} else if !IsPermanentPostExternalError(err) {
 		t.Fatalf("corrupt external record must be permanent, got: %v", err)
@@ -1384,7 +1384,7 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 	if err := os.WriteFile(mismatchPath, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.PostExternal("fleet-comms", "W0-key", "ShipA", "ShipB", "ship", "", "payload"); err == nil {
+	if _, err := b.PostExternal("fleet-comms", "W0-key", "ShipA", "ShipB", "payload"); err == nil {
 		t.Fatal("expected key mismatch error")
 	} else if !IsPermanentPostExternalError(err) {
 		t.Fatalf("external record key mismatch must be permanent, got: %v", err)
@@ -1397,7 +1397,7 @@ func TestPostExternalPermanentErrorClassification(t *testing.T) {
 		t.Fatal(err)
 	}
 	badBus := &Bus{Root: badRoot, BusDir: badBusDir, MsgDir: filepath.Join(badBusDir, "msgs"), ShipID: "alpha"}
-	if _, err := badBus.PostExternal("fleet-comms", "W0-temp", "ShipA", "ShipB", "ship", "", "payload"); err == nil {
+	if _, err := badBus.PostExternal("fleet-comms", "W0-temp", "ShipA", "ShipB", "payload"); err == nil {
 		t.Fatal("expected temporary/infrastructure error")
 	} else if IsPermanentPostExternalError(err) {
 		t.Fatalf("temporary infrastructure error must not be permanent, got: %v", err)
@@ -1533,7 +1533,7 @@ comms:
 	// The reply arrives with its own external id and references the original
 	// message through reply_to.
 	const replyID = "w0-20261115-reply5678"
-	replyCommsID, err := b.PostExternal("fleet-comms", replyID, "ChatGPT@pegasus", "Voyager", "ship", outboundID, "hello from ChatGPT")
+	replyCommsID, err := b.PostExternal("fleet-comms", replyID, "ChatGPT@pegasus", "Voyager", "hello from ChatGPT")
 	if err != nil {
 		t.Fatalf("PostExternal failed: %v", err)
 	}
@@ -1563,8 +1563,11 @@ comms:
 			continue
 		}
 		replies++
-		if rec.ReplyTo != outboundID {
-			t.Errorf("rec.ReplyTo = %q, want %q", rec.ReplyTo, outboundID)
+		// The five-argument PostExternal contract has no replyTo parameter:
+		// reply linkage is carried inside the payload front matter (wormhole
+		// layer), so the Comms record's ReplyTo stays empty.
+		if rec.ReplyTo != "" {
+			t.Errorf("rec.ReplyTo = %q, want empty (5-arg PostExternal contract)", rec.ReplyTo)
 		}
 		if rec.ExternalSource != "fleet-comms" {
 			t.Errorf("rec.ExternalSource = %q, want %q", rec.ExternalSource, "fleet-comms")
@@ -1581,7 +1584,7 @@ comms:
 	}
 
 	// Republishing the same reply must not create a second copy.
-	again, err := b.PostExternal("fleet-comms", replyID, "ChatGPT@pegasus", "Voyager", "ship", outboundID, "hello from ChatGPT")
+	again, err := b.PostExternal("fleet-comms", replyID, "ChatGPT@pegasus", "Voyager", "hello from ChatGPT")
 	if err != nil {
 		t.Fatalf("repeated PostExternal failed: %v", err)
 	}

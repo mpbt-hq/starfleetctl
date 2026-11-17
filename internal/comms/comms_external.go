@@ -354,10 +354,13 @@ func dedupSorted(recipients []string) []string {
 // crash window where a record would be stuck without a durable ID.
 //
 // source identifies the wormhole (e.g. fleet-comms), externalID is the
-// wormhole front-matter ID, from/target are canonical ship IDs, msgType is
-// the message type (ship/user/control), replyTo is the optional reply target,
-// and text is the full message content including front matter (never truncated).
-func (b *Bus) PostExternal(source, externalID, from, target, msgType, replyTo, text string) (string, error) {
+// wormhole front-matter ID, from/target are canonical ship IDs, and text is
+// the full message content including front matter (never truncated).
+// The signature is the owner-approved five-argument contract
+// (decisions/2026-11-08--wormhole-is-comms-transport.md, W0-130, W0-134):
+// message type and reply linkage are carried inside the payload front matter,
+// not as extra parameters. Imported records get the default type "ship".
+func (b *Bus) PostExternal(source, externalID, from, target, text string) (string, error) {
 	if source == "" || externalID == "" || from == "" || target == "" {
 		return "", permanentPostExternalError("comms: PostExternal: source, externalID, from, target all required")
 	}
@@ -422,8 +425,6 @@ func (b *Bus) PostExternal(source, externalID, from, target, msgType, replyTo, t
 		Payload:    text,
 		From:       from,
 		Target:     target,
-		Type:       msgType,
-		ReplyTo:    replyTo,
 		CommsID:    id,
 		State:      externalPosting,
 		CreatedAt:  isots(),

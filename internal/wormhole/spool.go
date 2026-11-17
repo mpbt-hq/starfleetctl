@@ -556,23 +556,18 @@ func (s *Spool) parseForTarget(data []byte, name, target string) (*Message, erro
 // in cur/ or failed/). The processed transition is always committed locally
 // and pushed to the remote.
 func (s *Spool) importLocked(bus *comms.Bus, target string, msg *Message, data []byte, name string, errs *[]error) {
-	// Bus.PostExternal(source, externalID, from, target, msgType, replyTo, text):
+	// Bus.PostExternal(source, externalID, from, target, text):
 	//  - source is the stable configured repository identity,
 	//  - externalID is the immutable message id,
 	//  - from is the logical sender address used for replies/routing (falls back
 	//    to the canonical envelope sender when no logical address is present),
-	//  - msgType is the message type (ship/user/control)
-	//  - replyTo is the optional reply target
-	//  - text is the exact original payload bytes (never reconstructed).
-	msgType := msg.Type
-	if msgType == "" {
-		msgType = "ship"
-	}
+	//  - text is the exact original payload bytes (never reconstructed) — it
+	//    carries the message front matter (type, reply_to) unchanged.
 	fromAddr := msg.From
 	if msg.Sender != "" {
 		fromAddr = msg.Sender
 	}
-	if _, err := bus.PostExternal(s.repo.ID, msg.ID, fromAddr, target, msgType, msg.ReplyTo, string(data)); err != nil {
+	if _, err := bus.PostExternal(s.repo.ID, msg.ID, fromAddr, target, string(data)); err != nil {
 		if isPermanentPostExternalError(err) {
 			if ferr := s.failLocked(target, maildirCur, name, fmt.Errorf("permanent import rejection: %w", err)); ferr != nil {
 				*errs = append(*errs, fmt.Errorf("import %s permanently rejected but failed transition incomplete (message not lost): %v; move: %w", msg.ID, err, ferr))

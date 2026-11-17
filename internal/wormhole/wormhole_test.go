@@ -1306,11 +1306,22 @@ func TestTypeAndReplyToRoundtrip(t *testing.T) {
 		}
 		if rec.From == "beta" && rec.Target == "alpha" && strings.Contains(rec.Text, "directive with type and reply") {
 			found = true
-			if rec.Type != "control" {
-				t.Fatalf("message type lost in transit: got %q, want %q", rec.Type, "control")
+			// The five-argument PostExternal contract (owner decision
+			// 2026-11-08, W0-130/W0-134) carries type/reply_to inside the
+			// payload front matter, not as Comms record fields: the record
+			// gets the default type "ship" and an empty reply_to, while the
+			// original front matter is preserved verbatim in the payload.
+			if rec.Type != "ship" {
+				t.Fatalf("imported record type = %q, want Comms default %q", rec.Type, "ship")
 			}
-			if rec.ReplyTo != "m0000111122223333" {
-				t.Fatalf("reply_to lost in transit: got %q", rec.ReplyTo)
+			if rec.ReplyTo != "" {
+				t.Fatalf("imported record reply_to = %q, want empty (5-arg contract)", rec.ReplyTo)
+			}
+			if !strings.Contains(rec.Text, "type: control") {
+				t.Fatalf("payload front matter lost type: got %q", rec.Text)
+			}
+			if !strings.Contains(rec.Text, "reply_to: m0000111122223333") {
+				t.Fatalf("payload front matter lost reply_to: got %q", rec.Text)
 			}
 		}
 	}
@@ -2967,7 +2978,7 @@ func TestEmptyMessageRejectedMovedToFailed(t *testing.T) {
 		t.Fatalf("initial sync: %v", err)
 	}
 
-	msg := NewMessage("beta", "alpha", "ship", "", "")
+	msg := NewMessage("beta", "alpha", "ship", "first payload", "")
 	msg.Content = ""
 	if err := validateMessage(msg); err == nil {
 		t.Fatal("expected empty message to be rejected by validation")
@@ -3020,7 +3031,7 @@ func TestPermanentPostExternalErrorMovesToFailed(t *testing.T) {
 	msg := NewMessage("beta", "alpha", "ship", "first payload", "")
 	// Pre-create an external record with same source+externalID but different payload
 	// so PostExternal returns a permanent hash-mismatch error.
-	if _, err := bus.PostExternal(sp.repo.ID, msg.ID, "beta", "alpha", "ship", "", "different payload"); err != nil {
+	if _, err := bus.PostExternal(sp.repo.ID, msg.ID, "beta", "alpha", "different payload"); err != nil {
 		t.Fatalf("seed conflicting external record: %v", err)
 	}
 
@@ -3154,7 +3165,7 @@ func TestPermanentImportMoveToFailedErrorDoesNotLoseMessage(t *testing.T) {
 
 	msg := NewMessage("beta", "alpha", "ship", "payload", "")
 	// Trigger permanent PostExternal error (hash mismatch).
-	if _, err := bus.PostExternal(sp.repo.ID, msg.ID, "beta", "alpha", "ship", "", "different payload"); err != nil {
+	if _, err := bus.PostExternal(sp.repo.ID, msg.ID, "beta", "alpha", "different payload"); err != nil {
 		t.Fatalf("seed conflicting external record: %v", err)
 	}
 
@@ -4688,7 +4699,7 @@ func TestPostImportCrashRecoveryCompletesProcessedTransition(t *testing.T) {
 	}
 
 	// The import succeeds ...
-	commsID, err := bus.PostExternal(sp.repo.ID, msg.ID, "beta", "alpha", "ship", "", string(raw))
+	commsID, err := bus.PostExternal(sp.repo.ID, msg.ID, "beta", "alpha", string(raw))
 	if err != nil {
 		t.Fatalf("PostExternal: %v", err)
 	}
