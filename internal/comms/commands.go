@@ -178,8 +178,17 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 			hash := sha256.Sum256([]byte(hashInput))
 			outID := hex.EncodeToString(hash[:])
 
+			lock, err := b.lockBus()
+			if err != nil {
+				return "", err
+			}
+			defer lock.Close()
+
 			// Check if we already have an outbox record for this content
 			// (retry scenario: same content, same session).
+			// Must be done UNDER the lock to avoid TOCTOU: two concurrent
+			// sends with identical content could both see no record, then
+			// both acquire the lock sequentially and publish twice.
 			existing, err := b.findOutboxByHash(from, hash[:])
 			if err != nil {
 				return "", err
@@ -188,12 +197,6 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 				// Already published and recorded - return existing transport ID.
 				return existing.ExternalID, nil
 			}
-
-			lock, err := b.lockBus()
-			if err != nil {
-				return "", err
-			}
-			defer lock.Close()
 
 			// Write pending outbox record BEFORE remote publish.
 			pending := msgRecord{
