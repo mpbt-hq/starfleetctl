@@ -30,6 +30,12 @@ type OutboundMessage struct {
 	Text    string
 	Type    string
 	ReplyTo string
+	// ID is an optional deterministic outbox ID provided by the caller.
+	// When set, the transport SHOULD use this as the message ID instead of
+	// generating a new random one. This enables exactly-once semantics across
+	// retries: the same outbox ID is used for the initial publish and any
+	// retries, so the remote side can deduplicate.
+	ID string
 }
 
 // RemoteTransportFunc publishes an outbound message through a registered
