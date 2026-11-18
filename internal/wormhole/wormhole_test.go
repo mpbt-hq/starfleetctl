@@ -189,7 +189,10 @@ func setupRemote(t *testing.T) string {
 // ~3s per test, at 100ms it costs ~0.3s.
 func testConfigFast(remote string) *config.WormholesConfig {
 	cfg := testConfig(remote)
-	cfg.Sync.Interval = "250ms"
+	cfg.Sync.Interval = "500ms"
+	// Daemon tests assert lifecycle, not startup sync; skipping it makes the
+	// ready marker appear without a full git sync round trip.
+	cfg.Sync.StartupSync = false
 	return cfg
 }
 
