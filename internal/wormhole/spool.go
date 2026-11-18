@@ -27,6 +27,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
@@ -535,6 +536,12 @@ func (s *Spool) processCurLocked(bus *comms.Bus, target string, errs *[]error) e
 // immutable id must match the file name, and the recipient must match the
 // mailbox (recipient authorization).
 func (s *Spool) parseForTarget(data []byte, name, target string) (*Message, error) {
+	// Reject non-UTF-8 payloads as permanently malformed before the message is
+	// ever handed to Comms (PostExternal takes a string; invalid bytes would be
+	// silently replaced by U+FFFD, i.e. lossy).
+	if !utf8.Valid(data) {
+		return nil, fmt.Errorf("message is not valid UTF-8")
+	}
 	msg, err := parseMessage(data)
 	if err != nil {
 		return nil, err

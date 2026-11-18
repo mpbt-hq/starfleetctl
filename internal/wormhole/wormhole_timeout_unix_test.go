@@ -26,9 +26,9 @@ import (
 // kills only the direct process (default CommandContext behavior, no Setpgid).
 func TestGitCommandTimeoutKillsBlockedProcess(t *testing.T) {
 	const (
-		deadline = 200 * time.Millisecond
-		minWait  = 150 * time.Millisecond // proves the call actually waited for the deadline
-		maxWait  = 2 * time.Second        // deadline + generous scheduling tolerance
+		deadline = 160 * time.Millisecond
+		minWait  = 110 * time.Millisecond // proves the call actually waited for the deadline
+		maxWait  = 1 * time.Second        // deadline + generous scheduling tolerance
 	)
 
 	// gitPIDsWithMarker returns PIDs of git processes whose command line contains
@@ -197,11 +197,15 @@ func TestGitCommandTimeoutKillsBlockedProcess(t *testing.T) {
 		cloneTimeout, commandTimeout := testTimeouts(cfg)
 		sp := newSpool(root, cfg.Repositories[0], 0, "alpha", cloneTimeout, commandTimeout)
 
-		// Prepare a real clone with the FIFO inactive.
-		if err := sp.Publish(NewMessage("alpha", "beta", "info", "timeout-seed", "")); err != nil {
+		// Prepare a real clone with the FIFO inactive. The seed publish needs a
+		// generous timeout: under full parallel load a 200ms command timeout is
+		// too tight for an ordinary push. The 200ms deadline below applies only
+		// to the deliberately blocked commands.
+		seed := newSpool(root, cfg.Repositories[0], 0, "alpha", 30*time.Second, 30*time.Second)
+		if err := seed.Publish(NewMessage("alpha", "beta", "info", "timeout-seed", "")); err != nil {
 			t.Fatalf("publish seed: %v", err)
 		}
-		cloneDir := sp.git.CloneDir()
+		cloneDir := seed.git.CloneDir()
 
 		fifoDir := t.TempDir()
 		fifo := filepath.Join(fifoDir, "gitconfig")

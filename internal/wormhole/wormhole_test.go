@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,6 +22,7 @@ import (
 
 	"github.com/metux/starfleetctl/internal/comms"
 	"github.com/metux/starfleetctl/internal/config"
+	"github.com/metux/starfleetctl/internal/shipnames"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,27 +46,166 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// setupRemote creates a bare repository with an initial commit on main and
-// returns its path. All tests stay entirely local (no network).
+// testSharedDir is a per-run directory (created by TestMain) holding fixtures
+// shared across tests: the compiled CLI binary and the template remote.
+var testSharedDir string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "wormhole-test-shared")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "mktemp:", err)
+		os.Exit(1)
+	}
+	testSharedDir = dir
+	// Neutralise inherited fleet env so every test sees the same defaults
+	// comms.New(root) would derive from its own root (bus dir = BusDir(root),
+	// ship id = user@host fallback). Tests that need a specific identity set
+	// it via t.Setenv themselves and therefore stay serial.
+	for _, k := range []string{"STARFLEET_BUS_DIR", "STARFLEET_SHIP_ID", "STARFLEET_BUS_TTL", "PROJECT", "STARFLEET_AGENT_HANDLE"} {
+		os.Unsetenv(k)
+	}
+	// Make the many short-lived git subprocesses cheaper: skip system/global
+	// config reads, disable gc and compression, skip fetch negotiation round
+	// trips. Applies to every git exec that inherits this env (test helpers and
+	// gitCommandEnv both build on os.Environ).
+	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	os.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	os.Setenv("GIT_CONFIG_COUNT", "5")
+	os.Setenv("GIT_CONFIG_KEY_0", "gc.auto")
+	os.Setenv("GIT_CONFIG_VALUE_0", "0")
+	os.Setenv("GIT_CONFIG_KEY_1", "core.compression")
+	os.Setenv("GIT_CONFIG_VALUE_1", "0")
+	os.Setenv("GIT_CONFIG_KEY_2", "fetch.negotiationAlgorithm")
+	os.Setenv("GIT_CONFIG_VALUE_2", "noop")
+	os.Setenv("GIT_CONFIG_KEY_3", "maintenance.auto")
+	os.Setenv("GIT_CONFIG_VALUE_3", "false")
+	os.Setenv("GIT_CONFIG_KEY_4", "core.untrackedCache")
+	os.Setenv("GIT_CONFIG_VALUE_4", "true")
+	// The suite is I/O-bound (git subprocesses, daemon processes, short
+	// polls), not CPU-bound: let many tests overlap instead of stopping at
+	// the default -parallel=GOMAXPROCS. The acceptance command stays
+	// unchanged; this only raises the internal concurrency limit.
+	testing.Init() // register test flags before m.Run() so we can tune -parallel below
+	if f := flag.Lookup("parallel"); f != nil {
+		n := runtime.NumCPU() * 8
+		if n < 32 {
+			n = 32
+		}
+		_ = f.Value.Set(strconv.Itoa(n))
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// reserveShip registers name in the test workspace's ship-name registry so
+// localShips(root) includes it. This replaces STARFLEET_SHIP_ID via t.Setenv,
+// which would forbid t.Parallel in the calling test.
+func reserveShip(t *testing.T, root, name string) {
+	t.Helper()
+	if err := shipnames.New(root).Reserve(name); err != nil {
+		t.Fatalf("reserve ship %q: %v", name, err)
+	}
+}
+
+// testBus builds the comms bus for a test workspace and pins the ship identity
+// explicitly on the Bus instead of via the STARFLEET_SHIP_ID environment.
+func testBus(t *testing.T, root, shipID string) *comms.Bus {
+	t.Helper()
+	bus, err := comms.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shipID != "" {
+		bus.ShipID = shipID
+		bus.ShipIDSet = true
+		reserveShip(t, root, shipID)
+	}
+	return bus
+}
+
+var (
+	templateRemoteOnce sync.Once
+	templateRemotePath string
+	templateRemoteErr  error
+)
+
+// setupRemote returns a fresh bare repository with an initial commit on main.
+// A template remote is built once per test run; every test gets its own clone
+// of it, so tests stay isolated and can mutate (or rename away) their remote.
+// All tests stay entirely local (no network).
 func setupRemote(t *testing.T) string {
 	t.Helper()
-	base := t.TempDir()
-	remote := filepath.Join(base, "remote.git")
-	runGit(t, "", "init", "--bare", "-b", "main", remote)
+	templateRemoteOnce.Do(func() {
+		base := filepath.Join(testSharedDir, "template")
+		remote := filepath.Join(base, "remote.git")
+		runGitRaw := func(dir string, args ...string) {
+			cmd := exec.Command("git", args...)
+			if dir != "" {
+				cmd.Dir = dir
+			}
+			cmd.Env = append(os.Environ(),
+				"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+				"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+				"GIT_TERMINAL_PROMPT=0",
+			)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				templateRemoteErr = fmt.Errorf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+			}
+		}
+		runGitRaw("", "init", "--bare", "-b", "main", remote)
+		seed := filepath.Join(base, "seed")
+		if templateRemoteErr == nil {
+			if err := os.MkdirAll(seed, 0o755); err != nil {
+				templateRemoteErr = err
+			}
+		}
+		if templateRemoteErr == nil {
+			if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("seed\n"), 0o644); err != nil {
+				templateRemoteErr = err
+			}
+		}
+		if templateRemoteErr == nil {
+			runGitRaw(seed, "init", "-b", "main")
+			runGitRaw(seed, "add", "README.md")
+			runGitRaw(seed, "commit", "-q", "-m", "seed")
+			runGitRaw(seed, "remote", "add", "origin", remote)
+			runGitRaw(seed, "push", "-q", "origin", "main")
+		}
+		if templateRemoteErr == nil {
+			templateRemotePath = remote
+		}
+	})
+	if templateRemoteErr != nil {
+		t.Fatalf("build template remote: %v", templateRemoteErr)
+	}
+	dest := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, "", "clone", "--bare", "--quiet", templateRemotePath, dest)
+	return dest
+}
 
-	seed := filepath.Join(base, "seed")
-	if err := os.MkdirAll(seed, 0o755); err != nil {
-		t.Fatal(err)
+// testConfigFast is testConfig with a short sync interval, for tests that run
+// a real daemon and wait for several cycles: waiting for 3 cycles at 1s costs
+// ~3s per test, at 100ms it costs ~0.3s.
+func testConfigFast(remote string) *config.WormholesConfig {
+	cfg := testConfig(remote)
+	cfg.Sync.Interval = "250ms"
+	return cfg
+}
+
+// ensureClone creates the spool's local clone without a full fetch/rebase/push
+// round trip. Bootstrap-only replacement for runOnce(nil, false): the first
+// Publish/process call syncs anyway.
+func ensureClone(t *testing.T, sp *Spool) {
+	t.Helper()
+	lock, err := sp.git.Lock(60 * time.Second)
+	if err != nil {
+		t.Fatalf("lock: %v", err)
 	}
-	runGit(t, seed, "init", "-b", "main")
-	if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("seed\n"), 0o644); err != nil {
-		t.Fatal(err)
+	defer lock.Close()
+	if err := sp.git.EnsureCloneLocked(); err != nil {
+		t.Fatalf("clone: %v", err)
 	}
-	runGit(t, seed, "add", "README.md")
-	runGit(t, seed, "commit", "-q", "-m", "seed")
-	runGit(t, seed, "remote", "add", "origin", remote)
-	runGit(t, seed, "push", "-q", "origin", "main")
-	return remote
 }
 
 func testConfig(remote string) *config.WormholesConfig {
@@ -165,9 +308,39 @@ func testTimeouts(cfg *config.WormholesConfig) (time.Duration, time.Duration) {
 	return cloneTimeout, commandTimeout
 }
 
+// waitForDaemonLog blocks until the daemon log under root contains needle, or
+// fails the test after timeout. It replaces fixed sleeps: the test intent is
+// "the daemon ran cycles", which the log proves as soon as it happens.
+func waitForDaemonLog(t *testing.T, root, needle string, timeout time.Duration) {
+	t.Helper()
+	logPath := filepath.Join(WorkDir(root), "daemon.log")
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(logPath); err == nil && strings.Contains(string(data), needle) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	data, _ := os.ReadFile(logPath)
+	t.Fatalf("daemon.log did not contain %q within %s, log:\n%s", needle, timeout, data)
+}
+
+// waitProcessGone reports whether pid no longer exists within timeout.
+func waitProcessGone(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
 // ---- message envelope ----------------------------------------------------
 
 func TestNewMessageUniqueIDsAndRoundtrip(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]bool)
 	for i := 0; i < 100; i++ {
 		msg := NewMessage("alpha", "beta", "message", "hello", "")
@@ -194,6 +367,7 @@ func TestNewMessageUniqueIDsAndRoundtrip(t *testing.T) {
 }
 
 func TestParseRejectsUnknownFieldsAndTraversal(t *testing.T) {
+	t.Parallel()
 	bad := []string{
 		"no front matter\n",
 		"---\nid: a\nfrom: b\nto: c\nunknown: x\n---\nbody\n",
@@ -210,6 +384,7 @@ func TestParseRejectsUnknownFieldsAndTraversal(t *testing.T) {
 // ---- configuration -------------------------------------------------------
 
 func TestLoadConfigMissingFileReturnsDefaults(t *testing.T) {
+	t.Parallel()
 	cfg, err := LoadConfig(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -220,6 +395,7 @@ func TestLoadConfigMissingFileReturnsDefaults(t *testing.T) {
 }
 
 func TestLoadConfigValid(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeConfig(t, root, testConfig("/remote/repo"))
 	cfg, err := LoadConfig(root)
@@ -232,6 +408,7 @@ func TestLoadConfigValid(t *testing.T) {
 }
 
 func TestLoadConfigRejectsLegacyKeys(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		"wormholes:\n  enabled: false\n  outgoing: {}\n",
 		"wormholes:\n  enabled: false\n  incoming: {}\n",
@@ -253,6 +430,7 @@ func TestLoadConfigRejectsLegacyKeys(t *testing.T) {
 }
 
 func TestLoadConfigRejectsUnknownNestedMappingPath(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRawConfig(t, root, "wormholes:\n  enabled: false\n  repositories:\n    - id: r\n      remote: x\n      branch: main\n      incoming:\n        enabled: false\n        bogus:\n          x: 1\n")
 	if _, err := LoadConfig(root); err == nil {
@@ -261,6 +439,7 @@ func TestLoadConfigRejectsUnknownNestedMappingPath(t *testing.T) {
 }
 
 func TestLoadConfigRejectsInterestingValues(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRawConfig(t, root, "wormholes:\n  enabled: false\n  repositories:\n    - id: \"../x\"\n      remote: x\n      branch: main\n")
 	if _, err := LoadConfig(root); err == nil {
@@ -269,6 +448,7 @@ func TestLoadConfigRejectsInterestingValues(t *testing.T) {
 }
 
 func TestPathHelpers(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if got, want := WorkDir(root), filepath.Join(root, ".starfleet-ai", "var", "wormholes"); got != want {
 		t.Errorf("WorkDir() = %q, want %q", got, want)
@@ -285,6 +465,7 @@ func TestPathHelpers(t *testing.T) {
 }
 
 func TestEnsureDir(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := EnsureDir(root); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
@@ -301,16 +482,14 @@ func TestEnsureDir(t *testing.T) {
 // ---- lifecycle -----------------------------------------------------------
 
 func TestPublishProcessLifecycle(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	repo := cfg.Repositories[0]
 
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
@@ -383,21 +562,17 @@ func TestPublishProcessLifecycle(t *testing.T) {
 }
 
 func TestRecipientMismatchMovesToFailed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "beta", "message", "wrong mailbox", "")
 	dir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "new")
@@ -427,22 +602,65 @@ func TestRecipientMismatchMovesToFailed(t *testing.T) {
 	}
 }
 
-func TestMalformedMessageMovesToFailed(t *testing.T) {
+// TestInvalidUTF8MovesToFailed is the regression test for the W0-134
+// invalid-UTF-8 rule: a message file whose bytes are not valid UTF-8 must be
+// rejected as permanently malformed (failed/ + durable .reason) BEFORE it
+// reaches Bus.PostExternal, never silently lossy-converted.
+func TestInvalidUTF8MovesToFailed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	_, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
+	ensureClone(t, sp)
+
+	dir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "new")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	payload := append([]byte("---\nid: badutf8\nfrom: beta\nto: alpha\n---\n"), 0xff, 0xfe, 0x00, 'x')
+	if err := os.WriteFile(filepath.Join(dir, "badutf8.md"), payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := processPendingMessages(root); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	failedDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "failed")
+	if _, err := os.Stat(filepath.Join(failedDir, "badutf8.md")); err != nil {
+		t.Fatalf("invalid-UTF-8 message not moved to failed/: %v", err)
+	}
+	reason, err := os.ReadFile(filepath.Join(failedDir, "badutf8.md.reason"))
+	if err != nil {
+		t.Fatalf("diagnostic missing: %v", err)
+	}
+	if !strings.Contains(string(reason), "UTF-8") {
+		t.Fatalf("reason must name the UTF-8 problem, got: %s", reason)
+	}
+	// Nothing may have reached the local bus.
+	bus := testBus(t, root, "alpha")
+	if n := countFiles(t, bus.MsgDir); n != 0 {
+		t.Fatalf("invalid-UTF-8 message must not be imported, got %d comms messages", n)
+	}
+}
+
+func TestMalformedMessageMovesToFailed(t *testing.T) {
+	t.Parallel()
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfig(remote)
+	writeConfig(t, root, cfg)
+	reserveShip(t, root, "alpha")
+
+	testBus(t, root, "alpha")
+	cloneTimeout, commandTimeout := testTimeouts(cfg)
+	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
+	ensureClone(t, sp)
 
 	dir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "new")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -468,6 +686,7 @@ func TestMalformedMessageMovesToFailed(t *testing.T) {
 }
 
 func TestImportFailureKeepsMessageInCur(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -475,9 +694,7 @@ func TestImportFailureKeepsMessageInCur(t *testing.T) {
 
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "message", "hello", "")
 	dir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "new")
@@ -512,6 +729,7 @@ func TestImportFailureKeepsMessageInCur(t *testing.T) {
 }
 
 func TestRepositoryLockIsShared(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -551,15 +769,14 @@ func externalCommit(t *testing.T, remote, file string) {
 }
 
 func TestPushRecoversFromConcurrentRemoteUpdate(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "message", "concurrent", "")
 	rel := "mail/alpha/new/" + msg.ID + ".md"
@@ -590,6 +807,7 @@ func TestPushRecoversFromConcurrentRemoteUpdate(t *testing.T) {
 // reports the configured count (the old hardcoded default of 3 would retry
 // and report 3).
 func TestSyncUsesConfiguredPushRetries(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -615,8 +833,7 @@ func TestSyncUsesConfiguredPushRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 	err := processPendingMessages(root)
 	if err == nil {
 		t.Fatal("processing must fail while the remote rejects pushes")
@@ -634,6 +851,7 @@ func TestSyncUsesConfiguredPushRetries(t *testing.T) {
 }
 
 func TestCrashRecoveryCommitsDirtyTransition(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -671,17 +889,15 @@ func TestCrashRecoveryCommitsDirtyTransition(t *testing.T) {
 // messages already in new/ at the first processing cycle are moved to
 // processed/ WITHOUT being imported, and only future messages are imported.
 func TestInitialScanBaselineExcludesExisting(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	cfg.Repositories[0].Incoming.InitialScan = "baseline"
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	old1 := NewMessage("beta", "alpha", "ship", "pre-existing 1", "")
@@ -731,17 +947,15 @@ func TestInitialScanBaselineExcludesExisting(t *testing.T) {
 // committed, no initial-scan marker. A restart must converge to the same
 // result as an uninterrupted baseline: no import, no loss, no duplication.
 func TestInitialScanCrashDuringBaselineMove(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	cfg.Repositories[0].Incoming.InitialScan = "baseline"
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	m1 := NewMessage("beta", "alpha", "ship", "crash candidate 1", "")
@@ -755,9 +969,7 @@ func TestInitialScanCrashDuringBaselineMove(t *testing.T) {
 
 	// Receiver pulls without processing: the pre-first-cycle state.
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 	if sp.hasInitialScanCompleted("alpha") {
 		t.Fatal("no initial scan may have run yet")
 	}
@@ -815,17 +1027,15 @@ func TestInitialScanCrashDuringBaselineMove(t *testing.T) {
 // moved messages (they are baseline, not to be replayed) and must keep
 // importing future messages normally.
 func TestInitialScanCrashAfterMoveBeforeMarker(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	cfg.Repositories[0].Incoming.InitialScan = "baseline"
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	m1 := NewMessage("beta", "alpha", "ship", "moved before crash", "")
@@ -834,9 +1044,7 @@ func TestInitialScanCrashAfterMoveBeforeMarker(t *testing.T) {
 	}
 
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	// Crash AFTER the whole move, BEFORE commit and marker.
 	newDir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "new")
@@ -876,6 +1084,7 @@ func TestInitialScanCrashAfterMoveBeforeMarker(t *testing.T) {
 }
 
 func TestParseExternalLogicalSenderRoundtrip(t *testing.T) {
+	t.Parallel()
 	data := []byte("---\n" +
 		"id: w0-20261113T1010Z-chatgpt-voyager-post-restart\n" +
 		"from: ChatGPT@pegasus\n" +
@@ -912,6 +1121,7 @@ func TestParseExternalLogicalSenderRoundtrip(t *testing.T) {
 }
 
 func TestCanonicalSenderNormalization(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in      string
 		canon   string
@@ -943,6 +1153,7 @@ func TestCanonicalSenderNormalization(t *testing.T) {
 }
 
 func TestParseRejectsInvalidCanonicalEnvelopeSenders(t *testing.T) {
+	t.Parallel()
 	bad := []string{
 		"---\nid: w0-1\nfrom: ChatGPT@pegasus@evil\nto: alpha\n---\nbody\n",
 		"---\nid: w0-2\nfrom: @pegasus\nto: alpha\n---\nbody\n",
@@ -958,6 +1169,7 @@ func TestParseRejectsInvalidCanonicalEnvelopeSenders(t *testing.T) {
 }
 
 func TestParseSenderFromConsistency(t *testing.T) {
+	t.Parallel()
 	accept := []string{
 		"---\nid: w0-ok-1\nfrom: ChatGPT\nsender: ChatGPT@pegasus\nto: alpha\n---\nbody\n",
 		"---\nid: w0-ok-2\nfrom: ChatGPT@pegasus\nsender: ChatGPT@pegasus\nto: alpha\n---\nbody\n",
@@ -999,16 +1211,14 @@ func TestParseSenderFromConsistency(t *testing.T) {
 }
 
 func TestImportExternalLogicalSenderPreservesReplyAddress(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
 
@@ -1092,6 +1302,7 @@ func TestImportExternalLogicalSenderPreservesReplyAddress(t *testing.T) {
 }
 
 func TestPublishRemoteLogicalSenderPreservesDomain(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -1106,12 +1317,8 @@ func TestPublishRemoteLogicalSenderPreservesDomain(t *testing.T) {
 	}
 
 	InstallCommsTransport()
-	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
-	t.Setenv("STARFLEET_SHIP_ID", "Voyager")
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reserveShip(t, root, "Voyager")
+	bus := testBus(t, root, "Voyager")
 
 	id, err := bus.Tell("ChatGPT@pegasus", "reply via pegasus", "")
 	if err != nil {
@@ -1169,13 +1376,10 @@ func TestPublishRemoteLogicalSenderPreservesDomain(t *testing.T) {
 }
 
 func TestNormalShipToShipUnchangedWithLogicalSenderSupport(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reserveShip(t, root, "alpha")
+	bus := testBus(t, root, "alpha")
 	id, err := bus.Tell("beta", "hello ship", "")
 	if err != nil {
 		t.Fatalf("ship-to-ship tell: %v", err)
@@ -1215,6 +1419,7 @@ func gitOut(t *testing.T, args ...string) string {
 // inline attachment pointer is rejected by the wormhole transport instead of
 // silently dropping the attachment.
 func TestAttachmentPointerRejected(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -1229,14 +1434,10 @@ func TestAttachmentPointerRejected(t *testing.T) {
 	}
 
 	InstallCommsTransport()
-	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
-	t.Setenv("STARFLEET_SHIP_ID", "beta")
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reserveShip(t, root, "beta")
+	bus := testBus(t, root, "beta")
 
-	_, err = bus.Tell("alpha@peer.example", "see [[attach:report.txt:2048:deadbeef]] for details", "corr-att-1")
+	_, err := bus.Tell("alpha@peer.example", "see [[attach:report.txt:2048:deadbeef]] for details", "corr-att-1")
 	if err == nil {
 		t.Fatal("tell with attachment pointer must be rejected by the wormhole transport")
 	}
@@ -1259,16 +1460,14 @@ func TestAttachmentPointerRejected(t *testing.T) {
 // a reply target and verifies both survive the full wormhole pipeline into
 // the receiving Comms record.
 func TestTypeAndReplyToRoundtrip(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	msg := NewMessage("beta", "alpha", "control", "directive with type and reply", "m0000111122223333")
@@ -1331,16 +1530,14 @@ func TestTypeAndReplyToRoundtrip(t *testing.T) {
 }
 
 func TestConcurrentCyclesImportExactlyOnce(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	msg := NewMessage("beta", "alpha", "message", "concurrent cycles", "")
@@ -1375,6 +1572,7 @@ func TestConcurrentCyclesImportExactlyOnce(t *testing.T) {
 }
 
 func TestCommitDoesNotIncludeForeignStagedFiles(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -1423,6 +1621,7 @@ func TestCommitDoesNotIncludeForeignStagedFiles(t *testing.T) {
 }
 
 func TestCommsRoutingPublishesThroughWormhole(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -1437,12 +1636,8 @@ func TestCommsRoutingPublishesThroughWormhole(t *testing.T) {
 	}
 
 	InstallCommsTransport()
-	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(root, "bus"))
-	t.Setenv("STARFLEET_SHIP_ID", "beta")
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reserveShip(t, root, "beta")
+	bus := testBus(t, root, "beta")
 
 	msgID, err := bus.Tell("alpha@peer.example", "hello over wormhole", "corr-42")
 	if err != nil {
@@ -1468,6 +1663,7 @@ func TestCommsRoutingPublishesThroughWormhole(t *testing.T) {
 }
 
 func TestTwoInstanceRemoteImportE2E(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	rootA := t.TempDir()
 	rootB := t.TempDir()
@@ -1486,18 +1682,9 @@ func TestTwoInstanceRemoteImportE2E(t *testing.T) {
 		}
 	}
 
-	t.Setenv("STARFLEET_SHIP_ID", "alpha") // publisher: must NOT import its own outbound remote messages
-	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(rootA, "bus"))
-	busA, err := comms.New(rootA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("STARFLEET_BUS_DIR", filepath.Join(rootB, "bus"))
-	t.Setenv("STARFLEET_SHIP_ID", "beta")
-	busB, err := comms.New(rootB)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reserveShip(t, rootA, "alpha")
+	busA := testBus(t, rootA, "alpha")
+	busB := testBus(t, rootB, "beta")
 
 	InstallCommsTransport()
 
@@ -1636,6 +1823,7 @@ func readCommsRecords(t *testing.T, bus *comms.Bus, ship string) []testCommsReco
 // Publish -> Git-Maildir -> Import -> Comms record. A repeated processing
 // cycle must be idempotent: no second Comms record, same CommsID, same bytes.
 func TestLargePayloadRoundtripPreservesBytes(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -1674,11 +1862,8 @@ func TestLargePayloadRoundtripPreservesBytes(t *testing.T) {
 		t.Fatal("published message was not pushed to the remote")
 	}
 
-	t.Setenv("STARFLEET_SHIP_ID", "beta")
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reserveShip(t, root, "beta")
+	bus := testBus(t, root, "beta")
 
 	// First cycle: claim + import + processed.
 	if err := processPendingMessages(root); err != nil {
@@ -1734,9 +1919,10 @@ func TestLargePayloadRoundtripPreservesBytes(t *testing.T) {
 // TestDaemonLifecycle tests the full daemon start/stop/status cycle using
 // actual subprocesses via the CLI with a local git remote.
 func TestDaemonLifecycle(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	writeConfig(t, root, cfg)
 
 	binary := buildTestBinary(t)
@@ -1818,9 +2004,10 @@ func TestDaemonLifecycle(t *testing.T) {
 
 // TestDaemonStalePID tests that a stale PID file is cleaned up on start.
 func TestDaemonStalePID(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	writeConfig(t, root, cfg)
 
 	binary := buildTestBinary(t)
@@ -1871,13 +2058,13 @@ func TestDaemonStalePID(t *testing.T) {
 // a hard error: the recorded PID cannot be trusted (possible PID reuse), so
 // start must refuse to act and must not silently overwrite the files.
 func TestDaemonStalePIDWithStateMismatch(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	writeConfig(t, root, cfg)
 
 	binary := buildTestBinary(t)
-	t.Setenv("STARFLEETCTL_BINARY", binary)
 
 	// Create a PID file with one PID
 	if err := EnsureDir(root); err != nil {
@@ -1950,14 +2137,14 @@ func TestDaemonStalePIDWithStateMismatch(t *testing.T) {
 
 // TestDaemonAutostartIdempotent tests that Autostart is idempotent.
 func TestDaemonAutostartIdempotent(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	cfg.Enabled = true
 	writeConfig(t, root, cfg)
 
-	binary := buildTestBinary(t)
-	t.Setenv("STARFLEETCTL_BINARY", binary)
+	buildTestBinary(t)
 
 	// First autostart should start the daemon
 	started, err := Autostart(root)
@@ -1983,9 +2170,10 @@ func TestDaemonAutostartIdempotent(t *testing.T) {
 
 // TestParallelStart tests that two parallel start calls result in exactly one worker.
 func TestParallelStart(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	writeConfig(t, root, cfg)
 
 	binary := buildTestBinary(t)
@@ -2044,14 +2232,14 @@ func TestParallelStart(t *testing.T) {
 // exactly one worker and no errors: concurrent autostarts converge (the
 // loser of the race reports started=false without error).
 func TestParallelAutostart(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	cfg.Enabled = true
 	writeConfig(t, root, cfg)
 
-	binary := buildTestBinary(t)
-	t.Setenv("STARFLEETCTL_BINARY", binary)
+	buildTestBinary(t)
 
 	type autoResult struct {
 		started bool
@@ -2097,6 +2285,7 @@ func TestParallelAutostart(t *testing.T) {
 // the parent does not wait the full 30s timeout — and leaves no PID file
 // or ready file behind, while the state file records the failure reason.
 func TestWorkerCrashDuringStartup(t *testing.T) {
+	t.Parallel()
 	// This test simulates a worker crash by using an invalid config
 	// (remote that doesn't exist) so the startup sync fails fatally.
 	root := t.TempDir()
@@ -2153,9 +2342,10 @@ func TestWorkerCrashDuringStartup(t *testing.T) {
 // TestWorkerCrashAfterStart tests that if a worker crashes after successful start,
 // the daemon is properly detected as dead.
 func TestWorkerCrashAfterStart(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	writeConfig(t, root, cfg)
 
 	binary := buildTestBinary(t)
@@ -2193,8 +2383,10 @@ func TestWorkerCrashAfterStart(t *testing.T) {
 		t.Fatalf("failed to kill worker: %v", err)
 	}
 
-	// Wait a bit for process to die
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the process to die (bounded, instead of a fixed sleep)
+	if !waitProcessGone(pid, 2*time.Second) {
+		t.Fatalf("worker pid %d still alive after SIGKILL", pid)
+	}
 
 	// Status should show dead
 	cmd = exec.Command(binary, "wormhole", "status")
@@ -2217,6 +2409,7 @@ func TestWorkerCrashAfterStart(t *testing.T) {
 
 // TestNoForeignProcessKill tests that stop never kills a non-wormhole process.
 func TestNoForeignProcessKill(t *testing.T) {
+	t.Parallel()
 	// Start a harmless background process
 	cmd := exec.Command("sleep", "300")
 	cmd.Start()
@@ -2291,6 +2484,7 @@ func daemonTestEnv(root, ship string) []string {
 // sync: an unreachable remote neither blocks the start nor kills the daemon
 // later (per-cycle failures are logged and retried, never fatal).
 func TestStartupSyncDisabledStartsWithoutSync(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	cfg := testConfig("/nonexistent/remote.git")
 	cfg.Sync.StartupSync = false
@@ -2311,8 +2505,9 @@ func TestStartupSyncDisabledStartsWithoutSync(t *testing.T) {
 		_, _ = cmd.CombinedOutput()
 	})
 
-	// The daemon must stay alive across several failing ticks.
-	time.Sleep(3 * time.Second)
+	// The daemon must stay alive across several failing ticks: wait until the
+	// daemon log proves cycles actually ran (instead of a fixed sleep).
+	waitForDaemonLog(t, root, "[wormhole] cycle:", 3*time.Second)
 	cmd = exec.Command(binary, "wormhole", "status")
 	cmd.Dir = root
 	cmd.Env = daemonTestEnv(root, "alpha")
@@ -2347,12 +2542,13 @@ func TestStartupSyncDisabledStartsWithoutSync(t *testing.T) {
 // ticks while the remote is unreachable, and resumes importing once the
 // remote is back.
 func TestSyncFailureKeepsDaemonRunning(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
-	cfg := testConfig(remote)
+	cfg := testConfigFast(remote)
 	writeConfig(t, root, cfg)
 
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 	binary := buildTestBinary(t)
 	runDaemonCmd := func(args ...string) (string, error) {
 		cmd := exec.Command(binary, args...)
@@ -2373,7 +2569,7 @@ func TestSyncFailureKeepsDaemonRunning(t *testing.T) {
 	if err := os.Rename(remote, broken); err != nil {
 		t.Fatalf("break remote: %v", err)
 	}
-	time.Sleep(3 * time.Second)
+	waitForDaemonLog(t, root, "[wormhole] cycle:", 3*time.Second)
 
 	out, err := runDaemonCmd("wormhole", "status")
 	if err != nil {
@@ -2395,10 +2591,7 @@ func TestSyncFailureKeepsDaemonRunning(t *testing.T) {
 	if err := os.Rename(broken, remote); err != nil {
 		t.Fatalf("restore remote: %v", err)
 	}
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	m1 := NewMessage("beta", "alpha", "ship", "after recovery", "")
@@ -2430,6 +2623,7 @@ func TestSyncFailureKeepsDaemonRunning(t *testing.T) {
 //   - with a healthy remote, a stale marker (with or without stale pid/state
 //     files) is cleaned up and replaced by the fresh worker's own marker
 func TestStaleReadyMarkerDoesNotFakeStart(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	binary := buildTestBinary(t)
 
@@ -2536,6 +2730,7 @@ func TestStaleReadyMarkerDoesNotFakeStart(t *testing.T) {
 // or unreadable is a hard refusal — never "no daemon"; only a genuinely
 // absent pid file means no registered instance.
 func TestUnverifiedPIDFilesFailClosed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -2731,25 +2926,41 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// buildTestBinary builds the starfleetctl binary for testing and returns its path.
+var (
+	testBinaryOnce sync.Once
+	testBinaryPath string
+	testBinaryErr  error
+)
+
+// buildTestBinary builds the starfleetctl binary once per test run and shares
+// it across tests: linking the full CLI per test dominated the package runtime.
 func buildTestBinary(t *testing.T) string {
 	t.Helper()
-	buildDir := t.TempDir()
-	binary := filepath.Join(buildDir, "starfleetctl-test")
-
-	cmd := exec.Command("go", "build", "-o", binary, "./cmd/starfleetctl")
-	cmd.Dir = repoRoot(t)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("build failed: %v\n%s", err, out)
+	testBinaryOnce.Do(func() {
+		binary := filepath.Join(testSharedDir, "starfleetctl-test")
+		cmd := exec.Command("go", "build", "-o", binary, "./cmd/starfleetctl")
+		cmd.Dir = repoRoot(t)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			testBinaryErr = fmt.Errorf("build failed: %v\n%s", err, out)
+			return
+		}
+		testBinaryPath = binary
+		// Daemon-starting tests pick this up via os.Getenv in wormhole.go;
+		// setting it once here keeps those tests free of t.Setenv.
+		os.Setenv("STARFLEETCTL_BINARY", binary)
+	})
+	if testBinaryErr != nil {
+		t.Fatal(testBinaryErr)
 	}
-	return binary
+	return testBinaryPath
 }
 
 // TestGitignoreWormholes verifies that the repository's own .gitignore
 // ignores the wormhole runtime directory (pid, state, relay spool) at the
 // path the daemon actually uses: .starfleet-ai/var/wormholes/.
 func TestGitignoreWormholes(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 
 	// Initialize git repo
@@ -2832,6 +3043,7 @@ func copyFile(src, dst string) error {
 // message is pushed to `mail/<recipient>/new/` with sender/recipient/payload
 // preserved. Meaningful error cases are covered in a subtest.
 func TestSendCLIPublishesMessage(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
@@ -2962,21 +3174,17 @@ func TestGitCommandEnvForcesCLocale(t *testing.T) {
 }
 
 func TestEmptyMessageRejectedMovedToFailed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "first payload", "")
 	msg.Content = ""
@@ -3012,21 +3220,17 @@ func TestEmptyMessageRejectedMovedToFailed(t *testing.T) {
 }
 
 func TestPermanentPostExternalErrorMovesToFailed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "first payload", "")
 	// Pre-create an external record with same source+externalID but different payload
@@ -3068,17 +3272,16 @@ func TestPermanentPostExternalErrorMovesToFailed(t *testing.T) {
 }
 
 func TestTemporaryPostExternalErrorKeepsMessageInCur(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "hello", "")
 	dir := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "new")
@@ -3113,16 +3316,14 @@ func TestTemporaryPostExternalErrorKeepsMessageInCur(t *testing.T) {
 }
 
 func TestSuccessfulImportUnchanged(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	msg := NewMessage("beta", "alpha", "ship", "unchanged success", "")
@@ -3147,21 +3348,17 @@ func TestSuccessfulImportUnchanged(t *testing.T) {
 }
 
 func TestPermanentImportMoveToFailedErrorDoesNotLoseMessage(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "payload", "")
 	// Trigger permanent PostExternal error (hash mismatch).
@@ -3183,7 +3380,7 @@ func TestPermanentImportMoveToFailedErrorDoesNotLoseMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = sp.runOnce(bus, true)
+	err := sp.runOnce(bus, true)
 	if err == nil {
 		t.Fatal("expected error when moving permanent rejection to failed/ fails")
 	}
@@ -3198,21 +3395,17 @@ func TestPermanentImportMoveToFailedErrorDoesNotLoseMessage(t *testing.T) {
 }
 
 func TestCorruptExternalRecordMovesToFailed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "payload", "")
 	// Corrupt the external record for this source+externalID so PostExternal fails permanently.
@@ -3254,21 +3447,17 @@ func TestCorruptExternalRecordMovesToFailed(t *testing.T) {
 }
 
 func TestExternalRecordKeyMismatchMovesToFailed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "payload", "")
 	sum := sha256.Sum256([]byte(sp.repo.ID + "\x00" + msg.ID))
@@ -3310,21 +3499,17 @@ func TestExternalRecordKeyMismatchMovesToFailed(t *testing.T) {
 }
 
 func TestRecipientCopyMismatchMovesToFailed(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "payload", "")
 	data := buildMessageBytes(msg)
@@ -3462,16 +3647,13 @@ func setupCentralTest(t *testing.T) (root string, sp *Spool) {
 	root = t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "")
-	// Keep the bus inside the test workspace. It must stay the default bus
-	// dir: the ship-name registry lives at config.BusDir(root)/ships and does
-	// not follow STARFLEET_BUS_DIR.
-	t.Setenv("STARFLEET_BUS_DIR", config.BusDir(root))
+	// No t.Setenv here: TestMain has neutralised the fleet env, so comms.New
+	// derives bus dir = config.BusDir(root) and the user@host ship-id fallback
+	// — the same values the previous t.Setenv calls enforced. Keeping this
+	// helper env-free lets its callers run with t.Parallel().
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp = newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 	return root, sp
 }
 
@@ -3479,6 +3661,7 @@ func setupCentralTest(t *testing.T) (root string, sp *Spool) {
 // mailboxes of the flagship, a declarative standing ship, a reserved worker
 // and a worker known only from the board.
 func TestCentralProcessingFlagshipAndWorkers(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 
 	writeFleetShips(t, root, "Enterprise", "Laforge")
@@ -3517,6 +3700,7 @@ func TestCentralProcessingFlagshipAndWorkers(t *testing.T) {
 // TestCentralProcessingWithoutShipEnv proves that a ship is processed even
 // when the daemon process has no STARFLEET_SHIP_ID at all.
 func TestCentralProcessingWithoutShipEnv(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	registerShipReservation(t, root, "Discovery")
 
@@ -3537,6 +3721,7 @@ func TestCentralProcessingWithoutShipEnv(t *testing.T) {
 // fallback identity (e.g. "nekrad@x1") never becomes a mailbox, even though
 // it is what comms.New falls back to when STARFLEET_SHIP_ID is unset.
 func TestUserHostFallbackNeverUsedAsMailbox(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	registerShipReservation(t, root, "Discovery")
 
@@ -3577,6 +3762,7 @@ func TestUserHostFallbackNeverUsedAsMailbox(t *testing.T) {
 // TestCentralProcessingDeduplicatesShipEntries proves that a ship present in
 // several canonical sources is processed exactly once.
 func TestCentralProcessingDeduplicatesShipEntries(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 
 	writeFleetShips(t, root, "Enterprise", "Discovery")
@@ -3625,6 +3811,7 @@ func TestCentralProcessingDeduplicatesShipEntries(t *testing.T) {
 // not prevent the other mailboxes from being processed, while the error is
 // still aggregated and reported.
 func TestCentralProcessingIsolatesMailboxErrors(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 
 	registerShipReservation(t, root, "Discovery")
@@ -3656,6 +3843,7 @@ func TestCentralProcessingIsolatesMailboxErrors(t *testing.T) {
 // TestWormholeSyncUsesMultiShipLogic proves that `wormhole sync` runs the same
 // central multi-ship cycle as the daemon.
 func TestWormholeSyncUsesMultiShipLogic(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 
 	writeFleetShips(t, root, "Enterprise", "Laforge")
@@ -3718,16 +3906,14 @@ func setupRemoteWithLegacyArchives(t *testing.T) string {
 // TestLegacyTopLevelArchivesUntouched proves that the frozen top-level
 // inbox/ and outbox/ archives are neither scanned nor imported.
 func TestLegacyTopLevelArchivesUntouched(t *testing.T) {
+	t.Parallel()
 	remote := setupRemoteWithLegacyArchives(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	registerShipReservation(t, root, "Discovery")
 	msg := NewMessage("Enterprise", "Discovery", "ship", "active", "")
@@ -3744,10 +3930,7 @@ func TestLegacyTopLevelArchivesUntouched(t *testing.T) {
 			t.Fatalf("legacy archive file must stay untouched: %v (%s)", err, rel)
 		}
 	}
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "")
 	if n := countFiles(t, bus.MsgDir); n != 1 {
 		t.Fatalf("legacy archive must not be imported, got %d comms messages", n)
 	}
@@ -3756,6 +3939,7 @@ func TestLegacyTopLevelArchivesUntouched(t *testing.T) {
 // TestCentralProcessingNoRedelivery proves that a second cycle does not import
 // or move an already processed message again.
 func TestCentralProcessingNoRedelivery(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	registerShipReservation(t, root, "Discovery")
 
@@ -3793,17 +3977,15 @@ func TestCentralProcessingNoRedelivery(t *testing.T) {
 // baseline establishes the baseline per ship without importing pre-existing
 // messages, also when several ships are processed in one cycle.
 func TestCentralProcessingBaselineMultiShip(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	cfg.Repositories[0].Incoming.InitialScan = "baseline"
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	registerShipReservation(t, root, "Discovery")
 	registerShipReservation(t, root, "Voyager")
@@ -3817,10 +3999,7 @@ func TestCentralProcessingBaselineMultiShip(t *testing.T) {
 		t.Fatalf("process: %v", err)
 	}
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "")
 	if n := countFiles(t, bus.MsgDir); n != 0 {
 		t.Fatalf("baseline must not import pre-existing messages, got %d", n)
 	}
@@ -3842,6 +4021,7 @@ func TestCentralProcessingBaselineMultiShip(t *testing.T) {
 // binary with GO_WANT_HELPER_PROCESS=1 to obtain a process that has already
 // exited. This avoids any dependency on external binaries such as sleep/true.
 func TestWormholeHelperProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
@@ -3928,6 +4108,7 @@ func countMailboxFiles(t *testing.T, dir string) int {
 // shutdown (state "offline") are both ignored — even though "idle" records
 // never count as stale.
 func TestLocalShipsIgnoresEndedShipStatusRecord(t *testing.T) {
+	t.Parallel()
 	root, _ := setupCentralTest(t)
 
 	writeBoardStatusWithPID(t, root, "Ghost", "idle", deadPID(t))
@@ -3948,6 +4129,7 @@ func TestLocalShipsIgnoresEndedShipStatusRecord(t *testing.T) {
 // ship that has ended is not imported: the leftover status record must not
 // keep the mailbox alive.
 func TestEndedShipStatusRecordDoesNotActivateMailbox(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	writeBoardStatusWithPID(t, root, "Ghost", "idle", deadPID(t))
 
@@ -3972,6 +4154,7 @@ func TestEndedShipStatusRecordDoesNotActivateMailbox(t *testing.T) {
 // actually running is still recognized without a registry reservation: its
 // live PID is the lifecycle information that proves it.
 func TestRunningAdHocShipWithoutReservationIsDetected(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	writeBoardStatusWithPID(t, root, "AdHoc", "working", os.Getpid())
 
@@ -4024,12 +4207,24 @@ func setBaselineMode(t *testing.T, root string) {
 // one of the ship identity the single-ship implementation ran under — while a
 // newly appearing mailbox still runs its own baseline scan.
 func TestLegacyInitialScanMarkerAppliesOnlyToOwnerMailbox(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	setBaselineMode(t, root)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
 	registerShipReservation(t, root, "alpha")
 	registerShipReservation(t, root, "beta")
 	writeLegacyInitialScanMarker(t, sp)
+
+	// Mailbox evidence pins the legacy marker's owner to alpha, so no
+	// STARFLEET_SHIP_ID env (which would forbid t.Parallel) is needed.
+	legacyAbs := filepath.Join(sp.git.CloneDir(), "mail", "alpha", "processed", "legacy.md")
+	if err := os.MkdirAll(filepath.Dir(legacyAbs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyAbs, []byte("---\nid: legacy\n---\nold\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, sp.git.CloneDir(), "add", "-A")
+	runGit(t, sp.git.CloneDir(), "commit", "-q", "-m", "wormhole: legacy baseline")
 
 	msgAlpha := NewMessage("Enterprise", "alpha", "ship", "for alpha", "")
 	if err := sp.Publish(msgAlpha); err != nil {
@@ -4044,10 +4239,7 @@ func TestLegacyInitialScanMarkerAppliesOnlyToOwnerMailbox(t *testing.T) {
 		t.Fatalf("process: %v", err)
 	}
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "")
 	// The owner mailbox keeps its completed initial scan: its message is
 	// imported instead of being baselined away.
 	if n := countFiles(t, filepath.Join(bus.MsgDir, "alpha", "unseen")); n != 1 {
@@ -4073,6 +4265,7 @@ func TestLegacyInitialScanMarkerAppliesOnlyToOwnerMailbox(t *testing.T) {
 // explicitly configured ship identity: the mailbox showing evidence of the
 // previous scan identifies it.
 func TestLegacyInitialScanMarkerOwnerFromMailboxEvidence(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	setBaselineMode(t, root)
 	registerShipReservation(t, root, "alpha")
@@ -4123,6 +4316,7 @@ func TestLegacyInitialScanMarkerOwnerFromMailboxEvidence(t *testing.T) {
 // initializes itself independently when no legacy marker exists: each one runs
 // its own baseline scan and gets its own marker.
 func TestInitialScanMarkersAreIndependentPerMailbox(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 	setBaselineMode(t, root)
 	registerShipReservation(t, root, "alpha")
@@ -4167,6 +4361,7 @@ func TestInitialScanMarkersAreIndependentPerMailbox(t *testing.T) {
 // does not enter the local ship set or activate a mailbox. All current status
 // writers set a PID, so PID==0 only occurs in files not written by them.
 func TestStatusRecordWithoutPIDIsNotActive(t *testing.T) {
+	t.Parallel()
 	root, sp := setupCentralTest(t)
 
 	writeBoardStatusWithPID(t, root, "NoPID", "idle", 0)
@@ -4219,6 +4414,7 @@ func TestStatusRecordWithoutPIDIsNotActive(t *testing.T) {
 }
 
 func TestParseTolerantEnvelopeFormats(t *testing.T) {
+	t.Parallel()
 	canonical := "---\n" +
 		"id: w0-tol-canon\n" +
 		"from: alpha\n" +
@@ -4273,6 +4469,7 @@ func TestParseTolerantEnvelopeFormats(t *testing.T) {
 }
 
 func TestParseTolerantRejectsAmbiguousBoundary(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		// No blank line separating header and body (ambiguous without delimiters).
 		"id: w0-amb-1\nfrom: alpha\nto: beta\nhello body\n",
@@ -4293,6 +4490,7 @@ func TestParseTolerantRejectsAmbiguousBoundary(t *testing.T) {
 }
 
 func TestParseTolerantRejectsInvalidOrMissingRequired(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		// Missing required fields.
 		"id: w0-req-1\nfrom: alpha\n\nbody\n",
@@ -4312,6 +4510,7 @@ func TestParseTolerantRejectsInvalidOrMissingRequired(t *testing.T) {
 }
 
 func TestParseTolerantBodyLinesLookLikeHeaders(t *testing.T) {
+	t.Parallel()
 	// Body lines resembling envelope fields must not be interpreted as header.
 	msg := "id: w0-bodylike\n" +
 		"from: alpha\n" +
@@ -4352,6 +4551,7 @@ func TestParseTolerantBodyLinesLookLikeHeaders(t *testing.T) {
 }
 
 func TestParseTolerantSenderAndIDValidationUnchanged(t *testing.T) {
+	t.Parallel()
 	// Existing sender/from consistency and message-id validation remain enforced.
 	accept := []string{
 		"id: w0-ok-ext\nfrom: ChatGPT@pegasus\nto: Voyager\ncreated: 2026-11-13T10:00:00Z\n\nhi\n",
@@ -4400,21 +4600,17 @@ func writeUndeliverable(t *testing.T, sp *Spool, target string) *Message {
 // the message is neither moved to failed/ (where it would have no diagnostic)
 // nor lost.
 func TestFailedTransitionReasonWriteFailureKeepsMessage(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := writeUndeliverable(t, sp, "alpha")
 	name := msg.ID + ".md"
@@ -4451,21 +4647,17 @@ func TestFailedTransitionReasonWriteFailureKeepsMessage(t *testing.T) {
 // transition deterministically, ending with message + diagnostic committed and
 // pushed.
 func TestFailedTransitionCrashAfterReasonWriteRecovers(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := writeUndeliverable(t, sp, "alpha")
 	name := msg.ID + ".md"
@@ -4510,17 +4702,16 @@ func TestFailedTransitionCrashAfterReasonWriteRecovers(t *testing.T) {
 // crash between the move into failed/ and the commit: the next sync commits the
 // dirty transition (message + diagnostic) and pushes it.
 func TestFailedTransitionCrashAfterMoveRecovers(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := writeUndeliverable(t, sp, "alpha")
 	name := msg.ID + ".md"
@@ -4561,16 +4752,14 @@ func TestFailedTransitionCrashAfterMoveRecovers(t *testing.T) {
 // Bus.PostExternal and moved to processed/ exactly once - even when the daemon
 // crashed between the claim rename and the import.
 func TestPostExternalCrashRecoveryImportsExactlyOnce(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
 	msg := NewMessage("beta", "alpha", "ship", "integrated crash recovery", "")
@@ -4658,21 +4847,17 @@ func TestPostExternalCrashRecoveryImportsExactlyOnce(t *testing.T) {
 // same external identity and the exact payload bytes, and must finally reach
 // the durable processed state.
 func TestPostImportCrashRecoveryCompletesProcessedTransition(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := NewMessage("beta", "alpha", "ship", "post-import crash window", "")
 	raw := buildMessageBytes(msg)
@@ -4747,6 +4932,7 @@ func TestPostImportCrashRecoveryCompletesProcessedTransition(t *testing.T) {
 // which only mean "not supported on this platform/filesystem" are tolerated,
 // while real I/O errors are not.
 func TestDirSyncUnsupportedClassification(t *testing.T) {
+	t.Parallel()
 	unsupported := []error{
 		os.NewSyscallError("fsync", syscall.EINVAL),
 		os.NewSyscallError("fsync", syscall.EOPNOTSUPP),
@@ -4784,14 +4970,13 @@ func TestDirSyncUnsupportedClassification(t *testing.T) {
 // the git-excluded mail/.tmp/ are removed at the start of a locked cycle,
 // while real spool content is untouched.
 func TestStagingCleanupRemovesLeftovers(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	clone := sp.git.CloneDir()
 	tmpDir := filepath.Join(clone, "mail", mailTmpName)
@@ -4829,21 +5014,17 @@ func TestStagingCleanupRemovesLeftovers(t *testing.T) {
 // TestFailedTransitionLeavesNoStagingFiles verifies that a completed failed/
 // transition does not leave staging files behind in mail/.tmp/.
 func TestFailedTransitionLeavesNoStagingFiles(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "alpha")
+	reserveShip(t, root, "alpha")
 
-	bus, err := comms.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bus := testBus(t, root, "alpha")
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sp := newSpool(root, cfg.Repositories[0], cfg.Sync.PushRetries, "alpha", cloneTimeout, commandTimeout)
-	if err := sp.runOnce(nil, false); err != nil {
-		t.Fatalf("initial sync: %v", err)
-	}
+	ensureClone(t, sp)
 
 	msg := writeUndeliverable(t, sp, "alpha")
 	if err := sp.runOnce(bus, true); err != nil {
@@ -4868,11 +5049,12 @@ func TestFailedTransitionLeavesNoStagingFiles(t *testing.T) {
 // dir fsync): the published file holds exactly the envelope bytes and no
 // staging files are left behind.
 func TestPublishDurableWrite(t *testing.T) {
+	t.Parallel()
 	remote := setupRemote(t)
 	root := t.TempDir()
 	cfg := testConfig(remote)
 	writeConfig(t, root, cfg)
-	t.Setenv("STARFLEET_SHIP_ID", "beta")
+	reserveShip(t, root, "beta")
 	repo := cfg.Repositories[0]
 	cloneTimeout, commandTimeout := testTimeouts(cfg)
 	sender := newSpool(root, repo, cfg.Sync.PushRetries, "beta", cloneTimeout, commandTimeout)
