@@ -171,10 +171,17 @@ func (b *Bus) postAs(from, target, summary, payload, basename, replyTo, msgType 
 
 			// Write a durable pending outbox record BEFORE remote publish so
 			// retries reuse the same operation ID and don't publish twice.
-			// The ID is a deterministic hash of the message content INCLUDING
-			// sender (from), repository, destination, domain, type, and reply_to
-			// to avoid collisions between different messages with identical text.
-			// Uses null byte (\x00) as delimiter since it cannot appear in any field.
+			// The ID is a deterministic hash of the message content plus the
+			// destination (local target), the remote domain, the repository,
+			// the message type and reply_to, so that messages with identical
+			// text but different destination/domain/repository/type/reply_to
+			// never share an operation ID. Uses null byte (\x00) as delimiter
+			// since it cannot appear in any field.
+			// The sender is NOT part of the hash: sender separation is
+			// structural instead. The outbox record lives in the per-sender
+			// directory msgs/<from>/unseen (or seen/), and a record found in
+			// the legacy flat directory is only accepted when its From and
+			// ExternalSource match the current sender and repository.
 			hashInput := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s", clean(summary), localTarget, route.Domain, route.Repository, msgType, replyTo)
 			hash := sha256.Sum256([]byte(hashInput))
 			outID := hex.EncodeToString(hash[:])

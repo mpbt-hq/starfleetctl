@@ -238,6 +238,33 @@ The transport preserves `Type` and `ReplyTo` fields through the entire pipeline:
 
 **Attachments are not supported** — messages with inline attachment pointers (`[[attach:...]]`) are rejected with a clear error.
 
+## Outbound Outbox (exactly-once publish)
+
+A remote send does not write the message and then remember it. The outbox record is
+made durable **before** the transport call, so a crash between publish and bookkeeping
+cannot lose the record and cause a second, differently-identified publish:
+
+1. The operation ID is a SHA-256 hash over the message content, the local destination
+   target, the remote domain, the repository, the message type and `reply_to`,
+   separated by a null byte (`\x00`) that cannot occur inside a field. Identical text
+   with a different destination, domain, repository, type or `reply_to` therefore never
+   shares an operation ID.
+2. The pending record (`ExternalID` empty) is written to the sender's own outbox
+   directory (`msgs/<from>/unseen/`, later `seen/`) via temp file, fsync, rename and
+   directory fsync.
+3. Only then is the transport called. The transport uses the operation ID as the
+   message ID, so a retry publishes the same message identity and the remote side can
+   deduplicate it.
+4. After a successful publish the record is completed with the transport ID. A retry
+   that finds a completed record returns the existing transport ID without publishing
+   again.
+
+**Sender separation** is structural rather than part of the hash: the record lives in
+the per-sender outbox directory, and a record found in the legacy flat `msgs/` directory
+is only accepted when its `From` and `ExternalSource` match the current sender and
+repository. Two ships sending identical text to the same destination therefore produce
+independent records and independent publishes.
+
 ## Comms Routing (for remote delivery)
 
 In `.starfleet-ai/conf/comms.yaml`:
