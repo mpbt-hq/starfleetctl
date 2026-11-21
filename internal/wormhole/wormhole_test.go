@@ -2249,6 +2249,88 @@ func TestStartDaemonRecoversFromStaleRuntimeFiles(t *testing.T) {
 	}
 }
 
+// TestEnsureCloneReplacesStaleRemoteURL proves that a clone whose remote URL
+// no longer matches the configuration is replaced by a fresh clone instead of
+// failing every sync with a mismatch error forever.
+func TestEnsureCloneReplacesStaleRemoteURL(t *testing.T) {
+	t.Parallel()
+	remoteA := setupRemote(t)
+	remoteB := setupRemote(t)
+	root := t.TempDir()
+
+	cfg := GitSyncConfig{ID: "relay", Remote: remoteA, Branch: "main", CloneTimeout: 60 * time.Second, CommandTimeout: 60 * time.Second}
+	gs := NewGitSync(root, cfg)
+	lock, err := gs.Lock(60 * time.Second)
+	if err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	defer lock.Close()
+	if err := gs.EnsureCloneLocked(); err != nil {
+		t.Fatalf("initial clone: %v", err)
+	}
+	if got, err := gs.gitConfigIn(gs.cloneDir, "remote.origin.url"); err != nil || strings.TrimSpace(got) != remoteA {
+		t.Fatalf("clone must use the configured remote, got %q (%v)", got, err)
+	}
+
+	// The configuration now points to a different remote: the clone must be
+	// replaced, not kept.
+	cfg.Remote = remoteB
+	gs2 := NewGitSync(root, cfg)
+	if err := gs2.EnsureCloneLocked(); err != nil {
+		t.Fatalf("clone with changed remote must be replaced: %v", err)
+	}
+	got, err := gs2.gitConfigIn(gs2.cloneDir, "remote.origin.url")
+	if err != nil {
+		t.Fatalf("read remote.origin.url: %v", err)
+	}
+	if strings.TrimSpace(got) != remoteB {
+		t.Fatalf("clone must use the new remote, got %q want %q", strings.TrimSpace(got), remoteB)
+	}
+}
+
+// TestEnsureCloneKeepsUnpublishedContentOnRemoteChange proves that a clone
+// with content that exists nowhere else is never dropped: the replacement is
+// refused until the content has been published.
+func TestEnsureCloneKeepsUnpublishedContentOnRemoteChange(t *testing.T) {
+	t.Parallel()
+	remoteA := setupRemote(t)
+	remoteB := setupRemote(t)
+	root := t.TempDir()
+
+	cfg := GitSyncConfig{ID: "relay", Remote: remoteA, Branch: "main", CloneTimeout: 60 * time.Second, CommandTimeout: 60 * time.Second}
+	gs := NewGitSync(root, cfg)
+	lock, err := gs.Lock(60 * time.Second)
+	if err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	defer lock.Close()
+	if err := gs.EnsureCloneLocked(); err != nil {
+		t.Fatalf("initial clone: %v", err)
+	}
+
+	// A message that was written locally but never committed/pushed.
+	local := filepath.Join(gs.cloneDir, "mail", "alpha", "new", "local.md")
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("from: alpha\n\nunpublished\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Remote = remoteB
+	gs2 := NewGitSync(root, cfg)
+	err = gs2.EnsureCloneLocked()
+	if err == nil {
+		t.Fatal("replacing a clone with unpublished content must fail")
+	}
+	if !strings.Contains(err.Error(), "unpublished content") {
+		t.Fatalf("error must explain the unpublished content, got: %v", err)
+	}
+	if _, statErr := os.Stat(local); statErr != nil {
+		t.Fatalf("unpublished content must be kept, stat err=%v", statErr)
+	}
+}
+
 // TestDaemonAutostartIdempotent tests that Autostart is idempotent.
 func TestDaemonAutostartIdempotent(t *testing.T) {
 	t.Parallel()

@@ -85,7 +85,6 @@ const (
 	defaultCommandTimeout = 30 * time.Second
 )
 
-
 // validateInitialScan checks that initial_scan is "baseline" or "replay".
 func validateInitialScan(scan string) error {
 	switch scan {

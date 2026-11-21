@@ -147,10 +147,29 @@ func (g *GitSync) SyncLocked() error {
 }
 
 // EnsureCloneLocked ensures the repository is cloned and valid.
+//
+// An existing clone that no longer matches the configuration (the remote URL
+// or the tracked branch changed) is replaced by a fresh clone: such a clone
+// keeps talking to the old remote/branch, so it can neither publish nor
+// import and every sync would fail with a mismatch error forever. Local
+// content that is not published yet is never dropped — the replacement is
+// refused until it has been published.
 func (g *GitSync) EnsureCloneLocked() error {
 	gitDir := filepath.Join(g.cloneDir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
-		return g.validateClone()
+		stale, serr := g.cloneStale(g.cloneDir)
+		if serr != nil {
+			return serr
+		}
+		if !stale {
+			return g.validateClone()
+		}
+		if err := g.assertPublished(); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(g.cloneDir); err != nil {
+			return fmt.Errorf("remove stale clone dir: %w", err)
+		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat clone dir: %w", err)
 	}
@@ -209,6 +228,64 @@ func (g *GitSync) validateClone() error {
 		return fmt.Errorf("mkdir state dir: %w", err)
 	}
 	return g.ensureExcludes()
+}
+
+// cloneStale reports whether an existing clone no longer matches the
+// configuration: the remote URL or the tracked branch changed. Such a clone
+// keeps talking to the old remote/branch, so it can neither publish nor
+// import any more.
+func (g *GitSync) cloneStale(dir string) (bool, error) {
+	remoteURL, err := g.gitConfigIn(dir, "remote.origin.url")
+	if err != nil {
+		return false, fmt.Errorf("no remote.origin.url: %w", err)
+	}
+	if strings.TrimSpace(remoteURL) != g.config.Remote {
+		return true, nil
+	}
+	branch, err := g.gitRevParseIn(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return false, fmt.Errorf("cannot determine branch: %w", err)
+	}
+	if strings.TrimSpace(branch) != g.config.Branch {
+		return true, nil
+	}
+	return false, nil
+}
+
+// assertPublished refuses to replace a clone that still holds content which
+// is not published on its remote: uncommitted changes below mail/ and local
+// commits that are not reachable from any remote-tracking branch. Dropping
+// them would lose messages that exist nowhere else.
+func (g *GitSync) assertPublished() error {
+	findings, err := g.unpublishedContent()
+	if err != nil {
+		return err
+	}
+	if len(findings) == 0 {
+		return nil
+	}
+	return fmt.Errorf("wormhole %s: clone does not match the configuration and still holds unpublished content — publish it before switching the remote or branch: %s", g.config.ID, strings.Join(findings, "; "))
+}
+
+// unpublishedContent lists the local content of the clone that is not
+// published on its remote.
+func (g *GitSync) unpublishedContent() ([]string, error) {
+	var findings []string
+	status, err := g.gitLocked("status", "--porcelain", "--", "mail/")
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w\n%s", err, string(status))
+	}
+	if trimmed := strings.TrimSpace(string(status)); trimmed != "" {
+		findings = append(findings, trimmed)
+	}
+	count, err := g.gitLocked("rev-list", "--count", "HEAD", "--not", "--remotes")
+	if err != nil {
+		return nil, fmt.Errorf("git rev-list: %w\n%s", err, string(count))
+	}
+	if trimmed := strings.TrimSpace(string(count)); trimmed != "" && trimmed != "0" {
+		findings = append(findings, fmt.Sprintf("%s local commit(s) not on any remote branch", trimmed))
+	}
+	return findings, nil
 }
 
 // validateCloneDir validates a cloned repo directory.
