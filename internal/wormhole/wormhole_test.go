@@ -2169,6 +2169,86 @@ func TestDaemonStalePIDWithStateMismatch(t *testing.T) {
 	_, _ = cmd.CombinedOutput()
 }
 
+// TestStaleRuntimeFilesAreCleanedWhenWorkerIsGone proves that runtime files
+// left behind by a worker that no longer exists are cleaned up instead of
+// blocking the daemon forever: the worker writes its PID file before its
+// state file, so a worker killed in between leaves a PID file without a
+// state file. A recorded PID that is gone and no worker of this workspace
+// running proves the files are stale leftovers, not an ambiguous PID.
+func TestStaleRuntimeFilesAreCleanedWhenWorkerIsGone(t *testing.T) {
+	t.Parallel()
+
+	for _, label := range []string{"missing state file", "corrupt state file"} {
+		root := t.TempDir()
+		if err := EnsureDir(root); err != nil {
+			t.Fatal(err)
+		}
+		if err := writePIDFile(PIDFile(root), deadPID(t)); err != nil {
+			t.Fatal(err)
+		}
+		if label == "corrupt state file" {
+			if err := os.WriteFile(StateFile(root), []byte("not json at all"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		inst, err := resolveDaemon(root)
+		if err != nil {
+			t.Fatalf("%s: stale runtime files must not block the daemon: %v", label, err)
+		}
+		if inst != nil {
+			t.Fatalf("%s: stale runtime files must not resolve to an instance", label)
+		}
+		if _, err := os.Stat(PIDFile(root)); !os.IsNotExist(err) {
+			t.Fatalf("%s: stale pid file must be removed, stat err=%v", label, err)
+		}
+		if _, err := os.Stat(StateFile(root)); !os.IsNotExist(err) {
+			t.Fatalf("%s: stale state file must be removed, stat err=%v", label, err)
+		}
+	}
+}
+
+// TestStartDaemonRecoversFromStaleRuntimeFiles proves the user-visible
+// consequence: a workspace whose worker died before it could write its state
+// file can start the daemon again, without manual file removal.
+func TestStartDaemonRecoversFromStaleRuntimeFiles(t *testing.T) {
+	t.Parallel()
+	remote := setupRemote(t)
+	root := t.TempDir()
+	cfg := testConfigFast(remote)
+	writeConfig(t, root, cfg)
+
+	binary := buildTestBinary(t)
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePIDFile(PIDFile(root), deadPID(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(args ...string) (string, error) {
+		cmd := exec.Command(binary, args...)
+		cmd.Dir = root
+		cmd.Env = daemonTestEnv(root, "alpha")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	out, err := run("wormhole", "start")
+	if err != nil {
+		t.Fatalf("start with stale runtime files must succeed: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _, _ = run("wormhole", "stop") })
+
+	out, err = run("wormhole", "status")
+	if err != nil {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Status: running") {
+		t.Fatalf("daemon must be running after recovery, got: %s", out)
+	}
+}
+
 // TestDaemonAutostartIdempotent tests that Autostart is idempotent.
 func TestDaemonAutostartIdempotent(t *testing.T) {
 	t.Parallel()

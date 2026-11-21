@@ -461,9 +461,14 @@ type daemonInstance struct {
 //   - PID file present but empty, unparseable, non-positive or unreadable:
 //     hard error — a present but unusable PID file must never be read as
 //     "no daemon", or start could spawn a second worker over a recorded one
-//   - PID file present but state file missing or corrupt: hard error — the
-//     recorded PID cannot be verified against its recorded instance, and an
-//     unverifiable PID must never be signaled or overwritten silently
+//   - PID file present but state file missing or corrupt: hard error while
+//     the recorded PID is alive or another worker of this workspace runs —
+//     the recorded PID cannot be verified against its recorded instance, and
+//     an unverifiable PID must never be signaled or overwritten silently.
+//     If the recorded PID is gone and no worker of this workspace runs, the
+//     pair is stale leftovers (e.g. the worker was killed between writing its
+//     PID file and its state file): the runtime files are removed and the
+//     caller continues, so the daemon can be started again
 //   - PID file and state file disagree on the PID: hard error (possible PID
 //     reuse — refuse to act on it)
 //   - state records a different workspace root: hard error (files do not
@@ -480,7 +485,14 @@ func resolveDaemon(root string) (*daemonInstance, error) {
 	}
 	st, ok := readStateFile(StateFile(root))
 	if !ok {
-		return nil, fmt.Errorf("wormhole: state file missing or corrupt while pid file records PID %d — refusing to act on an unverified PID (remove %s and %s manually if you are sure)", pid, PIDFile(root), StateFile(root))
+		if isProcessAlive(pid) {
+			return nil, fmt.Errorf("wormhole: state file missing or corrupt while pid file records PID %d — refusing to act on an unverified PID (remove %s and %s manually if you are sure)", pid, PIDFile(root), StateFile(root))
+		}
+		if hasLiveWorkerFor(root) {
+			return nil, fmt.Errorf("wormhole: state file missing or corrupt while pid file records the dead PID %d, but a wormhole worker for this workspace is running — refusing to act (remove %s and %s manually if you are sure)", pid, PIDFile(root), StateFile(root))
+		}
+		cleanupDaemonFiles(root)
+		return nil, nil
 	}
 	if st.PID != pid {
 		return nil, fmt.Errorf("wormhole: pid file (%d) and state file (%d) disagree — possible PID reuse, refusing to act (remove %s and %s manually if you are sure)", pid, st.PID, PIDFile(root), StateFile(root))
@@ -489,6 +501,27 @@ func resolveDaemon(root string) (*daemonInstance, error) {
 		return nil, fmt.Errorf("wormhole: state file records root %q, not this workspace %q — refusing to act", st.Root, root)
 	}
 	return &daemonInstance{PID: pid, State: st}, nil
+}
+
+// hasLiveWorkerFor reports whether a wormhole worker for this workspace root
+// is running, independently of the runtime files. It is used on the rare path
+// where the runtime files are inconsistent: only when no such worker exists
+// may the stale files be removed.
+func hasLiveWorkerFor(root string) bool {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		if isWormholeWorkerFor(pid, root) {
+			return true
+		}
+	}
+	return false
 }
 
 // instanceAlive reports whether a resolved instance is still running as the
@@ -686,11 +719,18 @@ func StopDaemon(root string) error {
 	}
 	defer lock.Close()
 
+	// A PID file that exists before the identity is resolved but yields no
+	// instance afterwards was stale leftovers (the recorded process is gone):
+	// resolveDaemon removed them.
+	_, pidPresent, _ := readPIDFile(PIDFile(root))
 	inst, rerr := resolveDaemon(root)
 	if rerr != nil {
 		return rerr
 	}
 	if inst == nil {
+		if pidPresent {
+			return fmt.Errorf("wormhole daemon not running (stale runtime files cleaned up)")
+		}
 		return fmt.Errorf("wormhole daemon not running (no pid file)")
 	}
 
