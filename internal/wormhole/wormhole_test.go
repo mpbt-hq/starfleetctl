@@ -410,6 +410,37 @@ func TestLoadConfigValid(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAppliesDocumentedSyncDefaults(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRawConfig(t, root, "wormholes:\n  enabled: true\n  repositories:\n    - id: relay\n      remote: /remote/repo\n      branch: main\n")
+	cfg, err := LoadConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync.Interval != "5s" || cfg.Sync.CloneTimeout != "2m" ||
+		cfg.Sync.CommandTimeout != "30s" || cfg.Sync.PushRetries != 3 || !cfg.Sync.StartupSync {
+		t.Fatalf("unexpected sync defaults: %+v", cfg.Sync)
+	}
+}
+
+func TestLoadConfigPartialSyncOverridesOnlyGivenFields(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRawConfig(t, root, "wormholes:\n  enabled: true\n  sync:\n    interval: 10s\n  repositories:\n    - id: relay\n      remote: /remote/repo\n      branch: main\n")
+	cfg, err := LoadConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync.Interval != "10s" {
+		t.Fatalf("sync.interval = %q, want %q", cfg.Sync.Interval, "10s")
+	}
+	if cfg.Sync.CloneTimeout != "2m" || cfg.Sync.CommandTimeout != "30s" ||
+		cfg.Sync.PushRetries != 3 || !cfg.Sync.StartupSync {
+		t.Fatalf("unexpected sync defaults: %+v", cfg.Sync)
+	}
+}
+
 func TestLoadConfigRejectsLegacyKeys(t *testing.T) {
 	t.Parallel()
 	cases := []string{

@@ -201,7 +201,10 @@ func LoadConfig(root string) (*config.WormholesConfig, error) {
 		return nil, fmt.Errorf("wormhole config %s: %w", cfgPath, err)
 	}
 
-	var cfg config.WormholesConfig
+	// Seed the struct with the documented defaults so that a config file
+	// which omits the sync block, or individual sync fields, keeps the
+	// documented values instead of being rejected with empty durations.
+	cfg := *DefaultConfig()
 	if err := wormNode.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode wormhole config %s: %w", cfgPath, err)
 	}
