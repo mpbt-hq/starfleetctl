@@ -2331,6 +2331,46 @@ func TestEnsureCloneKeepsUnpublishedContentOnRemoteChange(t *testing.T) {
 	}
 }
 
+// TestWormholeRouteValidationChecksTheRepository proves that a Comms
+// routing-table entry is checked against the wormhole configuration: the
+// named repository must exist, be enabled and be complete, so a typo is
+// reported as a configuration error instead of failing per message.
+func TestWormholeRouteValidationChecksTheRepository(t *testing.T) {
+	t.Parallel()
+	remote := setupRemote(t)
+	root := t.TempDir()
+	writeConfig(t, root, testConfig(remote))
+
+	route := comms.TransportRoute{Domain: "peer.example", Transport: "wormhole", Repository: "relay"}
+	if err := ValidateRoute(root, route); err != nil {
+		t.Fatalf("configured repository must validate: %v", err)
+	}
+
+	route.Repository = "missing"
+	err := ValidateRoute(root, route)
+	if err == nil || !strings.Contains(err.Error(), "unknown repository") {
+		t.Fatalf("unknown repository must be rejected, got: %v", err)
+	}
+
+	disabled := false
+	cfg := testConfig(remote)
+	cfg.Repositories[0].Enabled = &disabled
+	writeConfig(t, root, cfg)
+	route.Repository = "relay"
+	err = ValidateRoute(root, route)
+	if err == nil || !strings.Contains(err.Error(), "is disabled") {
+		t.Fatalf("disabled repository must be rejected, got: %v", err)
+	}
+
+	cfg = testConfig(remote)
+	cfg.Enabled = false
+	writeConfig(t, root, cfg)
+	err = ValidateRoute(root, route)
+	if err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("disabled wormhole transport must be rejected, got: %v", err)
+	}
+}
+
 // TestDaemonAutostartIdempotent tests that Autostart is idempotent.
 func TestDaemonAutostartIdempotent(t *testing.T) {
 	t.Parallel()

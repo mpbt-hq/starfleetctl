@@ -42,9 +42,16 @@ type OutboundMessage struct {
 // transport and returns the transport's stable external message ID.
 type RemoteTransportFunc func(root string, route TransportRoute, msg OutboundMessage) (string, error)
 
+// RemoteTransportRouteValidator validates a routing-table entry against the
+// transport's own configuration, e.g. whether the named endpoint exists. The
+// validator is consulted when the route is used, so a broken remote route
+// does not affect local traffic.
+type RemoteTransportRouteValidator func(root string, route TransportRoute) error
+
 var (
-	transportMu      sync.RWMutex
-	remoteTransports = make(map[string]RemoteTransportFunc)
+	transportMu         sync.RWMutex
+	remoteTransports    = make(map[string]RemoteTransportFunc)
+	transportValidators = make(map[string]RemoteTransportRouteValidator)
 )
 
 // RegisterRemoteTransport makes a transport backend available to the normal
@@ -58,6 +65,18 @@ func RegisterRemoteTransport(name string, fn RemoteTransportFunc) {
 	remoteTransports[name] = fn
 }
 
+// RegisterRemoteTransportWithValidator registers a transport backend together
+// with a validator for its routing-table entries.
+func RegisterRemoteTransportWithValidator(name string, fn RemoteTransportFunc, validate RemoteTransportRouteValidator) {
+	RegisterRemoteTransport(name, fn)
+	if name == "" || validate == nil {
+		return
+	}
+	transportMu.Lock()
+	defer transportMu.Unlock()
+	transportValidators[name] = validate
+}
+
 func lookupRemoteTransport(name string) (RemoteTransportFunc, bool) {
 	transportMu.RLock()
 	defer transportMu.RUnlock()
@@ -65,9 +84,17 @@ func lookupRemoteTransport(name string) (RemoteTransportFunc, bool) {
 	return fn, ok
 }
 
+func lookupRemoteTransportValidator(name string) (RemoteTransportRouteValidator, bool) {
+	transportMu.RLock()
+	defer transportMu.RUnlock()
+	fn, ok := transportValidators[name]
+	return fn, ok
+}
+
 type routingTable struct {
 	localDomain string
 	byDomain    map[string]TransportRoute
+	routeErrors map[string]error
 	configured  bool
 }
 
@@ -80,6 +107,7 @@ func loadRoutingTable(root string) (*routingTable, error) {
 	rt := &routingTable{
 		localDomain: strings.TrimSpace(cfg.Comms.Routing.LocalDomain),
 		byDomain:    make(map[string]TransportRoute),
+		routeErrors: make(map[string]error),
 	}
 	if rt.localDomain == "" {
 		rt.localDomain = "local"
@@ -112,6 +140,15 @@ func loadRoutingTable(root string) (*routingTable, error) {
 			Transport:  transport,
 			Repository: repository,
 		}
+		// A transport may reject its own routing entries (e.g. an endpoint
+		// that does not exist in its configuration). The error is kept with
+		// the route and reported when that route is used, so a broken remote
+		// route does not break local traffic.
+		if validate, ok := lookupRemoteTransportValidator(transport); ok {
+			if err := validate(root, rt.byDomain[key]); err != nil {
+				rt.routeErrors[key] = fmt.Errorf("comms routing: domain %q: %w", domain, err)
+			}
+		}
 		rt.configured = true
 	}
 	return rt, nil
@@ -141,6 +178,9 @@ func (rt *routingTable) resolve(target string) (localTarget string, route Transp
 	route, ok := rt.byDomain[strings.ToLower(domain)]
 	if !ok {
 		return "", TransportRoute{}, false, fmt.Errorf("comms: no route for domain %q", domain)
+	}
+	if err := rt.routeErrors[strings.ToLower(domain)]; err != nil {
+		return "", TransportRoute{}, false, err
 	}
 	if user == "" {
 		return "", TransportRoute{}, false, fmt.Errorf("comms: invalid recipient %q", target)

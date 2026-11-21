@@ -41,6 +41,41 @@ func newRoutingTestBusAs(t *testing.T, root, shipID string) *Bus {
 	return b
 }
 
+// TestRoutingRemoteRouteValidationErrorIsScopedToItsDomain proves that a
+// routing-table entry rejected by its transport is reported when that route
+// is used, while local traffic keeps working.
+func TestRoutingRemoteRouteValidationErrorIsScopedToItsDomain(t *testing.T) {
+	root := t.TempDir()
+	writeCommsConfig(t, root, `
+comms:
+  routing:
+    domains:
+      - domain: peer.example
+        transport: fake-route-validated
+        repository: relay
+`)
+	b := newRoutingTestBus(t, root)
+
+	RegisterRemoteTransportWithValidator("fake-route-validated",
+		func(root string, route TransportRoute, msg OutboundMessage) (string, error) {
+			return "ext-1", nil
+		},
+		func(root string, route TransportRoute) error {
+			return fmt.Errorf("unknown repository %q", route.Repository)
+		})
+
+	_, err := b.Tell("bob@peer.example", "remote hello", "")
+	if err == nil {
+		t.Fatal("send to a domain with an invalid route must fail")
+	}
+	if !strings.Contains(err.Error(), "unknown repository") {
+		t.Fatalf("error must name the invalid endpoint, got: %v", err)
+	}
+	if _, err := b.Tell("beta", "local hello", ""); err != nil {
+		t.Fatalf("local send must still work: %v", err)
+	}
+}
+
 func TestRoutingLocalRecipients(t *testing.T) {
 	root := t.TempDir()
 	writeCommsConfig(t, root, `

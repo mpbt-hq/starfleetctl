@@ -18,22 +18,50 @@ import (
 // InstallCommsTransport registers the Wormhole transport with Comms. Call it
 // once at process startup before any Comms send path runs.
 func InstallCommsTransport() {
-	comms.RegisterRemoteTransport("wormhole", PublishRemoteMessage)
+	comms.RegisterRemoteTransportWithValidator("wormhole", PublishRemoteMessage, ValidateRoute)
+}
+
+// ValidateRoute checks a Comms routing-table entry against the wormhole
+// configuration: the named repository must exist, be enabled and be complete.
+// Without this check a typo in the repository ID is only discovered per
+// message, at publish time, and the message stays pending.
+func ValidateRoute(root string, route comms.TransportRoute) error {
+	if route.Repository == "" {
+		return fmt.Errorf("route %q has no repository", route.Domain)
+	}
+	cfg, err := LoadConfig(root)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enabled {
+		return fmt.Errorf("wormhole transport is disabled")
+	}
+	for i := range cfg.Repositories {
+		repo := cfg.Repositories[i]
+		if repo.ID != route.Repository {
+			continue
+		}
+		if !repoEnabled(repo) {
+			return fmt.Errorf("repository %q is disabled", repo.ID)
+		}
+		if repo.Remote == "" || repo.Branch == "" {
+			return fmt.Errorf("repository %q is incomplete", repo.ID)
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown repository %q", route.Repository)
 }
 
 // PublishRemoteMessage publishes one Comms outbound message into the wormhole
 // repository selected by the routing table. It returns the transport message
 // ID (not a local Comms ID).
 func PublishRemoteMessage(root string, route comms.TransportRoute, msg comms.OutboundMessage) (string, error) {
-	if route.Repository == "" {
-		return "", fmt.Errorf("wormhole: route %q has no repository", route.Domain)
+	if err := ValidateRoute(root, route); err != nil {
+		return "", err
 	}
 	cfg, err := LoadConfig(root)
 	if err != nil {
 		return "", err
-	}
-	if !cfg.Enabled {
-		return "", fmt.Errorf("wormhole transport is disabled")
 	}
 	var repo *config.RepositoryConfig
 	for i := range cfg.Repositories {
@@ -44,12 +72,6 @@ func PublishRemoteMessage(root string, route comms.TransportRoute, msg comms.Out
 	}
 	if repo == nil {
 		return "", fmt.Errorf("wormhole: unknown repository %q", route.Repository)
-	}
-	if !repoEnabled(*repo) {
-		return "", fmt.Errorf("wormhole: repository %q is disabled", repo.ID)
-	}
-	if repo.Remote == "" || repo.Branch == "" {
-		return "", fmt.Errorf("wormhole: repository %q is incomplete", repo.ID)
 	}
 	if msg.From == "" || msg.Target == "" {
 		return "", fmt.Errorf("wormhole: outbound message needs sender and recipient")
