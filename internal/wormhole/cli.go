@@ -201,17 +201,21 @@ func runSend(root string, args []string) int {
 		return 1
 	}
 
-	cfg, err := config.Load(root)
+	// Use the wormhole loader so that the CLI applies the same strict
+	// validation as the daemon: unknown keys, unsafe repository IDs, duplicate
+	// IDs, invalid durations and missing remote/branch are rejected before a
+	// checkout path is derived from the repository ID.
+	cfg, err := LoadConfig(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "wormhole send: %v\n", err)
 		return 1
 	}
-	if !cfg.Wormholes.Enabled {
+	if !cfg.Enabled {
 		fmt.Fprintln(os.Stderr, "wormhole send: wormhole is disabled in configuration")
 		return 1
 	}
 
-	repo, err := selectRepo(&cfg.Wormholes, *repoID)
+	repo, err := selectRepo(cfg, *repoID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "wormhole send: %v\n", err)
 		return 1
@@ -224,9 +228,9 @@ func runSend(root string, args []string) int {
 		return 1
 	}
 
-	cloneTimeout, _ := time.ParseDuration(cfg.Wormholes.Sync.CloneTimeout)
-	commandTimeout, _ := time.ParseDuration(cfg.Wormholes.Sync.CommandTimeout)
-	sp := newSpool(root, repo, cfg.Wormholes.Sync.PushRetries, *from, cloneTimeout, commandTimeout)
+	cloneTimeout, _ := time.ParseDuration(cfg.Sync.CloneTimeout)
+	commandTimeout, _ := time.ParseDuration(cfg.Sync.CommandTimeout)
+	sp := newSpool(root, repo, cfg.Sync.PushRetries, *from, cloneTimeout, commandTimeout)
 	if err := sp.Publish(msg); err != nil {
 		fmt.Fprintf(os.Stderr, "wormhole send failed: %v\n", err)
 		return 1
@@ -236,13 +240,17 @@ func runSend(root string, args []string) int {
 }
 
 // selectRepo picks an explicitly named enabled repository, or the first enabled
-// one when no id was given.
+// one when no id was given. The selected repository must carry the remote and
+// branch values that the checkout and the Git operations depend on.
 func selectRepo(cfg *config.WormholesConfig, id string) (config.RepositoryConfig, error) {
 	if id != "" {
 		for _, repo := range cfg.Repositories {
 			if repo.ID == id {
 				if !repoEnabled(repo) {
 					return config.RepositoryConfig{}, fmt.Errorf("repository %q is disabled", id)
+				}
+				if err := checkRepoUsable(repo); err != nil {
+					return config.RepositoryConfig{}, err
 				}
 				return repo, nil
 			}
@@ -251,8 +259,24 @@ func selectRepo(cfg *config.WormholesConfig, id string) (config.RepositoryConfig
 	}
 	for _, repo := range cfg.Repositories {
 		if repoEnabled(repo) {
+			if err := checkRepoUsable(repo); err != nil {
+				return config.RepositoryConfig{}, err
+			}
 			return repo, nil
 		}
 	}
 	return config.RepositoryConfig{}, fmt.Errorf("no enabled repository configured")
+}
+
+// checkRepoUsable rejects a repository that cannot be mirrored: the checkout
+// directory and the lock file are derived from the remote and the branch, so
+// both must be present.
+func checkRepoUsable(repo config.RepositoryConfig) error {
+	if repo.Remote == "" {
+		return fmt.Errorf("repository %q: remote is required", repo.ID)
+	}
+	if repo.Branch == "" {
+		return fmt.Errorf("repository %q: branch is required", repo.ID)
+	}
+	return nil
 }

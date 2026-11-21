@@ -3155,6 +3155,31 @@ func TestSendCLIPublishesMessage(t *testing.T) {
 	})
 }
 
+// TestSendCLIRejectsUnsafeRepositoryID proves that the send CLI validates the
+// wormhole configuration exactly like the daemon: a repository id that is not
+// a safe path component (here a "../.." escape) must be rejected before any
+// checkout or lock path is derived from it, and no workdir must be created.
+func TestSendCLIRejectsUnsafeRepositoryID(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRawConfig(t, root, "wormholes:\n  enabled: true\n  repositories:\n    - id: \"../../escape\"\n      remote: /nonexistent/remote\n      branch: main\n")
+
+	binary := buildTestBinary(t)
+	cmd := exec.Command(binary, "wormhole", "send", "--to", "beta", "--from", "alpha", "--text", "x")
+	cmd.Dir = root
+	cmd.Env = daemonTestEnv(root, "alpha")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("send with unsafe repository id must fail, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "must consist solely of ASCII letters") {
+		t.Fatalf("expected invalid repository id error, got: %s", out)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, ".starfleet-ai", "var", "wormholes")); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected send must not create a wormhole workdir, stat err=%v", statErr)
+	}
+}
+
 // TestGitCommandEnvForcesCLocale proves git invocations are executed with a
 // deterministic C locale (GT-7): a pre-existing LC_ALL in the environment must
 // not leak duplicate entries (glibc resolves the first), and the child git
