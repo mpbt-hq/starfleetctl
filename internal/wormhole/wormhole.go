@@ -72,6 +72,19 @@ func DefaultConfig() *config.WormholesConfig {
 	}
 }
 
+const (
+	// daemonReadyMinTimeout is the minimum time the parent waits for the
+	// worker to become ready.
+	daemonReadyMinTimeout = 30 * time.Second
+	// daemonReadyMargin covers config load and process startup on top of the
+	// time the startup sync may take.
+	daemonReadyMargin = 5 * time.Second
+	// defaultCloneTimeout and defaultCommandTimeout mirror the defaults in
+	// DefaultConfig and are used when a duration cannot be parsed.
+	defaultCloneTimeout   = 2 * time.Minute
+	defaultCommandTimeout = 30 * time.Second
+)
+
 
 // validateInitialScan checks that initial_scan is "baseline" or "replay".
 func validateInitialScan(scan string) error {
@@ -494,16 +507,59 @@ func (inst *daemonInstance) instanceAlive(root string) bool {
 // the parent polls for the ready file with a timeout to confirm successful
 // start, and detects an early child exit immediately (instead of waiting
 // for the full timeout).
+// The waiting time follows the configured clone and command timeouts (see
+// daemonReadyTimeout), because the worker only becomes ready after its
+// startup sync has finished.
 // Uses a start lock to serialize concurrent start attempts.
 func StartDaemon(root string) error {
 	if err := EnsureDir(root); err != nil {
 		return fmt.Errorf("wormhole daemon dir: %w", err)
 	}
-	_, err := LoadConfig(root)
+	cfg, err := LoadConfig(root)
 	if err != nil {
 		return fmt.Errorf("wormhole config: %w", err)
 	}
+	return startDaemon(root, daemonReadyTimeout(cfg))
+}
 
+// daemonReadyTimeout returns how long the parent waits for the worker to
+// become ready. The worker writes the ready file only after its startup sync
+// has completed; that sync clones every enabled repository (sync.clone_timeout)
+// and runs Git commands (sync.command_timeout) per repository. The deadline
+// therefore follows the configured timeouts instead of a fixed 30 seconds, so
+// a clone that legitimately needs longer than 30 seconds is not killed as a
+// failed start.
+func daemonReadyTimeout(cfg *config.WormholesConfig) time.Duration {
+	timeout := daemonReadyMinTimeout
+	if cfg == nil {
+		return timeout
+	}
+	clone, err := time.ParseDuration(cfg.Sync.CloneTimeout)
+	if err != nil || clone <= 0 {
+		clone = defaultCloneTimeout
+	}
+	command, err := time.ParseDuration(cfg.Sync.CommandTimeout)
+	if err != nil || command <= 0 {
+		command = defaultCommandTimeout
+	}
+	repos := 0
+	for _, repo := range cfg.Repositories {
+		if repoEnabled(repo) {
+			repos++
+		}
+	}
+	if repos > 0 {
+		derived := time.Duration(repos)*(clone+command) + daemonReadyMargin
+		if derived > timeout {
+			timeout = derived
+		}
+	}
+	return timeout
+}
+
+// startDaemon starts the worker and waits at most readyTimeout for it to
+// become ready.
+func startDaemon(root string, readyTimeout time.Duration) error {
 	// Acquire start lock to serialize concurrent start/autostart attempts.
 	lockPath := StartLockPath(root)
 	lock, err := flock.Lock(lockPath, flock.Options{
@@ -574,8 +630,9 @@ func StartDaemon(root string) error {
 	go func() { waitCh <- cmd.Wait() }()
 
 	// Poll for the child to write its PID file and "ready" file, with timeout.
-	// We wait up to 30 seconds for the worker to fully start (includes config load, git clone).
-	deadline := time.Now().Add(30 * time.Second)
+	// The worker becomes ready only after its startup sync has completed, so
+	// the deadline follows the configured clone and command timeouts.
+	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
 		select {
 		case werr := <-waitCh:
@@ -608,7 +665,7 @@ func StartDaemon(root string) error {
 	_ = os.Remove(PIDFile(root))
 	_ = os.Remove(StateFile(root))
 	_ = os.Remove(filepath.Join(WorkDir(root), "ready"))
-	return fmt.Errorf("wormhole daemon failed to start within timeout (child PID %d)", childPID)
+	return fmt.Errorf("wormhole daemon failed to start within %v (child PID %d)", readyTimeout, childPID)
 }
 
 // StopDaemon stops the wormhole manager daemon.

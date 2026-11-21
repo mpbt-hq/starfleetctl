@@ -2571,6 +2571,94 @@ func TestStartupSyncDisabledStartsWithoutSync(t *testing.T) {
 	}
 }
 
+// TestDaemonReadyTimeoutFollowsConfiguredTimeouts proves that the time the
+// parent waits for the worker to become ready follows the configured clone
+// and command timeouts instead of a fixed 30 seconds: the worker writes the
+// ready file only after its startup sync has cloned every enabled repository,
+// so a clone that legitimately needs longer than 30 seconds must not be killed
+// as a failed start.
+func TestDaemonReadyTimeoutFollowsConfiguredTimeouts(t *testing.T) {
+	t.Parallel()
+
+	if got := daemonReadyTimeout(nil); got != daemonReadyMinTimeout {
+		t.Fatalf("nil config must yield the minimum timeout, got %v", got)
+	}
+
+	cfg := testConfig("/nonexistent/remote.git")
+	cfg.Sync.CloneTimeout = "10m"
+	cfg.Sync.CommandTimeout = "2m"
+	if got, want := daemonReadyTimeout(cfg), 12*time.Minute+daemonReadyMargin; got != want {
+		t.Fatalf("ready timeout must be derived from the configured timeouts, got %v want %v", got, want)
+	}
+
+	cfg = testConfig("/nonexistent/remote.git")
+	cfg.Sync.CloneTimeout = "1s"
+	cfg.Sync.CommandTimeout = "1s"
+	if got := daemonReadyTimeout(cfg); got != daemonReadyMinTimeout {
+		t.Fatalf("small timeouts must not lower the minimum timeout, got %v", got)
+	}
+
+	cfg = testConfig("/nonexistent/remote.git")
+	cfg.Sync.CloneTimeout = "10m"
+	cfg.Sync.CommandTimeout = "2m"
+	disabled := false
+	cfg.Repositories[0].Enabled = &disabled
+	if got := daemonReadyTimeout(cfg); got != daemonReadyMinTimeout {
+		t.Fatalf("a disabled repository must not extend the deadline, got %v", got)
+	}
+}
+
+// TestStartDaemonTimeoutKillsWorkerAndCleansFiles proves that a worker that
+// never becomes ready is stopped when the readiness deadline expires: the
+// process group is killed, the runtime files are removed and the error names
+// the deadline that was exceeded.
+func TestStartDaemonTimeoutKillsWorkerAndCleansFiles(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig("/nonexistent/remote.git")
+	writeConfig(t, root, cfg)
+
+	binary := buildTestBinary(t)
+
+	// A git that never returns keeps the startup sync (and therefore the
+	// worker) from ever becoming ready.
+	fakeBin := t.TempDir()
+	gitPath := filepath.Join(fakeBin, "git")
+	if err := os.WriteFile(gitPath, []byte("#!/bin/sh\nsleep 300\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STARFLEETCTL_BINARY", binary)
+
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	err := startDaemon(root, 2*time.Second)
+	if err == nil {
+		t.Fatal("start must fail when the worker does not become ready in time")
+	}
+	if !strings.Contains(err.Error(), "failed to start within 2s") {
+		t.Fatalf("error must name the exceeded deadline, got: %v", err)
+	}
+	for _, name := range []string{"wormhole.pid", "wormhole.state"} {
+		if _, statErr := os.Stat(filepath.Join(WorkDir(root), name)); !os.IsNotExist(statErr) {
+			t.Fatalf("%s must be removed after a failed start, stat err=%v", name, statErr)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(WorkDir(root), "ready")); !os.IsNotExist(statErr) {
+		t.Fatalf("ready file must not exist after a failed start, stat err=%v", statErr)
+	}
+	// The worker must have been alive inside its main loop (the startup sync
+	// was hanging), not have exited early — otherwise this test would pass for
+	// the wrong reason.
+	logData, logErr := os.ReadFile(filepath.Join(WorkDir(root), "daemon.log"))
+	if logErr != nil {
+		t.Fatalf("read daemon.log: %v", logErr)
+	}
+	if !strings.Contains(string(logData), "RunLoop started") {
+		t.Fatalf("worker must have reached its main loop, log:\n%s", logData)
+	}
+}
+
 // TestSyncFailureKeepsDaemonRunning proves that a sync failure AFTER a
 // successful start is transient: the daemon keeps running through failing
 // ticks while the remote is unreachable, and resumes importing once the
