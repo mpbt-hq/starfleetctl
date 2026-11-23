@@ -591,10 +591,12 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 	}
 	var missing, stale, unregistered []string
 	registered := loadOpencodePluginConfig(b)
+	assetCount := 0
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+		if e.IsDir() || !isOpencodePluginAsset(e.Name()) {
 			continue
 		}
+		assetCount++
 		current, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, e.Name()))
 		if err != nil {
 			return false, err.Error()
@@ -611,12 +613,12 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 		// Plugin must be registered in .opencode/opencode.json so opencode
 		// actually loads it. Path is relative to .opencode/ (see resolvePluginSpec
 		// path handling) to avoid the doubled-.opencode path bug.
-		if !registered[pluginConfigSpec(e.Name())] {
+		if strings.HasSuffix(e.Name(), ".ts") && !registered[pluginConfigSpec(e.Name())] {
 			unregistered = append(unregistered, e.Name())
 		}
 	}
 	if len(missing) == 0 && len(stale) == 0 && len(unregistered) == 0 {
-		return true, fmt.Sprintf("%d/%d present, up to date, registered", len(entries), len(entries))
+		return true, fmt.Sprintf("%d/%d plugin assets present and up to date; plugins registered", assetCount, assetCount)
 	}
 	var parts []string
 	if len(missing) > 0 {
@@ -629,6 +631,14 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 		parts = append(parts, fmt.Sprintf("unregistered: %s", strings.Join(unregistered, ", ")))
 	}
 	return false, strings.Join(parts, "; ")
+}
+
+// isOpencodePluginAsset reports whether an embedded file is needed at
+// runtime by an opencode plugin. TypeScript files are plugin entry points;
+// .mjs files may be imported helper modules and must be installed alongside
+// them, but must not be registered as plugins themselves.
+func isOpencodePluginAsset(name string) bool {
+	return strings.HasSuffix(name, ".ts") || strings.HasSuffix(name, ".mjs")
 }
 
 // pluginConfigSpec returns the opencode config "plugin" array entry for a
@@ -673,7 +683,7 @@ func fixOpencodePlugins(b *Bootstrap) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+		if e.IsDir() || !isOpencodePluginAsset(e.Name()) {
 			continue
 		}
 		data, err := fs.ReadFile(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, e.Name()))
