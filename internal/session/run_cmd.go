@@ -263,7 +263,8 @@ func runClientEnv(shipID, role, root string, client string) []string {
 		case strings.HasPrefix(kv, "STARFLEET_SHIP_ID="),
 			strings.HasPrefix(kv, "STARFLEET_ROLE="),
 			strings.HasPrefix(kv, "STARFLEET_LAUNCH_TYPE="),
-			strings.HasPrefix(kv, "STARFLEET_TARGET="):
+			strings.HasPrefix(kv, "STARFLEET_TARGET="),
+			strings.HasPrefix(kv, "STARFLEET_CLASS="):
 			continue
 		}
 		env = append(env, kv)
@@ -374,6 +375,7 @@ func execClientTermctl(root, client, shipID, role, systemPrompt, prompt, model s
 
 	vars := &LaunchVars{
 		ShipID:     shipID,
+		Role:       role,
 		PipePath:   pipePath,
 		Client:     client,
 		ShellCmd:   inner,
@@ -402,9 +404,13 @@ func buildInnerCommand(root, client, shipID, role, systemPrompt, prompt, model s
 	// Set env vars
 	parts = append(parts, "export STARFLEET_SHIP_ID="+shellQuote(shipID))
 	parts = append(parts, "export STARFLEET_ROLE="+shellQuote(role))
+	parts = append(parts, "export STARFLEET_LAUNCH_TYPE=terminal")
 	if role == "ship" {
 		parts = append(parts, "export STARFLEET_TARGET="+shellQuote(shipnames.FlagshipName(root)))
+	} else {
+		parts = append(parts, "unset STARFLEET_TARGET")
 	}
+	parts = append(parts, "unset STARFLEET_CLASS")
 
 	// Set OPENCODE_CONFIG for opencode (per-ship config generated in RunCmd;
 	// inherited by this shell, re-exported for explicitness). Unset the inline
