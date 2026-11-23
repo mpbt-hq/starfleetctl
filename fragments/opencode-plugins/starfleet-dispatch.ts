@@ -15,7 +15,7 @@ const PLUGIN_VERSION = '2.5.14'
 const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
-import { resolveUniqueShipSession } from './session-resolution.mjs'
+import { resolveLatestShipSession } from './session-resolution.mjs'
 
 const ROOT = process.cwd()
 
@@ -675,10 +675,10 @@ const logPollTimer = setInterval(async () => {
     const ship = aid()
     try {
       const response = await client.session.list({ query: { directory: ROOT } })
-      const recoveredSessionID = resolveUniqueShipSession(response, ship, ROOT)
+      const recoveredSessionID = resolveLatestShipSession(response, ship, ROOT)
       if (recoveredSessionID) {
         currentSessionID = recoveredSessionID
-        tickLog(`session-resolve ship=${ship}: recovered unique workspace session ${currentSessionID}`)
+        tickLog(`session-resolve ship=${ship}: recovered latest workspace session ${currentSessionID}`)
         return currentSessionID
       }
       if (!sessionResolveDiagnosticLogged) {
@@ -713,11 +713,12 @@ const logPollTimer = setInterval(async () => {
             hasId: Boolean(session?.id),
             directoryPresent: Boolean(session?.directory),
             directoryMatchesRoot: !session?.directory || session.directory === ROOT,
+            updated: Number.isFinite(session?.updated) ? session.updated : null,
             keys: keys(session),
           })),
         })}`)
       }
-      tickLog(`session-resolve ship=${ship}: no unique matching workspace session; refusing handoff`)
+      tickLog(`session-resolve ship=${ship}: no latest matching workspace session; refusing handoff`)
     } catch (e) {
       tickLog(`session-resolve ship=${ship}: session.list failed: ${String(e).slice(0, 180)}`)
     }
@@ -765,7 +766,7 @@ const logPollTimer = setInterval(async () => {
       const targetSid = await resolveSessionId()
       const ids = injectable.map((m: any) => m.id).join(',')
       if (!targetSid) {
-        tickLog(`handoff-skip ship=${aid()} sid=<missing|ambiguous> ids=[${ids}] reason=no-unique-ship-session`)
+        tickLog(`handoff-skip ship=${aid()} sid=<missing|ambiguous> ids=[${ids}] reason=no-latest-ship-session`)
         return
       }
 
