@@ -90,4 +90,16 @@ else
     fi
 fi
 
+# --- 3) focused runtime tests for deterministic session recovery ---
+if command -v node >/dev/null 2>&1; then
+    if node --test fragments/opencode-plugins/session-resolution.test.mjs; then
+        note "session recovery tests OK"
+    else
+        note "session recovery tests FAILED"
+        FAILED=1
+    fi
+else
+    note "node not found — skipping session recovery tests"
+fi
+
 exit "$FAILED"
