@@ -766,7 +766,7 @@ const logPollTimer = setInterval(async () => {
       const targetSid = await resolveSessionId()
       const ids = injectable.map((m: any) => m.id).join(',')
       if (!targetSid) {
-        tickLog(`handoff-skip ship=${aid()} sid=<missing|ambiguous> ids=[${ids}] reason=no-latest-ship-session`)
+        tickLog(`handoff-skip ship=${aid()} sid=<missing|unresolved> ids=[${ids}] reason=no-latest-ship-session`)
         return
       }
 
@@ -801,7 +801,7 @@ const logPollTimer = setInterval(async () => {
           // Keep the known id: opencode session ids change over time, so the
           // id is only ever learned from chat hooks (never persisted). Dropping
           // it here made every message undeliverable until the next turn
-          // (handoff-skip reason=no-unique-ship-session). Retries reuse it; a
+          // (handoff-skip reason=no-latest-ship-session). Retries reuse it; a
           // rotated session is picked up by the next hook.
         }
       } catch (e) {
