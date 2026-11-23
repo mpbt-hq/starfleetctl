@@ -680,7 +680,7 @@ const logPollTimer = setInterval(async () => {
         tickLog(`session-resolve ship=${ship}: recovered unique workspace session ${currentSessionID}`)
         return currentSessionID
       }
-      tickLog(`session-resolve ship=${ship}: ${matches.length} matching sessions; refusing ambiguous handoff`)
+      tickLog(`session-resolve ship=${ship}: no unique matching workspace session; refusing handoff`)
     } catch (e) {
       tickLog(`session-resolve ship=${ship}: session.list failed: ${String(e).slice(0, 180)}`)
     }
