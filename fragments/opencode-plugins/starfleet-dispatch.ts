@@ -15,6 +15,7 @@ const PLUGIN_VERSION = '2.5.14'
 const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
+import { resolveUniqueShipSession } from './session-resolution.mjs'
 
 const ROOT = process.cwd()
 
@@ -673,22 +674,9 @@ const logPollTimer = setInterval(async () => {
     const ship = aid()
     try {
       const response = await client.session.list({ query: { directory: ROOT } })
-      const body = response?.body ?? response
-      const data: any = body?.data ?? body
-      const sessions: any[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.sessions)
-          ? data.sessions
-          : data && typeof data === 'object'
-            ? Object.values(data)
-            : []
-      const matches = sessions.filter((session: any) =>
-        session?.id &&
-        session.title === ship &&
-        (!session.directory || session.directory === ROOT)
-      )
-      if (matches.length === 1) {
-        currentSessionID = matches[0].id
+      const recoveredSessionID = resolveUniqueShipSession(response, ship, ROOT)
+      if (recoveredSessionID) {
+        currentSessionID = recoveredSessionID
         tickLog(`session-resolve ship=${ship}: recovered unique workspace session ${currentSessionID}`)
         return currentSessionID
       }
