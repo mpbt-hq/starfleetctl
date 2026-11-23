@@ -368,3 +368,27 @@ comms:
 		t.Fatalf("record not updated with transport ID: %+v", updated)
 	}
 }
+
+func TestRoutingLocalRecipientsIgnoreUnrelatedInvalidConfig(t *testing.T) {
+	root := t.TempDir()
+	confDir := filepath.Join(root, ".starfleet-ai", "conf")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "web.yaml"), []byte("web: [broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := newRoutingTestBus(t, root)
+	for _, target := range []string{"Voyager", "Voyager@local"} {
+		id, err := b.Tell(target, "local delivery still works", "")
+		if err != nil {
+			t.Fatalf("local send to %s failed: %v", target, err)
+		}
+		if id == "" {
+			t.Fatalf("local send to %s returned empty id", target)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(b.MsgDir, "Voyager", "unseen")); err != nil {
+		t.Fatalf("Voyager inbox missing after local sends: %v", err)
+	}
+}

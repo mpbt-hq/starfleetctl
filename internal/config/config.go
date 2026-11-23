@@ -413,6 +413,30 @@ func LogDir(root string) string {
 	return filepath.Join(WorkDir(root), "log")
 }
 
+// LoadComms reads only the Comms configuration. Routing must not depend on
+// unrelated web, fleet, model-proxy, services, or wormhole YAML files.
+func LoadComms(root string) (CommsConfig, error) {
+	cfg := DefaultConfig()
+	path := filepath.Join(root, ".starfleet-ai", "conf", "comms.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg.Comms, nil
+		}
+		return CommsConfig{}, err
+	}
+	var raw map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return CommsConfig{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if node, ok := raw["comms"]; ok {
+		if err := node.Decode(&cfg.Comms); err != nil {
+			return CommsConfig{}, fmt.Errorf("parse %s comms: %w", path, err)
+		}
+	}
+	return cfg.Comms, nil
+}
+
 // Load reads configuration from .starfleet-ai/conf/web.yaml and
 // .starfleet-ai/conf/comms.yaml. Missing files are OK (defaults apply).
 // Each YAML file wraps its content under a top-level key (web:, comms:),
