@@ -35,8 +35,9 @@ function bus(cmd: Record<string, unknown>): any {
 }
 
 // Fetch tuning knobs from starfleetctl config.
-let HEARTBEAT_MS = 0
-let POLL_MS = 0
+// Safe defaults keep inbox polling alive when config lookup fails.
+let HEARTBEAT_MS = 300000
+let POLL_MS = 3000
 let FALLBACK_MODEL = ''
 let RETRY_POLL_MS = 2000
 let RETRY_COOLDOWN_MS = 10000
@@ -45,8 +46,8 @@ let LOG_COOLDOWN_MS = 10000
 function loadConfig(): void {
   const r = bus({ cmd: 'config' })
   if (r.ok) {
-    HEARTBEAT_MS = r.heartbeat_ms
-    POLL_MS = r.poll_ms
+    HEARTBEAT_MS = r.heartbeat_ms || 300000
+    POLL_MS = r.poll_ms || 3000
     FALLBACK_MODEL = r.fallback_model || ''
     RETRY_POLL_MS = r.retry_poll_ms || 2000
     RETRY_COOLDOWN_MS = r.retry_cooldown_ms || 10000
@@ -664,25 +665,37 @@ const logPollTimer = setInterval(async () => {
     }
   }, 3000)
 
-  // Resolve the active session ID for THIS ship.
-  //
-  // Authoritative source: the session id observed from opencode chat lifecycle
-  // hooks/events for the currently executing ship session (chat.params and
-  // experimental.chat.system.transform provide input.sessionID per turn; session
-  // events may provide it at startup). We cache it in currentSessionID and reuse
-  // it for polling/handoff so promptAsync targets the session actually running
-  // this ship, without enumerating/guessing across global sessions.
-  //
-  // We do NOT pick from session.list()/session.status() by title when multiple
-  // sessions exist or when the active id is unknown: that cannot prove which
-  // session is the active one for this process and caused ambiguous-resolution
-  // skips. opencode session ids change over time, so the id is learned ONLY
-  // from chat hooks/events and never persisted; before the first hook nothing
-  // is delivered (the launcher's initial --prompt turn provides it right away).
+  // Hooks are authoritative during an active turn. After an OpenCode/plugin
+  // restart, however, no hook may fire until another user turn. Recover only
+  // the unique session titled for this ship in this workspace; never guess.
   const resolveSessionId = async (): Promise<string> => {
     if (currentSessionID) return currentSessionID
     const ship = aid()
-    tickLog(`session-resolve ship=${ship}: no active session id (awaiting chat hook/session event)`)
+    try {
+      const response = await client.session.list({ query: { directory: ROOT } })
+      const body = response?.body ?? response
+      const data: any = body?.data ?? body
+      const sessions: any[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.sessions)
+          ? data.sessions
+          : data && typeof data === 'object'
+            ? Object.values(data)
+            : []
+      const matches = sessions.filter((session: any) =>
+        session?.id &&
+        session.title === ship &&
+        (!session.directory || session.directory === ROOT)
+      )
+      if (matches.length === 1) {
+        currentSessionID = matches[0].id
+        tickLog(`session-resolve ship=${ship}: recovered unique workspace session ${currentSessionID}`)
+        return currentSessionID
+      }
+      tickLog(`session-resolve ship=${ship}: ${matches.length} matching sessions; refusing ambiguous handoff`)
+    } catch (e) {
+      tickLog(`session-resolve ship=${ship}: session.list failed: ${String(e).slice(0, 180)}`)
+    }
     return ''
   }
 

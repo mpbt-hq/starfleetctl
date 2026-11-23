@@ -67,18 +67,18 @@ type routingTable struct {
 
 // loadRoutingTable reads the routing table from the Comms configuration.
 func loadRoutingTable(root string) (*routingTable, error) {
-	cfg, err := config.Load(root)
+	commsCfg, err := config.LoadComms(root)
 	if err != nil {
 		return nil, fmt.Errorf("comms routing: %w", err)
 	}
 	rt := &routingTable{
-		localDomain: strings.TrimSpace(cfg.Comms.Routing.LocalDomain),
+		localDomain: strings.TrimSpace(commsCfg.Routing.LocalDomain),
 		byDomain:    make(map[string]TransportRoute),
 	}
 	if rt.localDomain == "" {
 		rt.localDomain = "local"
 	}
-	for _, entry := range cfg.Comms.Routing.Domains {
+	for _, entry := range commsCfg.Routing.Domains {
 		domain := strings.TrimSpace(entry.Domain)
 		if domain == "" {
 			return nil, fmt.Errorf("comms routing: empty domain")
@@ -144,6 +144,23 @@ func (rt *routingTable) resolve(target string) (localTarget string, route Transp
 
 // resolveTarget resolves a recipient using the current routing table.
 func (b *Bus) resolveTarget(target string) (string, TransportRoute, bool, error) {
+	// Domainless recipients and the conventional @local address are always
+	// local. Do not load any configuration for these sends: a malformed or
+	// unrelated YAML file must never disable the local message bus.
+	addr := strings.TrimSpace(target)
+	if addr == "" {
+		return "", TransportRoute{}, false, fmt.Errorf("comms: empty recipient")
+	}
+	user, domain := addr, ""
+	if i := strings.LastIndex(addr, "@"); i >= 0 {
+		user, domain = addr[:i], addr[i+1:]
+	}
+	if domain == "" || strings.EqualFold(domain, "local") {
+		if user == "" {
+			return "", TransportRoute{}, false, fmt.Errorf("comms: invalid recipient %q", target)
+		}
+		return user, TransportRoute{}, false, nil
+	}
 	rt, err := loadRoutingTable(b.Root)
 	if err != nil {
 		return "", TransportRoute{}, false, err
