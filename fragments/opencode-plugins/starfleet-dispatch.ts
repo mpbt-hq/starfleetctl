@@ -153,6 +153,7 @@ export const plugin = async ({ client, $ }: any) => {
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
+  let sessionResolveDiagnosticLogged = false
   let currentTask = ''
   const hasSwitchedToFallback = { v: false }
 
@@ -679,6 +680,42 @@ const logPollTimer = setInterval(async () => {
         currentSessionID = recoveredSessionID
         tickLog(`session-resolve ship=${ship}: recovered unique workspace session ${currentSessionID}`)
         return currentSessionID
+      }
+      if (!sessionResolveDiagnosticLogged) {
+        sessionResolveDiagnosticLogged = true
+        const body = response?.body ?? response
+        const data = body?.data ?? body
+        const sessions = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.sessions)
+            ? data.sessions
+            : data && typeof data === 'object'
+              ? Object.values(data)
+              : []
+        const keys = (value: any): string[] =>
+          value && typeof value === 'object' ? Object.keys(value).slice(0, 12) : []
+        const titled = sessions.filter((session: any) => session?.title === ship)
+        const eligible = titled.filter((session: any) =>
+          session?.id && (!session.directory || session.directory === ROOT)
+        )
+        tickLog(`session-resolve-debug ship=${ship}: ${JSON.stringify({
+          responseType: Array.isArray(response) ? 'array' : typeof response,
+          responseKeys: keys(response),
+          bodyType: Array.isArray(body) ? 'array' : typeof body,
+          bodyKeys: keys(body),
+          dataType: Array.isArray(data) ? 'array' : typeof data,
+          dataKeys: keys(data),
+          sessionCount: sessions.length,
+          titleMatches: titled.length,
+          eligibleMatches: eligible.length,
+          sessions: sessions.slice(0, 50).map((session: any) => ({
+            title: typeof session?.title === 'string' ? session.title : null,
+            hasId: Boolean(session?.id),
+            directoryPresent: Boolean(session?.directory),
+            directoryMatchesRoot: !session?.directory || session.directory === ROOT,
+            keys: keys(session),
+          })),
+        })}`)
       }
       tickLog(`session-resolve ship=${ship}: no unique matching workspace session; refusing handoff`)
     } catch (e) {
