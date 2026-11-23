@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 
-// Recover only a uniquely identifiable ship session in the expected workspace.
+// Recover the most recently updated session for a ship in the expected workspace.
 // OpenCode SDK response wrappers have appeared as either {body: ...} or direct
-// data; accept both without ever choosing an arbitrary session.
-export function resolveUniqueShipSession(response, ship, root) {
+// data; accept both. Older sessions are retained and ignored for recovery.
+export function resolveLatestShipSession(response, ship, root) {
   const body = response?.body ?? response
   const data = body?.data ?? body
   const sessions = Array.isArray(data)
@@ -19,5 +19,11 @@ export function resolveUniqueShipSession(response, ship, root) {
     session.title === ship &&
     (!session.directory || session.directory === root)
   )
-  return matches.length === 1 ? matches[0].id : ''
+  if (matches.length === 0 || matches.some(session => !Number.isFinite(session.updated))) {
+    return ''
+  }
+
+  const latestUpdated = Math.max(...matches.map(session => session.updated))
+  const latest = matches.filter(session => session.updated === latestUpdated)
+  return latest.length === 1 ? latest[0].id : ''
 }
