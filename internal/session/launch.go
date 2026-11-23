@@ -64,6 +64,7 @@ func isShipRunning(root, shipID string) bool {
 // LaunchVars holds the computed values from a `session run` invocation.
 type LaunchVars struct {
 	ShipID      string
+	Role        string // explicit STARFLEET_ROLE for the launched process
 	PipePath    string // termctl control pipe path
 	ReleaseFull string
 	Client      string
@@ -346,6 +347,7 @@ func computeLaunch(root string, args []string) (*LaunchVars, error) {
 
 	return &LaunchVars{
 		ShipID:      shipID,
+		Role:        "ship",
 		PipePath:    pipePath,
 		ReleaseFull: project,
 		Client:      client,
@@ -652,6 +654,7 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 
 		vars := &LaunchVars{
 			ShipID:      name,
+			Role:        "ship",
 			PipePath:    pipePath,
 			ReleaseFull: "",
 			Client:      "opencode-ship",
@@ -686,11 +689,8 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("os.Executable: %w", err)
 	}
-	childEnv := append(os.Environ(),
-		"MPBT_WORKSPACE_ROOT="+root,
-		"STARFLEET_SHIP_ID="+name,
-		"STARFLEET_CLASS="+o.Class,
-	)
+	childEnv := shipProcessEnv(os.Environ(), name, "ship", flagship, launchType, o.Class)
+	childEnv = append(childEnv, "MPBT_WORKSPACE_ROOT="+root)
 
 	// Function to start/restart the termctl-run child process
 	startChild := func(model string) error {
@@ -732,7 +732,16 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 			return fmt.Errorf("generate opencode config: %w", err)
 		}
 
-		inner := "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
+		inner := "export STARFLEET_SHIP_ID=" + shellQuote(name) + "; "
+		inner += "export STARFLEET_ROLE=ship; "
+		inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
+		inner += "export STARFLEET_LAUNCH_TYPE=" + shellQuote(launchType) + "; "
+		if o.Class != "" {
+			inner += "export STARFLEET_CLASS=" + shellQuote(o.Class) + "; "
+		} else {
+			inner += "unset STARFLEET_CLASS; "
+		}
+		inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
 		inner += "export OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1; "
 		inner += "exec " + shellQuote(resolveClientPath("opencode"))
 		inner += " --model " + shellQuote(effectiveModel)
@@ -1236,12 +1245,22 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 		return fmt.Errorf("os.Executable: %w", err)
 	}
 
-	// Build environment for child: include workspace root and ship ID
-	childEnv := append(os.Environ(),
-		"MPBT_WORKSPACE_ROOT="+root,
-		"STARFLEET_SHIP_ID="+vars.ShipID,
-		"STARFLEET_CLASS="+vars.Class,
-	)
+	// Build a clean child environment. Never let the launching ship's
+	// identity leak into the newly launched process.
+	role := vars.Role
+	if role == "" {
+		role = "ship"
+	}
+	launchType := vars.LaunchType
+	if launchType == "" {
+		launchType = "background"
+	}
+	target := ""
+	if role == "ship" {
+		target = shipnames.FlagshipName(root)
+	}
+	childEnv := shipProcessEnv(os.Environ(), vars.ShipID, role, target, launchType, vars.Class)
+	childEnv = append(childEnv, "MPBT_WORKSPACE_ROOT="+root)
 
 	// Open log file for child output (so it doesn't inherit parent's stdout/stderr
 	// which get closed when starfleetctl exits)
@@ -1280,12 +1299,15 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 	// Don't wait - the child process runs independently.
 	// The log file will be closed when the child exits (we don't close it here).
 
-	// Post initial heartbeat
-	os.Setenv("STARFLEET_SHIP_ID", vars.ShipID)
+	// Post initial heartbeat using an explicit bus identity. Do not mutate
+	// the caller's process environment: this process may be the flagship or
+	// another ship that launched the child.
 	if vars.ReleaseFull != "" {
 		os.Setenv("PROJECT", vars.ReleaseFull)
 	}
 	if bus, err := comms.New(root); err == nil {
+		bus.ShipID = vars.ShipID
+		bus.ShipIDSet = true
 		provider := vars.Provider
 		if provider == "" {
 			provider = providerFromModel(vars.Model)

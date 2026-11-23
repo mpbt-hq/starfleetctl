@@ -93,3 +93,19 @@ func TestRunClientEnvDoesNotInheritAmbientIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildInnerCommandDoesNotLeakParentShipIdentity(t *testing.T) {
+	t.Setenv("STARFLEET_TARGET", "Enterprise")
+	t.Setenv("STARFLEET_CLASS", "cruiser")
+	cmd := buildInnerCommand(t.TempDir(), "opencode", "Voyager", "ship", "", "", "", nil, "")
+	for _, want := range []string{
+		"export STARFLEET_SHIP_ID='Voyager'",
+		"export STARFLEET_ROLE='ship'",
+		"export STARFLEET_LAUNCH_TYPE=terminal",
+		"unset STARFLEET_CLASS",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("inner command missing %q: %s", want, cmd)
+		}
+	}
+}
