@@ -5,8 +5,14 @@ package bootstrap
 
 import (
 	"encoding/json"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	starfleetctl "github.com/metux/starfleetctl"
 )
 
 func TestEnsureOpencodePlanAccessFromScratch(t *testing.T) {
@@ -144,4 +150,60 @@ func nestedBashPerms(doc map[string]any) (map[string]any, bool) {
 	}
 	bash, ok := permission["bash"].(map[string]any)
 	return bash, ok
+}
+
+
+// TestFixOpencodePluginsInstallsModuleAssets verifies that imported .mjs
+// helpers are installed and checked, without being registered as plugins.
+func TestFixOpencodePluginsInstallsModuleAssets(t *testing.T) {
+	root := t.TempDir()
+	b := New(root)
+
+	if err := fixOpencodePlugins(b); err != nil {
+		t.Fatalf("fixOpencodePlugins: %v", err)
+	}
+
+	const helperName = "session-resolution.mjs"
+	embeddedPath := filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, helperName)
+	want, err := fs.ReadFile(starfleetctl.Fragments, embeddedPath)
+	if err != nil {
+		t.Fatalf("read embedded helper: %v", err)
+	}
+	installedPath := filepath.Join(root, ".opencode", "plugins", helperName)
+	got, err := os.ReadFile(installedPath)
+	if err != nil {
+		t.Fatalf("read installed helper: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatal("installed helper differs from embedded source")
+	}
+
+	if ok, detail := verifyOpencodePlugins(b); !ok {
+		t.Fatalf("verify after install = false (%s)", detail)
+	}
+
+	// Imported helper modules are runtime assets, not plugin entry points.
+	configPath := filepath.Join(root, ".opencode", "opencode.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read opencode config: %v", err)
+	}
+	var config struct {
+		Plugin []string `json:"plugin"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse opencode config: %v", err)
+	}
+	for _, spec := range config.Plugin {
+		if strings.Contains(spec, helperName) {
+			t.Fatalf("helper module must not be registered as a plugin: %q", spec)
+		}
+	}
+
+	if err := os.Remove(installedPath); err != nil {
+		t.Fatalf("remove installed helper: %v", err)
+	}
+	if ok, detail := verifyOpencodePlugins(b); ok || !strings.Contains(detail, helperName) {
+		t.Fatalf("verify with missing helper = (%v, %q), want missing %s", ok, detail, helperName)
+	}
 }
