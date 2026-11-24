@@ -207,3 +207,68 @@ func TestFixOpencodePluginsInstallsModuleAssets(t *testing.T) {
 		t.Fatalf("verify with missing helper = (%v, %q), want missing %s", ok, detail, helperName)
 	}
 }
+
+
+// TestRootGitignoreManagedEntriesAreNarrowAndMerged verifies that bootstrap
+// ignores only embedded Starfleetctl hooks and preserves user-owned hook rules.
+func TestRootGitignoreManagedEntriesAreNarrowAndMerged(t *testing.T) {
+	root := t.TempDir()
+	b := New(root)
+	path := filepath.Join(root, ".gitignore")
+	initial := "build/\n/.claude/hooks/\n/.claude/hooks/my-custom-hook"
+	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, _ := verifyRootGitignore(b); ok {
+		t.Fatal("broad legacy rule should not satisfy root gitignore check")
+	}
+	if err := fixRootGitignore(b); err != nil {
+		t.Fatalf("fixRootGitignore: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if strings.Contains(content, "/.claude/hooks/\n") {
+		t.Fatalf("broad hooks directory rule remains: %q", content)
+	}
+	if !strings.Contains(content, "/.claude/hooks/agent-permission-hook\n") {
+		t.Fatalf("managed hook entry missing: %q", content)
+	}
+	if !strings.Contains(content, "/.claude/hooks/my-custom-hook") {
+		t.Fatalf("user hook rule was not preserved: %q", content)
+	}
+	if !strings.Contains(content, "build/\n") {
+		t.Fatalf("unrelated user rule was not preserved: %q", content)
+	}
+	if ok, detail := verifyRootGitignore(b); !ok {
+		t.Fatalf("verify after fix = false (%s)", detail)
+	}
+
+	before := string(data)
+	if err := fixRootGitignore(b); err != nil {
+		t.Fatalf("second fixRootGitignore: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != before {
+		t.Fatal("second root gitignore fix changed an already-correct file")
+	}
+}
+
+func TestMergeGitignoreEntriesPreservesLocalRules(t *testing.T) {
+	got := mergeGitignoreEntries(
+		"custom/\n/obsolete/\n",
+		[]string{"/managed/file"},
+		[]string{"/obsolete/"},
+	)
+	want := "custom/\n/managed/file\n"
+	if got != want {
+		t.Fatalf("mergeGitignoreEntries() = %q, want %q", got, want)
+	}
+}
