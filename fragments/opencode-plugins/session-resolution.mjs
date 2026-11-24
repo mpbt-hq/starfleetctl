@@ -2,8 +2,9 @@
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 
 // Recover the most recently updated session for a ship in the expected workspace.
-// OpenCode SDK response wrappers have appeared as either {body: ...} or direct
-// data; accept both. Older sessions are retained and ignored for recovery.
+// OpenCode's Session schema stores timestamps under time.updated. Accept the
+// legacy top-level updated shape too, so older SDK wrappers remain compatible.
+// SDK response wrappers have appeared as either {body: ...} or direct data.
 export function resolveLatestShipSession(response, ship, root) {
   const body = response?.body ?? response
   const data = body?.data ?? body
@@ -19,11 +20,14 @@ export function resolveLatestShipSession(response, ship, root) {
     session.title === ship &&
     (!session.directory || session.directory === root)
   )
-  if (matches.length === 0 || matches.some(session => !Number.isFinite(session.updated))) {
+  const updated = matches.map(session =>
+    Number.isFinite(session?.time?.updated) ? session.time.updated : session?.updated
+  )
+  if (matches.length === 0 || updated.some(value => !Number.isFinite(value))) {
     return ''
   }
 
-  const latestUpdated = Math.max(...matches.map(session => session.updated))
-  const latest = matches.filter(session => session.updated === latestUpdated)
+  const latestUpdated = Math.max(...updated)
+  const latest = matches.filter((session, index) => updated[index] === latestUpdated)
   return latest.length === 1 ? latest[0].id : ''
 }
