@@ -1159,7 +1159,6 @@ var rootGitignoreObsoleteEntries = []string{
 // User-created hooks and plugins in the same directories remain trackable.
 func rootGitignoreRequiredEntries() ([]string, error) {
 	var required []string
-	opencodeManifestNeeded := false
 	for _, source := range []struct {
 		subdir string
 		prefix string
@@ -1188,13 +1187,7 @@ func rootGitignoreRequiredEntries() ([]string, error) {
 				continue
 			}
 			required = append(required, source.prefix+entry.Name())
-			if source.subdir == opencodePluginsSubdir && strings.HasSuffix(entry.Name(), ".ts") {
-				opencodeManifestNeeded = true
-			}
 		}
-	}
-	if opencodeManifestNeeded {
-		required = append(required, "/.opencode/package.json")
 	}
 	return required, nil
 }
