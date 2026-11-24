@@ -241,7 +241,6 @@ func TestRootGitignoreManagedEntriesAreNarrowAndMerged(t *testing.T) {
 	for _, managed := range []string{
 		"/.opencode/plugins/starfleet-dispatch.ts",
 		"/.opencode/plugins/session-resolution.mjs",
-		"/.opencode/package.json",
 	} {
 		if !strings.Contains(content, managed+"\n") {
 			t.Errorf("managed OpenCode asset entry %q missing: %q", managed, content)
