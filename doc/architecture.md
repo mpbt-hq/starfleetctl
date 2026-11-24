@@ -17,45 +17,43 @@ starfleetctl provides a file-based coordination layer. All state lives in `.star
 
 ```
 workspace/
-├── _WORK/
-│   ├── comms/          # Status board + message bus
-│   │   ├── .lock           # Exclusive flock for atomic operations
-│   │   ├── .seq            # Message ID counter
-│   │   ├── status/         # Per-agent heartbeat files
-│   │   │   ├── Enterprise.tsv
-│   │   │   └── Voyager.tsv
-│   │   ├── msgs/           # Directive files
-│   │   │   ├── m0001.tsv
-│   │   │   └── m0002.tsv
-│   │   ├── acks/           # Acknowledgment markers
-│   │   ├── attachments/    # Large payload storage
-│   │   └── events.log      # Audit trail
-│   └── agent-claims/       # PR-branch locks
-│       ├── pr-3162.tsv
-│       └── pr-3163.tsv
-├── .starfleet-ai/var/
-│   └── dashboard/topics/       # Per-topic status files
+├── .starfleet-ai/
+│   ├── var/
+│   │   ├── comms/
+│   │   │   ├── .lock             # shared flock domain
+│   │   │   ├── .seq              # message ID counter
+│   │   │   ├── status/           # per-ship status/<ship>.json
+│   │   │   ├── msgs/             # per-recipient message JSON
+│   │   │   │   └── <ship>/
+│   │   │   │       ├── unseen/   # pending messages
+│   │   │   │       └── seen/     # acknowledged messages
+│   │   │   ├── attachments/     # large payload storage
+│   │   │   └── events.log       # audit trail
+│   │   ├── agent-claims/         # advisory PR-branch claims
+│   │   └── dashboard/topics/    # project task/topic files
+│   └── conf/                    # workspace configuration
+└── sop.d/                       # user-maintained SOP fragments
 ```
 
 ## Core Concepts
 
 ### Ships
 
-Each agent session is identified by a "ship name" (e.g., `Enterprise`, `Voyager`). The name is set via the `STARFLEET_SHIP_ID` environment variable. If unset, starfleetctl falls back to `user@hostname`.
+Each agent session is identified by a ship name (e.g., `Enterprise`, `Voyager`) in `STARFLEET_SHIP_ID`. If unset, the Comms bus uses the process-local fallback `anon-<pid>`; launchers normally set a stable ship identity explicitly.
 
 ### Comms Bus
 
 The comms bus is a publish-subscribe system built on files:
 
-1. **Status heartbeats** — Each ship writes a TSV file with its current state (`working`, `idle`, `blocked`, etc.). Other ships read these to see who's active.
+1. **Status heartbeats** — Each ship writes a JSON record at `status/<ship>.json`, containing its state and liveness metadata.
 
-2. **Directives** — Messages are written as individual TSV files. Each has a unique ID (`m0001`, `m0002`, ...), a sender, a target (or `all` for broadcasts), and a text body.
+2. **Directives** — Messages are JSON files in each recipient's `msgs/<ship>/unseen/` directory. Broadcasts are materialized as per-recipient copies.
 
-3. **Acknowledgments** — When a ship processes a directive, it creates an empty ack file. Fully-acked old directives are pruned automatically.
+3. **Acknowledgments** — Acknowledging a directive moves that recipient's copy from `unseen/` to `seen/`. Old fully-acknowledged directives can then be pruned. Legacy flat message files remain readable during migration.
 
 ### File Locking
 
-All mutations go through `flock(2)` on `.starfleet-ai/var/comms/.lock`. This ensures:
+Comms bus mutations go through `flock(2)` on `.starfleet-ai/var/comms/.lock`. This ensures:
 
 - Multiple processes can read concurrently
 - Only one process writes at a time

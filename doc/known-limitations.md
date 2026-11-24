@@ -28,6 +28,6 @@ The old "rebase" mode leaked PR-number markers onto pushed upstream commits (PR 
 ## Bash Interoperability
 
 Go and bash implementations read/write the same file formats, but:
-- Both must use the same `flock` domain (`_WORK_/comms/.lock`)
+- Both must use the same `flock` domain (`.starfleet-ai/var/comms/.lock`)
 - Don't mix `STARFLEET_BUS_DIR` overrides between implementations
 - Test interoperability before relying on it in production

@@ -19,7 +19,7 @@ Messages are JSON files stored in `msgs/<target>/unseen/`:
 
 ```json
 {
-  "id": "msg-abc123",
+  "id": "m0042",
   "epoch": 1753190400,
   "iso": "2026-07-21T12:00:00Z",
   "from": "Enterprise",
@@ -33,7 +33,7 @@ Messages are JSON files stored in `msgs/<target>/unseen/`:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | yes | Unique message ID (`msg-<random>`) |
+| `id` | yes | Unique message ID (`m0001`, `m0002`, …) |
 | `epoch` | yes | Unix timestamp |
 | `iso` | yes | ISO 8601 timestamp |
 | `from` | yes | Sender ship ID |
@@ -76,9 +76,9 @@ starfleetctl comms broadcast "roll call"
 
 | Variable | Default | Description |
 |---|---|---|
-| `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
+| `STARFLEET_SHIP_ID` | `anon-<pid>` when unset | Unique ship identifier (launchers normally set it explicitly) |
 | `STARFLEET_BUS_DIR` | `.starfleet-ai/var/comms` | Storage directory |
-| `STARFLEET_STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
+| `STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat time-to-live |
 | `PROJECT` | — | Project label on the board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
 
@@ -120,7 +120,7 @@ starfleetctl comms board
 starfleetctl comms board --json
 ```
 
-Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. Stale entries (older than `STARFLEET_STARFLEET_BUS_TTL`) are marked `[STALE]`.
+Output columns: `AGENT`, `PROJECT`, `STATE`, `AGE`, `INBOX`, `ATTACH`, `NOTE`. Stale entries (older than `STARFLEET_BUS_TTL`) are marked `[STALE]`.
 
 ### Directives (Messaging)
 
