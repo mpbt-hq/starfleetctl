@@ -14,7 +14,7 @@ When several ships share one repository, you need:
 - **Safe commits** — concurrent sessions don't race the same working tree
 - **GitHub integration** — view, comment, and label PRs without `jq`/`sed`
 
-starfleetctl provides all of this as a single Go binary with no third-party dependencies.
+starfleetctl provides all of this as a single Go binary. Go module dependencies are declared in `go.mod` and resolved by the Go toolchain.
 
 ## Quick Start
 
@@ -54,6 +54,8 @@ installed, see `scripts/check-opencode-plugin.sh`).
 | [Reports](doc/reports.md) | Fleet report system (CLI + web) |
 | [Config Files](doc/config.md) | Reference for `.starfleet-ai/conf/*.yaml` + `timers/*.json` |
 | [Known Limitations](doc/known-limitations.md) | Current caveats and workarounds |
+| [Wormhole](doc/wormhole.md) | Git-Maildir transport and Comms integration |
+| [Wormhole Requirement Matrix](doc/wormhole-requirement-matrix.md) | Requirement-to-code/test evidence ledger |
 
 ## License
 

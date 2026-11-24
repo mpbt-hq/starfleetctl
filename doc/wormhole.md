@@ -108,7 +108,13 @@ The wormhole uses **Git Maildir spool** for message transport:
    - For every local ship: claim messages in `new/` → move to `cur/`
    - Import via `Bus.PostExternal()` → Comms inbox
    - Move `cur/` → `processed/` on success, or `failed/` on permanent failure
-4. **At-least-once delivery**: Claims prevent duplicate processing; crashes between claim and import leave message in `cur/` for retry
+4. **At-least-once transport/import**: A claimed message remains in `cur/` until
+   `Bus.PostExternal()` succeeds and the `cur/ → processed/` transition is
+   committed. Transient failures leave it in `cur/` for retry. If the process
+   crashes after Comms accepted the message but before the Maildir transition
+   completes, the import is retried; `PostExternal()` resumes or recognizes
+   the same `source + externalID + payload` and does not publish a duplicate
+   Comms message.
 
 ### Central multi-ship cycle
 
@@ -264,7 +270,10 @@ comms:
 
 - **Not a network daemon**: No listening socket; transport is Git-based
 - **Single-writer per repo**: Repository lock serializes all Git operations
-- **At-least-once delivery**: Crash between claim and seen_mark may cause re-delivery
+- **At-least-once processing with idempotent import**: A crash can cause a
+  message in `cur/` to be retried, including after Comms accepted it but before
+  the Maildir move to `processed/` completed. `PostExternal()` deduplicates
+  retries by repository source, immutable message ID, and payload hash.
 - **No consumer groups**: Each ship has its own mailbox; no competing consumers
 - **Read-only repos**: Can import but not publish messages
 - **No attachments**: Messages with attachments are rejected with explicit error

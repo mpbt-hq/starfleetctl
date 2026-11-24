@@ -30,10 +30,10 @@ make build              # produces ./starfleetctl binary
 ./starfleetctl --version  # verify
 ```
 
-**Requirements:** Go 1.21+ (stdlib only, no external dependencies). The
-optional `check-plugin` step of `make all` additionally needs `esbuild` and —
-for the type check — `typescript` + `@types/node` (`npm i -g typescript
-@types/node`); both steps skip gracefully when absent.
+**Requirements:** Go 1.22+ (see `go.mod`; Go modules resolve the declared
+third-party dependencies). The optional `check-plugin` step of `make all`
+additionally needs `esbuild` and — for the type check — `typescript` +
+`@types/node`; both checks skip gracefully when absent.
 **Build is always via `make` — `go build` and `go install` are not supported.**
 
 ### Option B: Use the Bootstrap Script (Workspace Setup)
@@ -72,9 +72,9 @@ Each AI agent session = one **ship** with a unique name:
 
 File-based pub/sub system in `.starfleet-ai/var/comms/`:
 
-- **Heartbeats** — each ship writes `status/<ship>.tsv` every few seconds
-- **Messages** — TSV files in `msgs/` (auto-moved to `seen/` on ack)
-- **Acknowledgments** — messages move from `unseen/` to `seen/<ship>/` on ack
+- **Status / heartbeats** — each ship writes a JSON record at `status/<ship>.json`
+- **Messages** — JSON records are stored per recipient under `msgs/<ship>/unseen/`
+- **Acknowledgments** — acknowledging a message moves its file from that ship's `unseen/` directory to `seen/`; legacy flat message files remain readable for compatibility
 - **Locking** — all writes go through `flock(2)` on `.lock` (bash & Go interoperable)
 
 #### Message Format
@@ -83,7 +83,7 @@ Messages are JSON files:
 
 ```json
 {
-  "id": "msg-abc123",
+  "id": "m0042",
   "epoch": 1753190400,
   "iso": "2026-07-21T12:00:00Z",
   "from": "Enterprise",
@@ -429,7 +429,7 @@ Shows every agent that has posted a heartbeat. Each card displays:
 - **Project** and **age** (time since last heartbeat)
 - **Inbox count** (unacked directives)
 - **Task**, **Branch**, **Blocker**, **ETA**, **Progress bar** (if reported)
-- **STALE** pill if the heartbeat is older than `STARFLEET_STARFLEET_BUS_TTL` (default 15 min)
+- **STALE** pill if the heartbeat is older than `STARFLEET_BUS_TTL` (default 15 min)
 - **Model** pill: shows the model ID or provider when reported
 
 Click a ship card to open the **ship detail panel** (slide-in from the right):
@@ -758,8 +758,8 @@ starfleetctl comms prune
 
 ```sh
 starfleetctl ship-names list        # see assigned names
-starfleetctl ship-names release <name>  # force-release
-starfleetctl ship-names gc          # auto-clean stale (> STARFLEET_STARFLEET_BUS_TTL)
+starfleetctl ship-names release <name>  # release only after verifying its processes exited
+starfleetctl ship-names gc          # reclaim reservations whose runner and OpenCode PIDs have exited
 ```
 
 ### 8.4 PR Claim Conflicts
@@ -802,11 +802,11 @@ starfleetctl web stop                  # kill daemon
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STARFLEET_SHIP_ID` | `user@hostname` | Unique ship identifier |
+| `STARFLEET_SHIP_ID` | `anon-<pid>` when unset | Unique ship identifier |
 | `STARFLEET_ROLE` | — | `flagship` or `ship` |
 | `STARFLEET_TARGET` | — | Flagship ship ID (for ships) |
 | `STARFLEET_BUS_DIR` | `.starfleet-ai/var/comms` | Comms state directory |
-| `STARFLEET_STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat TTL in seconds |
+| `STARFLEET_BUS_TTL` | `900` (15 min) | Heartbeat TTL in seconds |
 | `PROJECT` | — | Project label on board |
 | `AGENT_CONTROLLER` | `control` | Control agent for `ask`/`reply` |
 | `MPBT_WORKSPACE_ROOT` | auto-detect | Workspace root override |
@@ -817,33 +817,34 @@ starfleetctl web stop                  # kill daemon
 
 ```
 workspace/
-├── starfleet-bootstrap          # ← commit this
+├── starfleet-bootstrap          # commit this
 ├── .starfleet-ai/
 │   ├── var/
 │   │   ├── comms/
-│   │   │   ├── .lock            # flock domain
+│   │   │   ├── .lock            # shared flock domain
 │   │   │   ├── .seq             # message counter
-│   │   │   ├── status/          # heartbeats (Enterprise.tsv, Voyager.tsv)
-│   │   │   ├── msgs/            # messages
-│   │   │   │   ├── m0001.tsv
-│   │   │   │   └── m0002.tsv
-│   │   │   ├── acks/            # acknowledgment markers
+│   │   │   ├── status/          # per-ship status records (*.json)
+│   │   │   ├── msgs/            # per-recipient message JSON
+│   │   │   │   └── Voyager/
+│   │   │   │       ├── unseen/  # pending message files
+│   │   │   │       └── seen/    # acknowledged message files
 │   │   │   ├── attachments/     # large payloads
 │   │   │   └── events.log       # audit trail
-│   │   ├── agent-claims/        # PR claims (pr-3162.tsv, ...)
-│   │   ├── sop.d/               # fleet coordination fragments (under var/)
-│   │   ├── dashboard/
-│   │   │   └── topics/          # project tasks
-│   │   ├── log/                 # centralised logs (web.log, timer-worker.log)
+│   │   ├── agent-claims/        # advisory PR claims
+│   │   ├── sop.d/               # generated index + embedded instructions
+│   │   ├── dashboard/topics/    # project tasks
+│   │   ├── log/                 # centralised logs
 │   │   └── ships/               # session pipes + logs
 │   ├── conf/
-│   │   ├── models.yaml          # legacy model registry (optional, unused)
+│   │   ├── fleet.yaml           # fleet identity and worker-name pool
+│   │   ├── project.yaml         # project and worktree settings
+│   │   ├── wormholes.yaml       # optional Wormhole transport
 │   │   └── timers/              # persistent timers
 │   └── web.pid                  # web server PID (when daemonised)
+├── sop.d/                       # user-maintained SOP fragments
 ├── run-opencode.flagship        # launcher (flagship)
 └── run-opencode.ship            # launcher (worker)
 ```
-
 ---
 
 ## Further Reading
@@ -860,6 +861,8 @@ workspace/
 | [doc/known-limitations.md](doc/known-limitations.md) | Current caveats and workarounds |
 | [doc/config.md](doc/config.md) | Configuration reference |
 | [doc/github.md](doc/github.md) | GitHub integration |
+| [doc/wormhole.md](doc/wormhole.md) | Wormhole transport and Comms integration |
+| [doc/wormhole-requirement-matrix.md](doc/wormhole-requirement-matrix.md) | Requirement-to-code/test evidence ledger |
 
 ---
 
