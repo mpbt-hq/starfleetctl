@@ -84,7 +84,7 @@ starfleetctl session autoscale need 3 \
 ## Ship Names
 
 ```sh
-# Assign a ship name
+# Assign the next available ship name
 starfleetctl ship-names assign
 
 # Assign as flagship (control agent)
@@ -103,6 +103,43 @@ starfleetctl ship-names gc
 # Get shell environment (PS1 prefix, EXIT trap)
 eval "$(starfleetctl ship-names shell-env)"
 ```
+
+### Automatic allocation
+
+When a session is started without an explicit name, starfleetctl normally
+takes the first available name from the configured ship-name list. The list
+is processed in order: with the built-in defaults, worker names start with
+`Defiant`, `Voyager`, `Discovery`, `Excelsior`, and so on. Thus, when all
+these names are free, the first automatically named worker gets `Defiant`,
+the next gets `Voyager`, and the next gets `Discovery`. The flagship name
+(default `Enterprise`) is excluded from the worker pool.
+
+The order can be customized with `fleet.ship_names` in
+`.starfleet-ai/conf/fleet.yaml`. The legacy
+`.starfleet-ai/conf/ship-names.yaml` is also supported when no list is
+configured in `fleet.yaml`.
+
+Before scanning the list, the allocator makes a best-effort attempt to reuse
+a stale reservation recorded for the current TTY. This is only a restart
+convenience, not a persistent TTY-to-ship assignment. In the usual case,
+automatic allocation follows the configured list order; it does not bind a
+ship name permanently to a terminal.
+
+### Explicit names and reservations
+
+Use the launch command's `--name` option when a particular identity is
+required, for example:
+
+```sh
+./run-opencode.ship --name Voyager
+```
+
+A name can be owned by only one live runner/OpenCode session at a time.
+Starting another session with an already-used name is rejected rather than
+sharing the existing ship identity or OpenCode session. A reservation remains
+in use while either its runner process or its recorded OpenCode process is
+alive. Once both have exited, the stale reservation can be reclaimed by a
+later allocation or by `starfleetctl ship-names gc`.
 
 ## Worktrees
 
