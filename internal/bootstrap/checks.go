@@ -197,9 +197,9 @@ func Checks() []Check {
 			Fix:    fixWebConf,
 		},
 		{
-			Name:   ".gitignore: claude hooks entry",
-			Verify: verifyGitignoreClaudeHooks,
-			Fix:    fixGitignoreClaudeHooks,
+			Name:   "workspace root .gitignore (Starfleetctl-managed files)",
+			Verify: verifyRootGitignore,
+			Fix:    fixRootGitignore,
 		},
 	}
 }
@@ -1149,7 +1149,27 @@ func fixClaudeHooks(b *Bootstrap) error {
 	return nil
 }
 
-const gitignoreClaudeHooksEntry = "/.claude/hooks/"
+// rootGitignoreObsoleteEntries are broad rules managed by older
+// starfleetctl versions. They are removed during migration.
+var rootGitignoreObsoleteEntries = []string{
+	"/.claude/hooks/",
+}
+
+// rootGitignoreRequiredEntries lists only files installed by starfleetctl.
+// User-created hooks in the same directory remain trackable.
+func rootGitignoreRequiredEntries() ([]string, error) {
+	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeHooksSubdir))
+	if err != nil {
+		return nil, fmt.Errorf("reading embedded Claude hooks: %w", err)
+	}
+	var required []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			required = append(required, "/.claude/hooks/"+entry.Name())
+		}
+	}
+	return required, nil
+}
 
 const starfleetAIGitignoreContent = `# Ephemeral runtime directories (not persisted to git)
 /comms/
@@ -1207,18 +1227,45 @@ func gitignoreRequiredEntries() []string {
 	return out
 }
 
-func missingGitignoreEntries(content string) []string {
+func missingGitignoreEntries(content string, required []string) []string {
 	present := map[string]bool{}
 	for _, l := range strings.Split(content, "\n") {
 		present[strings.TrimSpace(l)] = true
 	}
 	var missing []string
-	for _, e := range gitignoreRequiredEntries() {
+	for _, e := range required {
 		if !present[e] {
 			missing = append(missing, e)
 		}
 	}
 	return missing
+}
+
+// mergeGitignoreEntries removes only explicitly obsolete managed lines and
+// appends missing required entries. All unrelated user lines are preserved.
+func mergeGitignoreEntries(content string, required, obsolete []string) string {
+	obsoleteSet := make(map[string]bool, len(obsolete))
+	for _, entry := range obsolete {
+		obsoleteSet[strings.TrimSpace(entry)] = true
+	}
+
+	lines := strings.Split(content, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !obsoleteSet[strings.TrimSpace(line)] {
+			kept = append(kept, line)
+		}
+	}
+	content = strings.Join(kept, "\n")
+
+	missing := missingGitignoreEntries(content, required)
+	if len(missing) == 0 {
+		return content
+	}
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return content + strings.Join(missing, "\n") + "\n"
 }
 
 func verifyStarfleetAIGitignore(b *Bootstrap) (bool, string) {
@@ -1227,7 +1274,7 @@ func verifyStarfleetAIGitignore(b *Bootstrap) (bool, string) {
 	if err != nil {
 		return false, "missing .starfleet-ai/.gitignore"
 	}
-	if missing := missingGitignoreEntries(string(data)); len(missing) > 0 {
+	if missing := missingGitignoreEntries(string(data), gitignoreRequiredEntries()); len(missing) > 0 {
 		return false, fmt.Sprintf(".starfleet-ai/.gitignore misses %d entries (e.g. %s)", len(missing), missing[0])
 	}
 	return true, "present, up to date"
@@ -1240,50 +1287,54 @@ func fixStarfleetAIGitignore(b *Bootstrap) error {
 		// File doesn't exist, create it from template
 		return os.WriteFile(path, []byte(starfleetAIGitignoreContent), 0o644)
 	}
-	// Append the entries the template has but the installed file lacks.
-	// Idempotent — keeps any local additions intact.
-	missing := missingGitignoreEntries(string(data))
-	if len(missing) == 0 {
+	// Merge required entries without disturbing local additions.
+	updated := mergeGitignoreEntries(string(data), gitignoreRequiredEntries(), nil)
+	if updated == string(data) {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if !strings.HasSuffix(string(data), "\n") {
-		if _, err := f.WriteString("\n"); err != nil {
-			return err
-		}
-	}
-	_, err = f.WriteString(strings.Join(missing, "\n") + "\n")
-	return err
+	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
-func verifyGitignoreClaudeHooks(b *Bootstrap) (bool, string) {
+func verifyRootGitignore(b *Bootstrap) (bool, string) {
 	path := filepath.Join(b.Root, ".gitignore")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, fmt.Sprintf("missing .gitignore: %v", err)
 	}
-	if strings.Contains(string(data), gitignoreClaudeHooksEntry) {
-		return true, "present"
+	required, err := rootGitignoreRequiredEntries()
+	if err != nil {
+		return false, err.Error()
 	}
-	return false, "missing /.claude/hooks/ entry in .gitignore"
+	content := string(data)
+	missing := missingGitignoreEntries(content, required)
+	for _, line := range strings.Split(content, "\n") {
+		for _, old := range rootGitignoreObsoleteEntries {
+			if strings.TrimSpace(line) == old {
+				return false, "contains obsolete broad Starfleetctl ignore rule"
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return false, fmt.Sprintf("missing managed entries: %s", strings.Join(missing, ", "))
+	}
+	return true, "present, exact managed files only"
 }
 
-func fixGitignoreClaudeHooks(b *Bootstrap) error {
+func fixRootGitignore(b *Bootstrap) error {
 	path := filepath.Join(b.Root, ".gitignore")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("reading .gitignore: %w", err)
 	}
-	content := string(data)
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
+	required, err := rootGitignoreRequiredEntries()
+	if err != nil {
+		return err
 	}
-	content += gitignoreClaudeHooksEntry + "\n"
-	return os.WriteFile(path, []byte(content), 0o644)
+	updated := mergeGitignoreEntries(string(data), required, rootGitignoreObsoleteEntries)
+	if updated == string(data) {
+		return nil
+	}
+	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
 const webYamlTemplate = `# starfleetctl web server configuration
