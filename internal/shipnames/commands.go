@@ -17,13 +17,14 @@ import (
 	"github.com/metux/starfleetctl/internal/fsutil"
 )
 
-// DoAssignFlagship implements `ship-names assign flagship`: reserve
-// the flagship name specifically, unlocked (matches bash — only the general
-// assignment path takes .assign.lock).
+// DoAssignFlagship reserves the flagship name under the shared assignment lock.
 func (r *Registry) DoAssignFlagship() error {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
 		return err
 	}
+	lh, err := r.assignLock()
+	if err != nil { return err }
+	defer lh.Close()
 	name := FlagshipName(r.Root)
 	path, err := r.shipFile(name)
 	if err != nil {
@@ -63,9 +64,26 @@ func currentTTY() string {
 	return ""
 }
 
-// isPIDDead returns true if the given PID is not running.
+// isPIDDead reports whether a PID is definitely gone. EPERM means the
+// process exists but is not signalable by this user, so it remains reserved.
 func isPIDDead(pid int) bool {
-	return syscall.Kill(pid, 0) != nil
+	if pid <= 0 {
+		return true
+	}
+	return syscall.Kill(pid, 0) == syscall.ESRCH
+}
+
+// reservationActive checks both the reservation owner and the OpenCode PID
+// recorded in comms status. Detached launches outlive their short-lived parent.
+func (r *Registry) reservationActive(name, data string) bool {
+	pid, _, _ := parseReservation(data)
+	if pid > 0 && !isPIDDead(pid) {
+		return true
+	}
+	if rec, ok := r.loadStatusMap()[name]; ok && rec.PID > 0 && !isPIDDead(rec.PID) {
+		return true
+	}
+	return false
 }
 
 // parseReservation parses a reservation file into its components.
@@ -109,14 +127,11 @@ func (r *Registry) ttyScan() string {
 		if err != nil {
 			continue
 		}
-		pid, _, tty := parseReservation(string(data))
-		if tty != myTTY {
+		_, _, tty := parseReservation(string(data))
+		if tty != myTTY || r.reservationActive(e.Name(), string(data)) {
 			continue
 		}
-		if pid > 0 && !isPIDDead(pid) {
-			continue
-		}
-		// Dead PID on same TTY — reclaim this name
+		// No live reservation owner or OpenCode process remains on this TTY.
 		return e.Name()
 	}
 	return ""
@@ -127,9 +142,8 @@ func (r *Registry) ttyScan() string {
 // reuse a reservation whose PID is dead and whose TTY matches the current
 // terminal (supports restart cycles without wasting ship names).
 //
-// A name is considered "free" if either:
-//   - No reservation file exists, OR
-//   - Reservation exists but the ship's comms status is stale/missing (dead ship)
+// An existing reservation is reclaimable only when neither its owner PID nor
+// the OpenCode PID recorded in comms status is alive.
 func (r *Registry) AssignName() (string, error) {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
 		return "", err
@@ -156,9 +170,6 @@ func (r *Registry) AssignName() (string, error) {
 		return "", err
 	}
 
-	// Load current status records to check if a reserved name is actually alive.
-	statusMap := r.loadStatusMap()
-
 	for _, name := range names {
 		path, err := r.shipFile(name)
 		if err != nil {
@@ -172,15 +183,12 @@ func (r *Registry) AssignName() (string, error) {
 			}
 			return name, nil
 		}
-		// Reservation file exists — check if ship is actually alive via comms status
-		if rec, ok := statusMap[name]; ok {
-			// Status exists — check if it's stale (using same logic as comms.Bus.stale)
-			if !r.isStale(rec.Epoch, rec.State) {
-				// Ship is alive — name is taken
-				continue
-			}
+		// Keep the name while either the runner or its OpenCode client lives.
+		data, readErr := os.ReadFile(path)
+		if readErr != nil || r.reservationActive(name, string(data)) {
+			continue
 		}
-		// No status or stale status — ship is dead, reclaim the name
+		// Both processes are gone; reclaim the stale reservation.
 		if err := writeReservation(path); err != nil {
 			return "", err
 		}
@@ -252,20 +260,28 @@ func writeReservation(path string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-// Reserve atomically creates (or keeps) a reservation file for name, so the
-// name is treated as taken. It is idempotent: an existing reservation is left
-// untouched. Used when a caller pre-allocates a ship name and wants starfleetctl
-// to record the reservation on its behalf.
+// Reserve exclusively claims name. All reservation mutations share the
+// assignment lock so explicit and automatic starts cannot race each other.
 func (r *Registry) Reserve(name string) error {
 	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
 		return err
 	}
+	lh, err := r.assignLock()
+	if err != nil {
+		return err
+	}
+	defer lh.Close()
 	path, err := r.shipFile(name)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(path); err == nil {
-		return nil // already reserved
+	data, readErr := os.ReadFile(path)
+	if readErr == nil {
+		if r.reservationActive(name, string(data)) {
+			return fmt.Errorf("ship name %q is already in use", name)
+		}
+	} else if !os.IsNotExist(readErr) {
+		return readErr
 	}
 	return writeReservation(path)
 }
@@ -288,10 +304,16 @@ func (r *Registry) DoRelease(name string) error {
 	if name == "" {
 		return fmt.Errorf("release: name required")
 	}
-	path, err := r.shipFile(name)
+	if err := os.MkdirAll(r.ShipsDir, 0o755); err != nil {
+		return err
+	}
+	lh, err := r.assignLock()
 	if err != nil {
 		return err
 	}
+	defer lh.Close()
+	path, err := r.shipFile(name)
+	if err != nil { return err }
 	_ = os.Remove(path) // rm -f: missing file is not an error
 	return nil
 }
@@ -357,12 +379,15 @@ func (r *Registry) DoGC() error {
 		}
 		return err
 	}
+	lh, err := r.assignLock()
+	if err != nil {
+		return err
+	}
+	defer lh.Close()
+
 	var names []string
 	for _, e := range entries {
-		if !e.Type().IsRegular() {
-			continue
-		}
-		if e.Name() == ".assign.lock" {
+		if !e.Type().IsRegular() || e.Name() == ".assign.lock" {
 			continue
 		}
 		names = append(names, e.Name())
@@ -371,11 +396,15 @@ func (r *Registry) DoGC() error {
 
 	removed := 0
 	for _, name := range names {
-		statusFile := filepath.Join(r.StatusDir, name+".tsv")
-		if _, err := os.Stat(statusFile); err != nil {
-			if path, perr := r.shipFile(name); perr == nil {
-				_ = os.Remove(path)
-			}
+		path, err := r.shipFile(name)
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || r.reservationActive(name, string(data)) {
+			continue
+		}
+		if err := os.Remove(path); err == nil {
 			fmt.Printf("ship-names: gc: released stale reservation '%s'\n", name)
 			removed++
 		}
