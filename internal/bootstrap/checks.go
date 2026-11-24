@@ -1156,16 +1156,36 @@ var rootGitignoreObsoleteEntries = []string{
 }
 
 // rootGitignoreRequiredEntries lists only files installed by starfleetctl.
-// User-created hooks in the same directory remain trackable.
+// User-created hooks and plugins in the same directories remain trackable.
 func rootGitignoreRequiredEntries() ([]string, error) {
-	entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, claudeHooksSubdir))
-	if err != nil {
-		return nil, fmt.Errorf("reading embedded Claude hooks: %w", err)
-	}
 	var required []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			required = append(required, "/.claude/hooks/"+entry.Name())
+	for _, source := range []struct {
+		subdir string
+		prefix string
+		include func(string) bool
+	}{
+		{
+			subdir: claudeHooksSubdir,
+			prefix: "/.claude/hooks/",
+			include: func(string) bool { return true },
+		},
+		{
+			subdir: opencodePluginsSubdir,
+			prefix: "/.opencode/plugins/",
+			include: isOpencodePluginAsset,
+		},
+	} {
+		entries, err := fs.ReadDir(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, source.subdir))
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("reading embedded %s: %w", source.subdir, err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && source.include(entry.Name()) {
+				required = append(required, source.prefix+entry.Name())
+			}
 		}
 	}
 	return required, nil
