@@ -238,6 +238,17 @@ func TestRootGitignoreManagedEntriesAreNarrowAndMerged(t *testing.T) {
 	if !strings.Contains(content, "/.claude/hooks/agent-permission-hook\n") {
 		t.Fatalf("managed hook entry missing: %q", content)
 	}
+	for _, managed := range []string{
+		"/.opencode/plugins/starfleet-dispatch.ts",
+		"/.opencode/plugins/session-resolution.mjs",
+	} {
+		if !strings.Contains(content, managed+"\n") {
+			t.Errorf("managed OpenCode asset entry %q missing: %q", managed, content)
+		}
+	}
+	if strings.Contains(content, "/.opencode/plugins/\n") {
+		t.Fatalf("broad OpenCode plugins directory rule was added: %q", content)
+	}
 	if !strings.Contains(content, "/.claude/hooks/my-custom-hook") {
 		t.Fatalf("user hook rule was not preserved: %q", content)
 	}
