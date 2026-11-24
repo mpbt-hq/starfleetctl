@@ -6,39 +6,44 @@ import assert from 'node:assert/strict'
 import { resolveLatestShipSession } from './session-resolution.mjs'
 
 const root = '/workspace/fleet'
-const voyager = { id: 'ses-voyager', title: 'Voyager', directory: root, updated: 100 }
+const voyager = { id: 'ses-voyager', title: 'Voyager', directory: root, time: { created: 10, updated: 100 } }
 
-test('recovers a unique ship session from SDK body wrapper', () => {
+test('recovers a unique ship session from the actual OpenCode Session schema', () => {
   assert.equal(resolveLatestShipSession({ body: { data: [voyager] } }, 'Voyager', root), 'ses-voyager')
 })
 
-test('recovers a unique ship session from direct session list', () => {
-  assert.equal(resolveLatestShipSession({ sessions: [voyager] }, 'Voyager', root), 'ses-voyager')
+test('recovers a unique ship session from a direct session list', () => {
+  assert.equal(resolveLatestShipSession([voyager], 'Voyager', root), 'ses-voyager')
 })
 
 test('selects the most recently updated session and leaves older sessions alone', () => {
-  const older = { ...voyager, id: 'ses-voyager-old', updated: 100 }
-  const newer = { ...voyager, id: 'ses-voyager-new', updated: 200 }
+  const older = { ...voyager, id: 'ses-voyager-old', time: { created: 1, updated: 100 } }
+  const newer = { ...voyager, id: 'ses-voyager-new', time: { created: 2, updated: 200 } }
   assert.equal(resolveLatestShipSession([newer, older], 'Voyager', root), 'ses-voyager-new')
 })
 
+test('supports legacy top-level updated timestamps', () => {
+  const legacy = { id: 'ses-voyager-legacy', title: 'Voyager', directory: root, updated: 100 }
+  assert.equal(resolveLatestShipSession([legacy], 'Voyager', root), 'ses-voyager-legacy')
+})
+
 test('does not choose arbitrarily when newest timestamps are tied', () => {
-  const first = { ...voyager, updated: 200 }
-  const second = { ...voyager, id: 'ses-voyager-2', updated: 200 }
+  const first = { ...voyager, time: { created: 1, updated: 200 } }
+  const second = { ...voyager, id: 'ses-voyager-2', time: { created: 2, updated: 200 } }
   assert.equal(resolveLatestShipSession([first, second], 'Voyager', root), '')
 })
 
 test('refuses to guess when a matching session has no valid update timestamp', () => {
   assert.equal(resolveLatestShipSession([
-    { ...voyager, updated: 200 },
-    { ...voyager, id: 'ses-voyager-unknown', updated: undefined },
+    { ...voyager, time: { created: 1, updated: 200 } },
+    { ...voyager, id: 'ses-voyager-unknown', time: { created: 2 } },
   ], 'Voyager', root), '')
 })
 
 test('ignores a same-title session from another workspace', () => {
   assert.equal(resolveLatestShipSession([
-    { ...voyager, directory: '/workspace/other', updated: 300 },
-    { ...voyager, id: 'ses-voyager-valid', updated: 100 },
+    { ...voyager, directory: '/workspace/other', time: { created: 1, updated: 300 } },
+    { ...voyager, id: 'ses-voyager-valid', time: { created: 2, updated: 100 } },
   ], 'Voyager', root), 'ses-voyager-valid')
 })
 
