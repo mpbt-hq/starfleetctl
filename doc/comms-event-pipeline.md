@@ -187,12 +187,16 @@ from `promptAsync` returning.
    contract. The old inbox wire protocol remains unchanged. Helper packaging
    uses an installed-but-unregistered .mjs module plus a build-only .d.mts
    declaration. Exact-head CI passed: Go build/vet/tests on Go 1.22.x and
-   stable, plugin bundle/typecheck, 59 plugin tests, and bootstrap tests.
-3. **Generic dispatcher:** add one poller, validated event envelope, queue,
-   ordering, and single-flight delivery coordination. Remove hook-local inbox
-   polling only after parity tests exist.
-4. **Go event contract:** add generic event polling and Go-owned prompt
-   formatting. Keep the old inbox path during a compatibility window.
+   stable, plugin bundle/typecheck, 65 plugin tests, and bootstrap tests.
+3. **Shared poller and event dispatcher:** implemented on this branch — both
+   OpenCode hooks call one single-flight inbox reader and coordinator. Startup
+   backlog and live inbox are deduplicated; one adapter claims a message at a
+   time; failed handoffs release the lease; unknown message types remain
+   pending. The shared dispatcher owns command-vs-prompt classification.
+4. **Generic Go event contract:** next — add a versioned event-poll response
+   with Go-owned Comms prompt formatting. Keep the legacy inbox command for
+   older plugin compatibility while migrating the new plugin to the event
+   envelope.
 5. **Lifecycle:** add distinct applied, turn-started, completed, and failed
    reporting with durable idempotency and restart recovery.
 6. **Future actions:** model switch, quit, reset, and similar operations become
