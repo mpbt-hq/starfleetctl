@@ -7,7 +7,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
-import { prepareLegacyInboxPrompt, preparePrompt } from './prompt-preparation.mjs'
+import { prepareLegacyInboxPrompt, preparePrompt, preparePromptEvents } from './prompt-preparation.mjs'
 import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
 
 // ============================================================================
@@ -51,10 +51,40 @@ describe('shared prompt preparation', () => {
         'Process each directive and carry out the requested action.\n\n' +
         'Directive m1 from Enterprise:\nstatus please\n\n' +
         'Directive m2 from Voyager:\ncheck CI\n\n' +
-        '--- end fleet directives ---',
+        '--- end fleet directives ---\n\n',
       ],
       startTurn: true,
     })
+  })
+
+  test('prepares Go-formatted prompt events without adding separators', () => {
+    const prepared = preparePromptEvents([
+      {
+        id: 'e1',
+        type: 'prompt.inject',
+        payload: { prompt: 'first block\\n\\n' },
+        actions: { start_turn: true },
+      },
+      {
+        id: 'e2',
+        type: 'prompt.inject',
+        payload: { prompt: ['second block', '\\n\\n'] },
+        actions: { start_turn: false },
+      },
+    ])
+    assert.deepStrictEqual(prepared, {
+      eventIds: ['e1', 'e2'],
+      parts: ['first block\\n\\n', 'second block', '\\n\\n'],
+      startTurn: true,
+    })
+  })
+
+  test('rejects unsupported or malformed prompt events as a whole batch', () => {
+    assert.equal(preparePromptEvents([{ id: 'e1', type: 'command.execute', payload: { command: 'quit' } }]), null)
+    assert.equal(preparePromptEvents([
+      { id: 'e1', type: 'prompt.inject', payload: { prompt: 'valid' } },
+      { id: 'e2', type: 'prompt.inject', payload: { prompt: 42 } },
+    ]), null)
   })
 
   test('legacy formatter rejects a non-array inbox response', () => {
