@@ -98,7 +98,7 @@ export function createEventCoordinator() {
       }
 
       const response = await pollPromise;
-      return { response, messages: available() };
+      return { response, events: available() };
     },
 
     /** @param {unknown} messages */
