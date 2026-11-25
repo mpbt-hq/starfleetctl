@@ -90,12 +90,12 @@ else
     fi
 fi
 
-# --- 3) focused runtime tests for deterministic session recovery ---
+# --- 3) focused runtime tests for session recovery and plugin identity ---
 if command -v node >/dev/null 2>&1; then
-    if node --test fragments/opencode-plugins/session-resolution.test.mjs; then
-        note "session recovery tests OK"
+    if node --test fragments/opencode-plugins/session-resolution.test.mjs fragments/opencode-plugins/runtime-identity.test.mjs; then
+        note "session recovery and runtime identity tests OK"
     else
-        note "session recovery tests FAILED"
+        note "session recovery and runtime identity tests FAILED"
         FAILED=1
     fi
 else

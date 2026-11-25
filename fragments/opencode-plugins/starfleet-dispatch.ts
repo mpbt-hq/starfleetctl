@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.15'
+const PLUGIN_VERSION = '2.5.16'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -16,8 +16,18 @@ const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
 import { resolveLatestShipSession } from './session-resolution.mjs'
+import { createFirstCommsReporter, createRuntimeIdentity, formatRuntimeIdentity } from './runtime-identity.mjs'
 
 const ROOT = process.cwd()
+
+// Captured at module evaluation, not at the first model turn. OpenCode may
+// reuse an old session after restart without issuing an initial prompt.
+const RUNTIME_IDENTITY = createRuntimeIdentity(
+  PLUGIN_VERSION,
+  process.pid,
+  new Date().toISOString(),
+)
+const reportFirstComms = createFirstCommsReporter(RUNTIME_IDENTITY)
 
 // Generic JSON-RPC to starfleetctl comms dispatch.
 // JSON in via stdin → JSON out. No shell escaping, no text parsing.
@@ -740,9 +750,20 @@ const logPollTimer = setInterval(async () => {
       const msgs = [...boot, ...inboxMsgs]
       const inboxIds = (r.messages || []).map((m: any) => m.id).join(',')
       if ((r.messages || []).length > 0 || boot.length > 0) {
-        tickLog(`inbox-poll ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inboxIds}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
+        const runtime = formatRuntimeIdentity(RUNTIME_IDENTITY)
+        tickLog(`inbox-poll ${runtime} ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inboxIds}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
       }
       if (msgs.length === 0) return
+
+      // Emit one process-scoped receipt on the first actual Comms message.
+      // This happens before session resolution/promptAsync and therefore also
+      // works when the reused session has not produced a model turn yet.
+      const firstCommsReport = reportFirstComms({
+        ship: aid(),
+        sessionID: currentSessionID,
+        messageIDs: msgs.map((m: any) => m.id),
+      })
+      if (firstCommsReport) tickLog(firstCommsReport)
 
       const injectable: any[] = []
       for (const msg of msgs) {
@@ -766,13 +787,13 @@ const logPollTimer = setInterval(async () => {
       const targetSid = await resolveSessionId()
       const ids = injectable.map((m: any) => m.id).join(',')
       if (!targetSid) {
-        tickLog(`handoff-skip ship=${aid()} sid=<missing|unresolved> ids=[${ids}] reason=no-latest-ship-session`)
+        tickLog(`handoff-skip ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=<missing|unresolved> ids=[${ids}] reason=no-latest-ship-session`)
         return
       }
 
       const lines = injectable.map((m: any) =>
         `Directive ${m.id} from ${m.from}:\n${m.text}`)
-      tickLog(`handoff-prompt ship=${aid()} sid=${targetSid} ids=[${ids}] calling=promptAsync`)
+      tickLog(`handoff-prompt ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${targetSid} ids=[${ids}] calling=promptAsync`)
       try {
         const res = await client.session.promptAsync({
           path: { id: targetSid },

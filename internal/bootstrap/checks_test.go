@@ -163,19 +163,21 @@ func TestFixOpencodePluginsInstallsModuleAssets(t *testing.T) {
 		t.Fatalf("fixOpencodePlugins: %v", err)
 	}
 
-	const helperName = "session-resolution.mjs"
-	embeddedPath := filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, helperName)
-	want, err := fs.ReadFile(starfleetctl.Fragments, embeddedPath)
-	if err != nil {
-		t.Fatalf("read embedded helper: %v", err)
-	}
-	installedPath := filepath.Join(root, ".opencode", "plugins", helperName)
-	got, err := os.ReadFile(installedPath)
-	if err != nil {
-		t.Fatalf("read installed helper: %v", err)
-	}
-	if string(got) != string(want) {
-		t.Fatal("installed helper differs from embedded source")
+	helperNames := []string{"session-resolution.mjs", "runtime-identity.mjs"}
+	for _, helperName := range helperNames {
+		embeddedPath := filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, helperName)
+		want, err := fs.ReadFile(starfleetctl.Fragments, embeddedPath)
+		if err != nil {
+			t.Fatalf("read embedded helper %s: %v", helperName, err)
+		}
+		installedPath := filepath.Join(root, ".opencode", "plugins", helperName)
+		got, err := os.ReadFile(installedPath)
+		if err != nil {
+			t.Fatalf("read installed helper %s: %v", helperName, err)
+		}
+		if string(got) != string(want) {
+			t.Fatalf("installed helper %s differs from embedded source", helperName)
+		}
 	}
 
 	if ok, detail := verifyOpencodePlugins(b); !ok {
@@ -195,16 +197,19 @@ func TestFixOpencodePluginsInstallsModuleAssets(t *testing.T) {
 		t.Fatalf("parse opencode config: %v", err)
 	}
 	for _, spec := range config.Plugin {
-		if strings.Contains(spec, helperName) {
-			t.Fatalf("helper module must not be registered as a plugin: %q", spec)
+		for _, helperName := range helperNames {
+			if strings.Contains(spec, helperName) {
+				t.Fatalf("helper module must not be registered as a plugin: %q", spec)
+			}
 		}
 	}
 
-	if err := os.Remove(installedPath); err != nil {
+	missingHelper := filepath.Join(root, ".opencode", "plugins", helperNames[1])
+	if err := os.Remove(missingHelper); err != nil {
 		t.Fatalf("remove installed helper: %v", err)
 	}
-	if ok, detail := verifyOpencodePlugins(b); ok || !strings.Contains(detail, helperName) {
-		t.Fatalf("verify with missing helper = (%v, %q), want missing %s", ok, detail, helperName)
+	if ok, detail := verifyOpencodePlugins(b); ok || !strings.Contains(detail, helperNames[1]) {
+		t.Fatalf("verify with missing helper = (%v, %q), want missing %s", ok, detail, helperNames[1])
 	}
 }
 
