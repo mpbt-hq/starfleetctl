@@ -8,7 +8,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
 import { prepareLegacyInboxPrompt, preparePrompt } from './prompt-preparation.mjs'
-import { createInboxCoordinator, isSupportedInboxMessage } from './inbox-coordinator.mjs'
+import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
@@ -58,7 +58,7 @@ describe('shared prompt preparation', () => {
   })
 
   test('legacy formatter rejects a non-array inbox response', () => {
-    assert.equal(prepareLegacyInboxPrompt({ messages: [] }), null)
+    assert.equal(prepareLegacyInboxPrompt({ events: [] }), null)
   })
 
   test('legacy formatter rejects a partially malformed batch without dropping peers', () => {
@@ -71,44 +71,44 @@ describe('shared prompt preparation', () => {
 
 describe('shared inbox coordinator', () => {
   test('merges startup backlog and live inbox without duplicate IDs', async () => {
-    const coordinator = createInboxCoordinator()
-    const startup = { id: 'm1', from: 'Enterprise', text: 'status', type: 'command' }
+    const coordinator = createEventCoordinator()
+    const startup = { id: 'm1', source: { from: 'Enterprise' }, payload: { command: 'status' }, type: 'command.execute' }
     coordinator.seed([startup])
 
     const result = await coordinator.poll(async () => ({
       ok: true,
-      messages: [
-        { id: 'm1', from: 'Enterprise', text: 'status', type: 'ship' },
-        { id: 'm2', from: 'Voyager', text: 'check CI', type: 'message' },
+      events: [
+        { id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' },
+        { id: 'm2', source: { from: 'Voyager' }, payload: { prompt: 'check CI' }, type: 'prompt.inject' },
       ],
     }))
 
-    assert.deepStrictEqual(result.messages.map((message) => message.id), ['m1', 'm2'])
-    assert.equal(result.messages[0].type, 'command')
-    assert.equal(result.messages[1].type, 'message')
+    assert.deepStrictEqual(result.events.map((message) => message.id), ['m1', 'm2'])
+    assert.equal(result.events[0].type, 'command')
+    assert.equal(result.events[1].type, 'message')
   })
 
   test('refreshes pending order from the current inbox response', async () => {
-    const coordinator = createInboxCoordinator()
+    const coordinator = createEventCoordinator()
     coordinator.seed([
-      { id: 'm1', from: 'Enterprise', text: 'one' },
-      { id: 'm2', from: 'Voyager', text: 'two' },
+      { id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'one' }, type: 'prompt.inject' },
+      { id: 'm2', source: { from: 'Voyager' }, payload: { prompt: 'two' }, type: 'prompt.inject' },
     ])
 
     const result = await coordinator.poll(async () => ({
       ok: true,
-      messages: [
-        { id: 'm3', from: 'Discovery', text: 'three' },
-        { id: 'm1', from: 'Enterprise', text: 'one' },
-        { id: 'm2', from: 'Voyager', text: 'two' },
+      events: [
+        { id: 'm3', source: { from: 'Discovery' }, payload: { prompt: 'three' }, type: 'prompt.inject' },
+        { id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'one' }, type: 'prompt.inject' },
+        { id: 'm2', source: { from: 'Voyager' }, payload: { prompt: 'two' }, type: 'prompt.inject' },
       ],
     }))
 
-    assert.deepStrictEqual(result.messages.map((message) => message.id), ['m3', 'm1', 'm2'])
+    assert.deepStrictEqual(result.events.map((message) => message.id), ['m3', 'm1', 'm2'])
   })
 
   test('coalesces concurrent inbox reads and leases each message once', async () => {
-    const coordinator = createInboxCoordinator()
+    const coordinator = createEventCoordinator()
     let calls = 0
     let finishRead: (value: any) => void = () => {}
     const readInbox = () => {
@@ -120,64 +120,64 @@ describe('shared inbox coordinator', () => {
     const secondPoll = coordinator.poll(readInbox)
     await Promise.resolve()
     assert.equal(calls, 1)
-    finishRead({ ok: true, messages: [{ id: 'm1', from: 'Enterprise', text: 'status' }] })
+    finishRead({ ok: true, events: [{ id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' }] })
 
     const [first, second] = await Promise.all([firstPoll, secondPoll])
-    assert.deepStrictEqual(first.messages.map((message) => message.id), ['m1'])
-    assert.deepStrictEqual(second.messages.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(first.events.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(second.events.map((message) => message.id), ['m1'])
 
-    const firstClaim = coordinator.claim(first.messages)
-    const secondClaim = coordinator.claim(second.messages)
+    const firstClaim = coordinator.claim(first.events)
+    const secondClaim = coordinator.claim(second.events)
     assert.deepStrictEqual(firstClaim.map((message) => message.id), ['m1'])
     assert.deepStrictEqual(secondClaim, [])
 
     coordinator.release(firstClaim.map((message) => message.id))
-    const retryClaim = coordinator.claim(second.messages)
+    const retryClaim = coordinator.claim(second.events)
     assert.deepStrictEqual(retryClaim.map((message) => message.id), ['m1'])
     coordinator.markSubmitted(retryClaim.map((message) => message.id))
 
     const nextPoll = await coordinator.poll(async () => ({
       ok: true,
-      messages: [{ id: 'm1', from: 'Enterprise', text: 'status' }],
+      events: [{ id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' }],
     }))
-    assert.deepStrictEqual(nextPoll.messages, [])
+    assert.deepStrictEqual(nextPoll.events, [])
   })
 
   test('failed live poll does not discard startup backlog', async () => {
-    const coordinator = createInboxCoordinator()
-    coordinator.seed([{ id: 'm1', from: 'Enterprise', text: 'status' }])
+    const coordinator = createEventCoordinator()
+    coordinator.seed([{ id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' }])
 
     const result = await coordinator.poll(async () => ({
       ok: false,
       error: 'temporary dispatch failure',
-      messages: [],
+      events: [],
     }))
 
     assert.equal(result.response.ok, false)
-    assert.deepStrictEqual(result.messages.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(result.events.map((message) => message.id), ['m1'])
   })
 
   test('unknown message types stay unsupported and can remain retryable', () => {
-    assert.equal(isSupportedInboxMessage({ id: 'm1', type: 'ship' }), true)
-    assert.equal(isSupportedInboxMessage({ id: 'm2', type: 'message' }), true)
-    assert.equal(isSupportedInboxMessage({ id: 'm3', type: 'command' }), true)
-    assert.equal(isSupportedInboxMessage({ id: 'm4' }), true)
-    assert.equal(isSupportedInboxMessage({ id: 'm5', type: 'future-unknown' }), false)
-    assert.equal(isSupportedInboxMessage({ id: 'm6', type: 42 }), false)
+    assert.equal(isSupportedEvent({ id: 'm1', type: 'ship' }), true)
+    assert.equal(isSupportedEvent({ id: 'm2', type: 'message' }), true)
+    assert.equal(isSupportedEvent({ id: 'm3', type: 'command' }), true)
+    assert.equal(isSupportedEvent({ id: 'm4' }), true)
+    assert.equal(isSupportedEvent({ id: 'm5', type: 'future-unknown' }), false)
+    assert.equal(isSupportedEvent({ id: 'm6', type: 42 }), false)
   })
 
   test('unsupported message types remain pending after an adapter releases its lease', async () => {
-    const coordinator = createInboxCoordinator()
-    const unsupported = { id: 'm-unknown', from: 'Enterprise', text: 'future event', type: 'future-unknown' }
-    const first = await coordinator.poll(async () => ({ ok: true, messages: [unsupported] }))
-    const claimed = coordinator.claim(first.messages)
+    const coordinator = createEventCoordinator()
+    const unsupported = { id: 'm-unknown', source: { from: 'Enterprise' }, payload: {}, type: 'future-unknown' }
+    const first = await coordinator.poll(async () => ({ ok: true, events: [unsupported] }))
+    const claimed = coordinator.claim(first.events)
 
     assert.equal(claimed.length, 1)
-    assert.equal(isSupportedInboxMessage(claimed[0]), false)
+    assert.equal(isSupportedEvent(claimed[0]), false)
     coordinator.release(claimed.map((message) => message.id))
 
-    const retry = await coordinator.poll(async () => ({ ok: true, messages: [] }))
-    assert.deepStrictEqual(retry.messages, [unsupported])
+    const retry = await coordinator.poll(async () => ({ ok: true, events: [] }))
+    assert.deepStrictEqual(retry.events, [unsupported])
   })
 })
 
@@ -638,10 +638,10 @@ comms: directive m124 from 'Enterprise' → TestShip
     test('spooled inbox message is found by poller and not dropped by submitted/seen/bootBacklog filters', () => {
       const submitted = new Set<string>(['m-seen'])
       const bootBacklog = [{ id: 'm-boot', from: 'Enterprise', text: 'boot', type: 'ship' }]
-      const inbox = { messages: [{ id: 'm-spool', from: 'ChatGPT', text: 'hello', type: 'ship' }, { id: 'm-seen', from: 'X', text: 'old', type: 'ship' }] }
+      const inbox = { events: [{ id: 'm-spool', from: 'ChatGPT', text: 'hello', type: 'ship' }, { id: 'm-seen', from: 'X', text: 'old', type: 'ship' }] }
 
       const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
-      const msgs = [...boot, ...(inbox.messages || []).filter((m: any) => !submitted.has(m.id))]
+      const msgs = [...boot, ...(inbox.events || []).filter((m: any) => !submitted.has(m.id))]
       const ids = msgs.map((m: any) => m.id)
 
       assert.deepStrictEqual(ids, ['m-boot', 'm-spool'])
@@ -823,7 +823,7 @@ comms: directive m124 from 'Enterprise' → TestShip
     })
 
     test('true commands keep command behavior (confirmed as command, not injected)', () => {
-      const msg = { id: 'mc1', from: 'Enterprise', text: 'status', type: 'command' }
+      const msg = { id: 'mc1', source: { from: 'Enterprise' }, payload: { command: 'status' }, type: 'command.execute' }
       const r = runTransform({ sid: 'ses_voyager', msgs: [msg] })
       assert.deepStrictEqual(r.commands, ['mc1'])
       assert.deepStrictEqual(r.injected, [])
