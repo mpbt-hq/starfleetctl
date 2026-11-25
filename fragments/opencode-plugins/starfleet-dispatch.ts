@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.18'
+const PLUGIN_VERSION = '2.5.19'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -464,8 +464,6 @@ export const plugin = async ({ client, $ }: any) => {
     }
   }
 
-  // One event dispatcher handles command-vs-prompt classification for both
-  // OpenCode adapters. Unknown message types remain pending and retryable.
   // One event dispatcher handles typed command events and prompt events for
   // both adapters. Prompt text is already composed by Go; this layer only
   // routes commands and returns prompt.inject events to the adapters.
