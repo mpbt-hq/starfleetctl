@@ -15,7 +15,7 @@ import { prepareLegacyInboxPrompt, preparePrompt } from './prompt-preparation'
 
 describe('shared prompt preparation', () => {
   test('accepts one complete prompt string without rewriting it', () => {
-    const prompt = '--- directives ---\\nDirective m1 from Enterprise:\\nstatus\\n--- end ---'
+    const prompt = '--- directives ---\nDirective m1 from Enterprise:\nstatus\n--- end ---'
     assert.deepStrictEqual(preparePrompt(['evt-1'], prompt, true), {
       eventIds: ['evt-1'],
       parts: [prompt],
@@ -46,10 +46,10 @@ describe('shared prompt preparation', () => {
     assert.deepStrictEqual(prepared, {
       eventIds: ['m1', 'm2'],
       parts: [
-        '--- fleet directives (from other ships via comms) ---\\n' +
-        'Process each directive and carry out the requested action.\\n\\n' +
-        'Directive m1 from Enterprise:\\nstatus please\\n\\n' +
-        'Directive m2 from Voyager:\\ncheck CI\\n\\n' +
+        '--- fleet directives (from other ships via comms) ---\n' +
+        'Process each directive and carry out the requested action.\n\n' +
+        'Directive m1 from Enterprise:\nstatus please\n\n' +
+        'Directive m2 from Voyager:\ncheck CI\n\n' +
         '--- end fleet directives ---',
       ],
       startTurn: true,
