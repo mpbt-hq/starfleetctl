@@ -18,6 +18,7 @@ import { execSync } from 'node:child_process'
 import { resolveLatestShipSession } from './session-resolution.mjs'
 import { normalizeInboxResponse } from './inbox-response.mjs'
 import { prepareLegacyInboxPrompt } from './prompt-preparation.mjs'
+import { createInboxCoordinator, isSupportedInboxMessage } from './inbox-coordinator.mjs'
 import { createFirstCommsReporter, createRuntimeIdentity, formatRuntimeIdentity } from './runtime-identity.mjs'
 
 const ROOT = process.cwd()
@@ -160,8 +161,7 @@ export const plugin = async ({ client, $ }: any) => {
 
   let tuiReady = false
   let sessionNeedsIdentity = true
-  let submitted = new Set<string>()
-  const bootBacklog: any[] = [] // directives pending at start (acked by init) — must be delivered, not dropped
+  const inboxCoordinator = createInboxCoordinator()
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
@@ -463,6 +463,39 @@ export const plugin = async ({ client, $ }: any) => {
     }
   }
 
+  // One event dispatcher handles command-vs-prompt classification for both
+  // OpenCode adapters. Unknown message types remain pending and retryable.
+  async function dispatchMessages(
+    messages: any[],
+    sessionIDProvider: () => Promise<string>,
+    mode: 'poll' | 'transform',
+  ): Promise<any[]> {
+    const injectable: any[] = []
+    for (const msg of messages) {
+      if (!isSupportedInboxMessage(msg)) {
+        tickLog(`unknown message type=${String(msg?.type)} from=${msg?.from} id=${msg?.id} (left pending)`)
+        continue
+      }
+      appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${String(msg.text || '').slice(0, 80)}`)
+      const sid = await sessionIDProvider()
+      let handled = false
+      try {
+        handled = await handleMessage(msg, client, sid)
+      } catch (e) {
+        tickLog(`handoff-${mode}-dispatch-error ship=${aid()} id=${msg.id} error=${String(e).slice(0, 180)}`)
+        continue
+      }
+      if (handled) {
+        inboxCoordinator.markSubmitted([msg.id])
+        const sr = bus({ cmd: 'seen_mark', id: msg.id })
+        tickLog(`handoff-${mode}-command ship=${aid()} sid=${sid || '-'} id=${msg.id} seen=${!!sr?.ok}`)
+      } else {
+        injectable.push(msg)
+      }
+    }
+    return injectable
+  }
+
   // Execute a policy action returned by starfleetctl error-handle.
   // This is the ONLY place recovery actions are performed — the plugin is a
   // thin detector + executor, all policy logic lives in the Go binary.
@@ -665,9 +698,7 @@ const logPollTimer = setInterval(async () => {
   if (!init.ok) {
     tickLog(`comms-init-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${init.error.slice(0, 180)}`)
   }
-  for (const m of init.messages) {
-    if (m && m.id && !submitted.has(m.id)) bootBacklog.push({ id: m.id, from: m.from, text: m.text, type: 'ship' })
-  }
+  inboxCoordinator.seed(init.messages)
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -737,6 +768,17 @@ const logPollTimer = setInterval(async () => {
     return ''
   }
 
+  // All adapters go through this one poller. Concurrent calls share one
+  // in-flight CLI read; the coordinator retains unsubmitted messages and
+  // leases each message to only one adapter.
+  const pollInbox = () => inboxCoordinator.poll(() => {
+    try {
+      return normalizeInboxResponse(bus({ cmd: 'inbox' }))
+    } catch (e) {
+      return { ok: false, error: String(e), messages: [] }
+    }
+  })
+
   let pollRunning = false
   let lastInboxPollDiagnosticAt = 0
   let lastInboxPollDiagnosticState = ''
@@ -749,28 +791,25 @@ const logPollTimer = setInterval(async () => {
   }
 
   const poll = async () => {
-    // Comms polling is deliberately independent of TUI/session lifecycle
-    // events. resolveSessionId() below handles reused sessions and retries
-    // when no safe session can be identified.
+    // The timer is only one caller of the shared poller; the current-turn hook
+    // uses the same coordinator and cannot claim the same message concurrently.
     if (pollRunning) return
     pollRunning = true
+    let claimedIds: string[] = []
     try {
-      const inbox = normalizeInboxResponse(bus({ cmd: 'inbox' }))
+      const { response: inbox, messages: available } = await pollInbox()
       if (!inbox.ok) {
-        logInboxPollDiagnostic('error', `error=${inbox.error.replace(/\s+/g, ' ').slice(0, 180)}`)
+        logInboxPollDiagnostic('error', `error=${String(inbox.error || 'unknown').replace(/\s+/g, ' ').slice(0, 180)}`)
       }
-      // A failed live inbox read must not block messages captured at startup.
       const inboxMessages = inbox.ok ? inbox.messages : []
-      const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
-      const inboxMsgs = inboxMessages.filter((m: any) => !submitted.has(m.id))
-      const msgs = [...boot, ...inboxMsgs]
+      const msgs = inboxCoordinator.claim(available)
+      claimedIds = msgs.map((m: any) => m.id)
       const inboxIds = inboxMessages.map((m: any) => m.id).join(',')
-      if (inboxMessages.length > 0 || boot.length > 0) {
-        const runtime = formatRuntimeIdentity(RUNTIME_IDENTITY)
-        tickLog(`inbox-poll ${runtime} ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inboxIds}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
+      if (inboxMessages.length > 0 || msgs.length > 0) {
+        tickLog(`inbox-poll ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inboxIds}] pending=[${claimedIds.join(',')}]`)
       }
       if (msgs.length === 0) {
-        logInboxPollDiagnostic('idle', 'messages=0 boot=0')
+        logInboxPollDiagnostic('idle', 'messages=0 pending=0')
         return
       }
       lastInboxPollDiagnosticState = 'messages'
@@ -785,23 +824,7 @@ const logPollTimer = setInterval(async () => {
       })
       if (firstCommsReport) tickLog(firstCommsReport)
 
-      const injectable: any[] = []
-      for (const msg of msgs) {
-        appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${msg.text.slice(0, 80)}`)
-        const sidForCmd = await resolveSessionId()
-        // handleMessage: type=command → execute, type=ship/user/control → false (inject)
-        if (await handleMessage(msg, client, sidForCmd)) {
-          // Command executed/accepted by handler: acknowledge it.
-          const sr = bus({ cmd: 'seen_mark', id: msg.id })
-          submitted.add(msg.id)
-          tickLog(`handoff-command ship=${aid()} sid=${sidForCmd || '-'} id=${msg.id} seen=${!!sr?.ok}`)
-          continue
-        }
-        // Not a command: do NOT claim it yet. Claiming (submitted + seen_mark)
-        // before a successful handoff would strand the directive on failure.
-        injectable.push(msg)
-      }
-
+      const injectable = await dispatchMessages(msgs, () => resolveSessionId(), 'poll')
       if (injectable.length === 0) return
 
       const targetSid = await resolveSessionId()
@@ -830,23 +853,19 @@ const logPollTimer = setInterval(async () => {
         })
         const resErr = res && (res as any).error
         if (!resErr) {
+          inboxCoordinator.markSubmitted(prepared.eventIds)
           for (const id of prepared.eventIds) {
-            submitted.add(id)
             const sr = bus({ cmd: 'seen_mark', id })
             tickLog(`handoff-ok ship=${aid()} sid=${targetSid} id=${id} seen=${!!sr?.ok} prompt=${JSON.stringify(res).slice(0, 120)}`)
           }
         } else {
           tickLog(`handoff-fail ship=${aid()} sid=${targetSid} ids=[${ids}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
-          // Keep the known id: opencode session ids change over time, so the
-          // id is only ever learned from chat hooks (never persisted). Dropping
-          // it here made every message undeliverable until the next turn
-          // (handoff-skip reason=no-latest-ship-session). Retries reuse it; a
-          // rotated session is picked up by the next hook.
         }
       } catch (e) {
         tickLog(`handoff-exception ship=${aid()} sid=${targetSid} ids=[${ids}] error=${String(e).slice(0, 200)}`)
       }
     } finally {
+      inboxCoordinator.release(claimedIds)
       pollRunning = false
     }
   }
@@ -905,55 +924,42 @@ const logPollTimer = setInterval(async () => {
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
-      // Fetch inbox and inject new directives. In this hook we are inside the
-      // current turn's system prompt construction for the active session/turn;
-      // appending to output.system injects directives into that turn's model
-      // context. Mark submitted/seen only AFTER a directive is actually injected
-      // (or a command executed) in this confirmed session context, so messages
-      // remain retry-fähig if injection is not possible.
-      const inbox = normalizeInboxResponse(bus({ cmd: 'inbox' }))
+      // Both adapters share the same poller, queue, dispatcher and message
+      // lease. This hook owns only placement into the active turn's system text.
+      const { response: inbox, messages: available } = await pollInbox()
       if (!inbox.ok) {
-        tickLog(`inbox-transform-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${inbox.error.slice(0, 180)}`)
-      }
-      const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
-      const pendingMsgs = [...boot, ...inbox.messages.filter((m: any) => !submitted.has(m.id))]
-      if (inbox.messages.length > 0 || boot.length > 0) {
-        tickLog(`inbox-transform ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inbox.messages.map((m: any) => m.id).join(',')}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
+        tickLog(`inbox-transform-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${String(inbox.error || 'unknown').slice(0, 180)}`)
       }
       const handoffSid = currentSessionID
-      const toInject: any[] = []
-      for (const msg of pendingMsgs) {
-        if (submitted.has(msg.id)) continue
-        const handled = handoffSid ? await handleMessage(msg, client, handoffSid) : false
-        if (handled) {
-          // Real command executed/accepted in the confirmed session context.
-          const sr = bus({ cmd: 'seen_mark', id: msg.id })
-          submitted.add(msg.id)
-          tickLog(`handoff-transform-command ship=${aid()} sid=${handoffSid} id=${msg.id} seen=${!!sr?.ok}`)
-          continue
-        }
-        // Injectable directive (ship/user/control/message or unknown): inject only
-        // when we have a confirmed session context for this turn.
-        if (!handoffSid) {
-          tickLog(`handoff-transform-skip ship=${aid()} sid=<missing> id=${msg.id} reason=no-session-context`)
-          continue
-        }
-        toInject.push(msg)
+      if (available.length > 0) {
+        tickLog(`inbox-transform ship=${aid()} sid=${handoffSid || '-'} pending=[${available.map((m: any) => m.id).join(',')}]`)
       }
-      if (toInject.length > 0) {
-        const prepared = prepareLegacyInboxPrompt(toInject)
-        if (!prepared) {
-          tickLog(`handoff-transform-skip ship=${aid()} sid=${handoffSid} reason=invalid-prompt-payload`)
-          return
+      if (!handoffSid) {
+        if (available.length > 0) {
+          tickLog(`inbox-transform-skip ship=${aid()} sid=<missing> ids=[${available.map((m: any) => m.id).join(',')}] reason=no-session-context`)
         }
-        // Both delivery adapters consume this exact prepared text. The current
-        // turn adapter owns only placement into OpenCode's system context.
-        output.system.push('', prepared.parts.join('\n'))
-        for (const id of prepared.eventIds) {
-          submitted.add(id)
-          const sr = bus({ cmd: 'seen_mark', id })
-          tickLog(`handoff-transform ship=${aid()} sid=${handoffSid} id=${id} seen=${!!sr?.ok} mode=system-inject`)
+        return
+      }
+
+      const claimed = inboxCoordinator.claim(available)
+      const claimedIds = claimed.map((m: any) => m.id)
+      try {
+        const toInject = await dispatchMessages(claimed, async () => handoffSid, 'transform')
+        if (toInject.length > 0) {
+          const prepared = prepareLegacyInboxPrompt(toInject)
+          if (!prepared) {
+            tickLog(`handoff-transform-skip ship=${aid()} sid=${handoffSid} reason=invalid-prompt-payload`)
+            return
+          }
+          output.system.push('', prepared.parts.join('\n'))
+          inboxCoordinator.markSubmitted(prepared.eventIds)
+          for (const id of prepared.eventIds) {
+            const sr = bus({ cmd: 'seen_mark', id })
+            tickLog(`handoff-transform ship=${aid()} sid=${handoffSid} id=${id} seen=${!!sr?.ok} mode=system-inject`)
+          }
         }
+      } finally {
+        inboxCoordinator.release(claimedIds)
       }
     },
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
