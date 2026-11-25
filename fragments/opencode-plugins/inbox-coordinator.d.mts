@@ -28,7 +28,7 @@ export interface EventPollResult {
   events: DispatchEvent[];
 }
 
-export interface InboxCoordinator {
+export interface EventCoordinator {
   seed(events: unknown): void;
   poll(readEvents: () => any | Promise<any>): Promise<EventPollResult>;
   claim(events: unknown): DispatchEvent[];
@@ -36,7 +36,7 @@ export interface InboxCoordinator {
   markSubmitted(ids: unknown): void;
 }
 
-export function createEventCoordinator(): InboxCoordinator;
+export function createEventCoordinator(): EventCoordinator;
 export function isSupportedEvent(event: unknown): boolean;
 export function normalizeEventResponse(raw: unknown): {
   ok: boolean;
