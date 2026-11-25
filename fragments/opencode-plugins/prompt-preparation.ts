@@ -67,7 +67,9 @@ export function prepareLegacyInboxPrompt(messages: unknown): PreparedPrompt | nu
     typeof message.text === 'string'
   );
 
-  if (usable.length === 0) return null;
+  // Never silently omit one malformed inbox entry while confirming its peers.
+  // Keep the entire batch retryable and surface the invalid payload to callers.
+  if (usable.length === 0 || usable.length !== messages.length) return null;
 
   const lines: string[] = [];
   for (const message of usable) {
