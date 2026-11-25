@@ -161,7 +161,7 @@ export const plugin = async ({ client, $ }: any) => {
 
   let tuiReady = false
   let sessionNeedsIdentity = true
-  const eventCoordinator = createInboxCoordinator()
+  const eventCoordinator = createEventCoordinator()
   const unsupportedEventDiagnostics = new Set<string>()
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
