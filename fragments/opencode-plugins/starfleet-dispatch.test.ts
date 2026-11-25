@@ -69,83 +69,83 @@ describe('shared prompt preparation', () => {
   })
 })
 
-describe('shared inbox coordinator', () => {
-  test('merges startup backlog and live inbox without duplicate IDs', async () => {
+describe('shared event coordinator', () => {
+  test('merges startup events and live poll without duplicate IDs', async () => {
     const coordinator = createEventCoordinator()
-    const startup = { id: 'm1', source: { from: 'Enterprise' }, payload: { command: 'status' }, type: 'command.execute' }
+    const startup = { id: 'e1', type: 'command.execute', source: { from: 'Enterprise' }, payload: { command: 'status' } }
     coordinator.seed([startup])
 
     const result = await coordinator.poll(async () => ({
       ok: true,
       events: [
-        { id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' },
-        { id: 'm2', source: { from: 'Voyager' }, payload: { prompt: 'check CI' }, type: 'prompt.inject' },
+        { id: 'e1', type: 'prompt.inject', source: { from: 'Enterprise' }, payload: { prompt: 'status' } },
+        { id: 'e2', type: 'prompt.inject', source: { from: 'Voyager' }, payload: { prompt: 'check CI' } },
       ],
     }))
 
-    assert.deepStrictEqual(result.events.map((message) => message.id), ['m1', 'm2'])
-    assert.equal(result.events[0].type, 'command')
-    assert.equal(result.events[1].type, 'message')
+    assert.deepStrictEqual(result.events.map((event) => event.id), ['e1', 'e2'])
+    assert.equal(result.events[0].type, 'command.execute')
+    assert.equal(result.events[1].type, 'prompt.inject')
   })
 
-  test('refreshes pending order from the current inbox response', async () => {
+  test('refreshes pending order from the current event response', async () => {
     const coordinator = createEventCoordinator()
     coordinator.seed([
-      { id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'one' }, type: 'prompt.inject' },
-      { id: 'm2', source: { from: 'Voyager' }, payload: { prompt: 'two' }, type: 'prompt.inject' },
+      { id: 'e1', type: 'prompt.inject', payload: { prompt: 'one' } },
+      { id: 'e2', type: 'prompt.inject', payload: { prompt: 'two' } },
     ])
 
     const result = await coordinator.poll(async () => ({
       ok: true,
       events: [
-        { id: 'm3', source: { from: 'Discovery' }, payload: { prompt: 'three' }, type: 'prompt.inject' },
-        { id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'one' }, type: 'prompt.inject' },
-        { id: 'm2', source: { from: 'Voyager' }, payload: { prompt: 'two' }, type: 'prompt.inject' },
+        { id: 'e3', type: 'prompt.inject', payload: { prompt: 'three' } },
+        { id: 'e1', type: 'prompt.inject', payload: { prompt: 'one' } },
+        { id: 'e2', type: 'prompt.inject', payload: { prompt: 'two' } },
       ],
     }))
 
-    assert.deepStrictEqual(result.events.map((message) => message.id), ['m3', 'm1', 'm2'])
+    assert.deepStrictEqual(result.events.map((event) => event.id), ['e3', 'e1', 'e2'])
   })
 
-  test('coalesces concurrent inbox reads and leases each message once', async () => {
+  test('coalesces concurrent event reads and leases each event once', async () => {
     const coordinator = createEventCoordinator()
     let calls = 0
     let finishRead: (value: any) => void = () => {}
-    const readInbox = () => {
+    const readEvents = () => {
       calls++
       return new Promise((resolve) => { finishRead = resolve })
     }
 
-    const firstPoll = coordinator.poll(readInbox)
-    const secondPoll = coordinator.poll(readInbox)
+    const firstPoll = coordinator.poll(readEvents)
+    const secondPoll = coordinator.poll(readEvents)
     await Promise.resolve()
     assert.equal(calls, 1)
-    finishRead({ ok: true, events: [{ id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' }] })
+    finishRead({ ok: true, events: [{ id: 'e1', type: 'prompt.inject', payload: { prompt: 'status' } }] })
 
     const [first, second] = await Promise.all([firstPoll, secondPoll])
-    assert.deepStrictEqual(first.events.map((message) => message.id), ['m1'])
-    assert.deepStrictEqual(second.events.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(first.events.map((event) => event.id), ['e1'])
+    assert.deepStrictEqual(second.events.map((event) => event.id), ['e1'])
 
     const firstClaim = coordinator.claim(first.events)
     const secondClaim = coordinator.claim(second.events)
-    assert.deepStrictEqual(firstClaim.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(firstClaim.map((event) => event.id), ['e1'])
     assert.deepStrictEqual(secondClaim, [])
 
-    coordinator.release(firstClaim.map((message) => message.id))
+    coordinator.release(firstClaim.map((event) => event.id))
     const retryClaim = coordinator.claim(second.events)
-    assert.deepStrictEqual(retryClaim.map((message) => message.id), ['m1'])
-    coordinator.markSubmitted(retryClaim.map((message) => message.id))
+    assert.deepStrictEqual(retryClaim.map((event) => event.id), ['e1'])
+    coordinator.markSubmitted(retryClaim.map((event) => event.id))
 
     const nextPoll = await coordinator.poll(async () => ({
       ok: true,
-      events: [{ id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' }],
+      events: [{ id: 'e1', type: 'prompt.inject', payload: { prompt: 'status' } }],
     }))
     assert.deepStrictEqual(nextPoll.events, [])
   })
 
-  test('failed live poll does not discard startup backlog', async () => {
+  test('failed live poll does not discard startup events', async () => {
     const coordinator = createEventCoordinator()
-    coordinator.seed([{ id: 'm1', source: { from: 'Enterprise' }, payload: { prompt: 'status' }, type: 'prompt.inject' }])
+    coordinator.seed([{ id: 'e1', type: 'prompt.inject', payload: { prompt: 'status' } }])
 
     const result = await coordinator.poll(async () => ({
       ok: false,
@@ -154,30 +154,44 @@ describe('shared inbox coordinator', () => {
     }))
 
     assert.equal(result.response.ok, false)
-    assert.deepStrictEqual(result.events.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(result.events.map((event) => event.id), ['e1'])
   })
 
-  test('unknown message types stay unsupported and can remain retryable', () => {
-    assert.equal(isSupportedEvent({ id: 'm1', type: 'ship' }), true)
-    assert.equal(isSupportedEvent({ id: 'm2', type: 'message' }), true)
-    assert.equal(isSupportedEvent({ id: 'm3', type: 'command' }), true)
-    assert.equal(isSupportedEvent({ id: 'm4' }), true)
-    assert.equal(isSupportedEvent({ id: 'm5', type: 'future-unknown' }), false)
-    assert.equal(isSupportedEvent({ id: 'm6', type: 42 }), false)
+  test('only known event types are dispatched', () => {
+    assert.equal(isSupportedEvent({ id: 'e1', type: 'prompt.inject' }), true)
+    assert.equal(isSupportedEvent({ id: 'e2', type: 'command.execute' }), true)
+    assert.equal(isSupportedEvent({ id: 'e3', type: 'future-unknown' }), false)
+    assert.equal(isSupportedEvent({ id: 'e4', type: 42 }), false)
+    assert.equal(isSupportedEvent({ id: 'e5' }), false)
   })
 
-  test('unsupported message types remain pending after an adapter releases its lease', async () => {
+  test('unsupported event types remain pending after an adapter releases its lease', async () => {
     const coordinator = createEventCoordinator()
-    const unsupported = { id: 'm-unknown', source: { from: 'Enterprise' }, payload: {}, type: 'future-unknown' }
+    const unsupported = { id: 'e-unknown', type: 'future-unknown', payload: {} }
     const first = await coordinator.poll(async () => ({ ok: true, events: [unsupported] }))
     const claimed = coordinator.claim(first.events)
 
     assert.equal(claimed.length, 1)
     assert.equal(isSupportedEvent(claimed[0]), false)
-    coordinator.release(claimed.map((message) => message.id))
+    coordinator.release(claimed.map((event) => event.id))
 
     const retry = await coordinator.poll(async () => ({ ok: true, events: [] }))
     assert.deepStrictEqual(retry.events, [unsupported])
+  })
+
+  test('validates the versioned event response envelope', () => {
+    const valid = normalizeEventResponse({
+      ok: true,
+      protocol_version: 1,
+      events: [{ id: 'e1', type: 'prompt.inject' }],
+    })
+    assert.equal(valid.ok, true)
+    assert.equal(valid.protocol_version, 1)
+    assert.equal(valid.events.length, 1)
+
+    assert.equal(normalizeEventResponse({ ok: true, protocol_version: 2, events: [] }).ok, false)
+    assert.equal(normalizeEventResponse({ ok: true, protocol_version: 1, events: {} }).ok, false)
+    assert.equal(normalizeEventResponse(null).ok, false)
   })
 })
 
