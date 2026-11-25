@@ -883,55 +883,56 @@ const logPollTimer = setInterval(async () => {
   }
 
   const poll = async () => {
-    // The timer is only one caller of the shared poller; the current-turn hook
-    // uses the same coordinator and cannot claim the same message concurrently.
+    // The timer is one consumer of the shared event poller; the current-turn
+    // hook uses the same coordinator and cannot claim the same event twice.
     if (pollRunning) return
     pollRunning = true
     let claimedIds: string[] = []
     try {
-      const { response: inbox, messages: available } = await pollInbox()
-      if (!inbox.ok) {
-        logInboxPollDiagnostic('error', `error=${String(inbox.error || 'unknown').replace(/\s+/g, ' ').slice(0, 180)}`)
+      const { response: eventResponse, events: available } = await pollEvents()
+      if (!eventResponse.ok) {
+        logInboxPollDiagnostic('error', `error=${String(eventResponse.error || 'unknown').replace(/\s+/g, ' ').slice(0, 180)}`)
       }
-      const inboxMessages = inbox.ok ? inbox.messages : []
-      const msgs = eventCoordinator.claim(available)
-      claimedIds = msgs.map((m: any) => m.id)
-      const inboxIds = inboxMessages.map((m: any) => m.id).join(',')
-      if (inboxMessages.length > 0 || msgs.length > 0) {
-        tickLog(`inbox-poll ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inboxIds}] pending=[${claimedIds.join(',')}]`)
+      const liveEvents = eventResponse.ok ? eventResponse.events : []
+      const events = eventCoordinator.claim(available)
+      claimedIds = events.map((event: any) => event.id)
+      const liveIDs = liveEvents.map((event: any) => event.id).join(',')
+      if (liveEvents.length > 0 || events.length > 0) {
+        tickLog(`event-poll ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${currentSessionID || '-'} live=[${liveIDs}] pending=[${claimedIds.join(',')}]`)
       }
-      if (msgs.length === 0) {
-        logInboxPollDiagnostic('idle', 'messages=0 pending=0')
+      if (events.length === 0) {
+        logInboxPollDiagnostic('idle', 'events=0 pending=0')
         return
       }
       lastInboxPollDiagnosticState = 'messages'
 
-      // Emit one process-scoped receipt on the first actual Comms message.
-      // This happens before session resolution/promptAsync and therefore also
-      // works when the reused session has not produced a model turn yet.
       const firstCommsReport = reportFirstComms({
         ship: aid(),
         sessionID: currentSessionID,
-        messageIDs: msgs.map((m: any) => m.id),
+        messageIDs: events.map((event: any) => event.id),
       })
       if (firstCommsReport) tickLog(firstCommsReport)
 
-      const injectable = await dispatchMessages(msgs, () => resolveSessionId(), 'poll')
-      if (injectable.length === 0) return
+      const promptEvents = await dispatchEvents(events, () => resolveSessionId(), 'poll')
+      if (promptEvents.length === 0) return
 
       const targetSid = await resolveSessionId()
-      const ids = injectable.map((m: any) => m.id).join(',')
+      const ids = promptEvents.map((event: any) => event.id).join(',')
       if (!targetSid) {
         tickLog(`handoff-skip ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=<missing|unresolved> ids=[${ids}] reason=no-latest-ship-session`)
         return
       }
 
-      const prepared = prepareLegacyInboxPrompt(injectable)
+      const prepared = preparePromptEvents(promptEvents)
       if (!prepared) {
-        tickLog(`handoff-skip ship=${aid()} sid=${targetSid} ids=[${ids}] reason=invalid-prompt-payload`)
+        tickLog(`handoff-skip ship=${aid()} sid=${targetSid} ids=[${ids}] reason=invalid-event-prompt`)
         return
       }
-      const promptText = prepared.parts.join('\n')
+      if (!prepared.startTurn) {
+        tickLog(`handoff-skip ship=${aid()} sid=${targetSid} ids=[${ids}] reason=start-turn-not-requested`)
+        return
+      }
+      const promptText = prepared.parts.join('')
       tickLog(`handoff-prompt ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${targetSid} ids=[${prepared.eventIds.join(',')}] calling=promptAsync`)
       try {
         const res = await client.session.promptAsync({
@@ -1016,34 +1017,34 @@ const logPollTimer = setInterval(async () => {
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
-      // Both adapters share the same poller, queue, dispatcher and message
-      // lease. This hook owns only placement into the active turn's system text.
-      const { response: inbox, messages: available } = await pollInbox()
-      if (!inbox.ok) {
-        tickLog(`inbox-transform-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${String(inbox.error || 'unknown').slice(0, 180)}`)
+      // This adapter only places Go-formatted prompt text into the active
+      // turn. Polling, command dispatch, ordering and leasing are shared.
+      const { response: eventResponse, events: available } = await pollEvents()
+      if (!eventResponse.ok) {
+        tickLog(`event-transform-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${String(eventResponse.error || 'unknown').slice(0, 180)}`)
       }
       const handoffSid = currentSessionID
       if (available.length > 0) {
-        tickLog(`inbox-transform ship=${aid()} sid=${handoffSid || '-'} pending=[${available.map((m: any) => m.id).join(',')}]`)
+        tickLog(`event-transform ship=${aid()} sid=${handoffSid || '-'} pending=[${available.map((event: any) => event.id).join(',')}]`)
       }
       if (!handoffSid) {
         if (available.length > 0) {
-          tickLog(`inbox-transform-skip ship=${aid()} sid=<missing> ids=[${available.map((m: any) => m.id).join(',')}] reason=no-session-context`)
+          tickLog(`event-transform-skip ship=${aid()} sid=<missing> ids=[${available.map((event: any) => event.id).join(',')}] reason=no-session-context`)
         }
         return
       }
 
       const claimed = eventCoordinator.claim(available)
-      const claimedIds = claimed.map((m: any) => m.id)
+      const claimedIds = claimed.map((event: any) => event.id)
       try {
-        const toInject = await dispatchMessages(claimed, async () => handoffSid, 'transform')
-        if (toInject.length > 0) {
-          const prepared = prepareLegacyInboxPrompt(toInject)
+        const promptEvents = await dispatchEvents(claimed, async () => handoffSid, 'transform')
+        if (promptEvents.length > 0) {
+          const prepared = preparePromptEvents(promptEvents)
           if (!prepared) {
-            tickLog(`handoff-transform-skip ship=${aid()} sid=${handoffSid} reason=invalid-prompt-payload`)
+            tickLog(`handoff-transform-skip ship=${aid()} sid=${handoffSid} reason=invalid-event-prompt`)
             return
           }
-          output.system.push('', prepared.parts.join('\n'))
+          output.system.push(prepared.parts.join(''))
           eventCoordinator.markSubmitted(prepared.eventIds)
           for (const id of prepared.eventIds) {
             const sr = bus({ cmd: 'seen_mark', id })
