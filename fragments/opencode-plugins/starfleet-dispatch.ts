@@ -759,13 +759,21 @@ const logPollTimer = setInterval(async () => {
   }
 }, LOG_POLL_MS)
 
-  // Init snapshots unread messages without acknowledging them. Delivery
-  // (prompt + seen_mark) remains the poller's responsibility.
-  const init = normalizeInboxResponse(bus({ cmd: 'init', note: 'opencode ship' }))
-  if (!init.ok) {
-    tickLog(`comms-init-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${init.error.slice(0, 180)}`)
+  // Init snapshots unread events without acknowledging them. New binaries
+  // return the versioned event envelope; older binaries fall back to the
+  // legacy inbox and are adapted locally during the compatibility window.
+  const rawInit = bus({ cmd: 'init', note: 'opencode ship' })
+  const init = normalizeEventResponse(rawInit)
+  let startupEvents: any[] = []
+  if (init.ok) {
+    startupEvents = init.events
+  } else if (rawInit?.ok && rawInit.protocol_version == null && Array.isArray(rawInit.messages)) {
+    startupEvents = legacyInboxEvents(rawInit.messages)
+    tickLog(`comms-init-legacy ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} events=${startupEvents.length}`)
+  } else {
+    tickLog(`comms-init-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${String(init.error || 'invalid event envelope').slice(0, 180)}`)
   }
-  eventCoordinator.seed(init.messages)
+  eventCoordinator.seed(startupEvents)
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -835,14 +843,31 @@ const logPollTimer = setInterval(async () => {
     return ''
   }
 
-  // All adapters go through this one poller. Concurrent calls share one
-  // in-flight CLI read; the coordinator retains unsubmitted messages and
-  // leases each message to only one adapter.
-  const pollInbox = () => eventCoordinator.poll(() => {
+  // All adapters go through this one event poller. Concurrent calls share
+  // one in-flight CLI read; the coordinator retains unsubmitted events and
+  // leases each event to only one adapter. The raw inbox path is only a
+  // compatibility fallback for older starfleetctl binaries.
+  const pollEvents = () => eventCoordinator.poll(() => {
     try {
-      return normalizeInboxResponse(bus({ cmd: 'inbox' }))
+      const raw = bus({ cmd: 'events.poll' })
+      const normalized = normalizeEventResponse(raw)
+      if (normalized.ok) return normalized
+
+      if (raw?.ok === false && /unknown cmd:\\s*events\\.poll/i.test(String(raw.error || ''))) {
+        const legacy = normalizeInboxResponse(bus({ cmd: 'inbox' }))
+        if (legacy.ok) {
+          return {
+            ok: true,
+            error: '',
+            protocol_version: 1,
+            events: legacyInboxEvents(legacy.messages),
+          }
+        }
+        return { ok: false, error: legacy.error, protocol_version: 1, events: [] }
+      }
+      return normalized
     } catch (e) {
-      return { ok: false, error: String(e), messages: [] }
+      return { ok: false, error: String(e), protocol_version: 1, events: [] }
     }
   })
 
