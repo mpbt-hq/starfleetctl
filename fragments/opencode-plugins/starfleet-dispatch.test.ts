@@ -7,7 +7,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
-import { prepareLegacyInboxPrompt, preparePrompt, preparePromptEvents } from './prompt-preparation.mjs'
+import { legacyInboxToEvents, prepareLegacyInboxPrompt, preparePrompt, preparePromptEvents } from './prompt-preparation.mjs'
 import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
 
 // ============================================================================
@@ -85,6 +85,35 @@ describe('shared prompt preparation', () => {
       { id: 'e1', type: 'prompt.inject', payload: { prompt: 'valid' } },
       { id: 'e2', type: 'prompt.inject', payload: { prompt: 42 } },
     ]), null)
+  })
+
+  test('legacy CLI messages adapt to generic prompt and command events', () => {
+    const events = legacyInboxToEvents([
+      { id: 'm-prompt', from: 'Enterprise', target: 'Defiant', text: 'check registry', type: 'ship' },
+      { id: 'm-command', from: 'Voyager', text: 'task status', type: 'command' },
+      { id: 'm-model', from: 'Discovery', text: 'model opencode/test', type: 'ship' },
+      { id: 'm-unknown', from: 'Enterprise', text: 'future', type: 'future-type' },
+    ])
+
+    assert.deepStrictEqual(events.map((event) => event.type), [
+      'prompt.inject',
+      'command.execute',
+      'command.execute',
+      'unsupported',
+    ])
+    assert.equal(events[0].payload.prompt[0], '--- fleet directives (from other ships via comms) ---')
+    assert.equal(events[1].payload.command, 'task status')
+    assert.equal(events[2].source.message_type, 'ship')
+    assert.equal(events[2].payload.command, 'model opencode/test')
+    assert.equal(events[3].payload.prompt, undefined)
+  })
+
+  test('legacy CLI event adapter rejects malformed prompt messages without acknowledging them', () => {
+    const [event] = legacyInboxToEvents([
+      { id: 'm-bad', from: 'Enterprise', text: 42, type: 'ship' },
+    ])
+    assert.equal(event.type, 'unsupported')
+    assert.equal(legacyInboxToEvents({ messages: [] }).length, 0)
   })
 
   test('legacy formatter rejects a non-array inbox response', () => {
