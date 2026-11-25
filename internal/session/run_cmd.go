@@ -249,8 +249,31 @@ func RunCmd(root string, args []string) int {
 // + heartbeat above), so STARFLEET_LAUNCH_TYPE is pinned to "terminal" — the
 // client process must see the same truth as the config and heartbeat instead of
 // inheriting a stale/default "background" label.
+// runClientEnv assembles the environment passed to a `run`-launched client.
+// The `run` command always launches a terminal client (see generateOpencodeConfig
+// + heartbeat above), so STARFLEET_LAUNCH_TYPE is pinned to "terminal" -- the
+// client process must see the same truth as the config and heartbeat instead of
+// inheriting a stale/default "background" label.
+//
+// Inherited STARFLEET_* identity variables are dropped before the explicit ones
+// are appended: a ship shell exports STARFLEET_TARGET/STARFLEET_SHIP_ID, and
+// inheriting them leaks the parent ship's identity into the child (a flagship
+// run would receive a STARFLEET_TARGET it must not have). Dropping them also
+// avoids duplicate keys in the environment, where the inherited value would win
+// over the explicit one.
 func runClientEnv(shipID, role, root string, client string) []string {
-	env := append(os.Environ(),
+	env := make([]string, 0, len(os.Environ())+8)
+	for _, kv := range os.Environ() {
+		switch {
+		case strings.HasPrefix(kv, "STARFLEET_SHIP_ID="),
+			strings.HasPrefix(kv, "STARFLEET_ROLE="),
+			strings.HasPrefix(kv, "STARFLEET_LAUNCH_TYPE="),
+			strings.HasPrefix(kv, "STARFLEET_TARGET="):
+			continue
+		}
+		env = append(env, kv)
+	}
+	env = append(env,
 		"STARFLEET_SHIP_ID="+shipID,
 		"STARFLEET_ROLE="+role,
 		"STARFLEET_LAUNCH_TYPE=terminal",
