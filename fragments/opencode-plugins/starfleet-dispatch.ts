@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.17'
+const PLUGIN_VERSION = '2.5.18'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -17,6 +17,7 @@ const APP_LOG_ENABLED = false
 import { execSync } from 'node:child_process'
 import { resolveLatestShipSession } from './session-resolution.mjs'
 import { normalizeInboxResponse } from './inbox-response.mjs'
+import { prepareLegacyInboxPrompt } from './prompt-preparation'
 import { createFirstCommsReporter, createRuntimeIdentity, formatRuntimeIdentity } from './runtime-identity.mjs'
 
 const ROOT = process.cwd()
@@ -810,22 +811,20 @@ const logPollTimer = setInterval(async () => {
         return
       }
 
-      const lines = injectable.map((m: any) =>
-        `Directive ${m.id} from ${m.from}:\n${m.text}`)
-      tickLog(`handoff-prompt ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${targetSid} ids=[${ids}] calling=promptAsync`)
+      const prepared = prepareLegacyInboxPrompt(injectable)
+      if (!prepared) {
+        tickLog(`handoff-skip ship=${aid()} sid=${targetSid} ids=[${ids}] reason=invalid-prompt-payload`)
+        return
+      }
+      const promptText = prepared.parts.join('\n')
+      tickLog(`handoff-prompt ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${targetSid} ids=[${prepared.eventIds.join(',')}] calling=promptAsync`)
       try {
         const res = await client.session.promptAsync({
           path: { id: targetSid },
           body: {
             parts: [{
               type: 'text', synthetic: true,
-              text: [
-                '--- fleet directives (from other ships via comms) ---',
-                'Process each directive and carry out the requested action.',
-                '',
-                ...lines,
-                '--- end fleet directives ---',
-              ].join('\n'),
+              text: promptText,
             }],
           },
         })
@@ -942,20 +941,19 @@ const logPollTimer = setInterval(async () => {
         toInject.push(msg)
       }
       if (toInject.length > 0) {
-        const lines: string[] = []
-        for (const msg of toInject) {
-          lines.push(`Directive ${msg.id} from ${msg.from}:`, msg.text, '')
-          submitted.add(msg.id)
-          const sr = bus({ cmd: 'seen_mark', id: msg.id })
-          tickLog(`handoff-transform ship=${aid()} sid=${handoffSid} id=${msg.id} seen=${!!sr?.ok} mode=system-inject`)
+        const prepared = prepareLegacyInboxPrompt(toInject)
+        if (!prepared) {
+          tickLog(`handoff-transform-skip ship=${aid()} sid=${handoffSid} reason=invalid-prompt-payload`)
+          return
         }
-        output.system.push(
-          '', '--- fleet directives (from other ships via comms) ---',
-          'These are directives received from other ships in the fleet.',
-          'Process each directive and carry out the requested action.',
-          '', ...lines,
-          '--- end fleet directives ---',
-        )
+        // Both delivery adapters consume this exact prepared text. The current
+        // turn adapter owns only placement into OpenCode's system context.
+        output.system.push('', prepared.parts.join('\n'))
+        for (const id of prepared.eventIds) {
+          submitted.add(id)
+          const sr = bus({ cmd: 'seen_mark', id })
+          tickLog(`handoff-transform ship=${aid()} sid=${handoffSid} id=${id} seen=${!!sr?.ok} mode=system-inject`)
+        }
       }
     },
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
