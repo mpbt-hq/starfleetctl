@@ -62,11 +62,11 @@ type dispatchRequest struct {
 type dispatchResponse struct {
 	OK       bool      `json:"ok"`
 	Error    string    `json:"error,omitempty"`
-	Messages        []Message        `json:"messages,omitempty"`
-	ProtocolVersion int              `json:"protocol_version,omitempty"`
-	Events          []DispatchEvent  `json:"events,omitempty"`
-	Seen            []string         `json:"seen,omitempty"`
-	Tag      string    `json:"tag,omitempty"`
+	Messages        []Message       `json:"messages,omitempty"`
+	ProtocolVersion int             `json:"protocol_version,omitempty"`
+	Events          []DispatchEvent `json:"events,omitempty"`
+	Seen            []string        `json:"seen,omitempty"`
+	Tag             string          `json:"tag,omitempty"`
 
 	// config response
 	HeartbeatMS     int    `json:"heartbeat_ms,omitempty"`
