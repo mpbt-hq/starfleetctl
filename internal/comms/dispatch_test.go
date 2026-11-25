@@ -179,10 +179,10 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 		if !ok {
 			t.Fatalf("event[%d].payload.prompt type = %T, want string", i, event.Payload.Prompt)
 		}
-		want := "--- fleet directives (from other ships via comms) ---\\n" +
-			"Process each directive and carry out the requested action.\\n\\n" +
-			"Directive " + message.ID + " from " + message.From + ":\\n" +
-			message.Text + "\\n\\n--- end fleet directives ---\\n\\n"
+		want := "--- fleet directives (from other ships via comms) ---\n" +
+			"Process each directive and carry out the requested action.\n\n" +
+			"Directive " + message.ID + " from " + message.From + ":\n" +
+			message.Text + "\n\n--- end fleet directives ---\n\n"
 		if prompt != want {
 			t.Errorf("event[%d].prompt = %q, want Go-formatted prompt %q", i, prompt, want)
 		}
