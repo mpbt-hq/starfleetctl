@@ -199,7 +199,13 @@ func (b *Bus) dispatchInit(req dispatchRequest) dispatchResponse {
 	if err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
-	return dispatchResponse{OK: true, Messages: orEmptyInbox(messages)}
+	events := eventsFromMessages(messages)
+	return dispatchResponse{
+		OK:              true,
+		Messages:        orEmptyInbox(messages),
+		ProtocolVersion: dispatchEventProtocolVersion,
+		Events:          &events,
+	}
 }
 
 func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
