@@ -162,6 +162,7 @@ export const plugin = async ({ client, $ }: any) => {
   let tuiReady = false
   let sessionNeedsIdentity = true
   const inboxCoordinator = createInboxCoordinator()
+  const unsupportedMessageDiagnostics = new Set<string>()
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
@@ -473,7 +474,11 @@ export const plugin = async ({ client, $ }: any) => {
     const injectable: any[] = []
     for (const msg of messages) {
       if (!isSupportedInboxMessage(msg)) {
-        tickLog(`unknown message type=${String(msg?.type)} from=${msg?.from} id=${msg?.id} (left pending)`)
+        const diagnosticKey = `${String(msg?.id)}:${String(msg?.type)}`
+        if (!unsupportedMessageDiagnostics.has(diagnosticKey)) {
+          unsupportedMessageDiagnostics.add(diagnosticKey)
+          tickLog(`unknown message type=${String(msg?.type)} from=${msg?.from} id=${msg?.id} (left pending)`)
+        }
         continue
       }
       appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${String(msg.text || '').slice(0, 80)}`)
