@@ -64,7 +64,7 @@ type dispatchResponse struct {
 	Error           string           `json:"error,omitempty"`
 	Messages        []Message        `json:"messages,omitempty"`
 	ProtocolVersion int              `json:"protocol_version,omitempty"`
-	Events          []DispatchEvent  `json:"events,omitempty"`
+	Events          *[]DispatchEvent `json:"events,omitempty"`
 	Seen            []string         `json:"seen,omitempty"`
 	Tag             string           `json:"tag,omitempty"`
 
