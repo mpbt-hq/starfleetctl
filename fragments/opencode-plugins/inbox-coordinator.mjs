@@ -34,14 +34,14 @@ export function normalizeEventResponse(raw) {
       events: [],
     };
   }
-  if (raw.events !== undefined && !Array.isArray(raw.events)) {
+  if (!Array.isArray(raw.events)) {
     return { ok: false, error: 'events must be an array', protocol_version: 1, events: [] };
   }
   return {
     ok: true,
     error: '',
     protocol_version: 1,
-    events: Array.isArray(raw.events) ? raw.events : [],
+    events: raw.events,
   };
 }
 
