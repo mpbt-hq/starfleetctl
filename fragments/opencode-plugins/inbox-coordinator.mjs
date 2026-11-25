@@ -29,9 +29,15 @@ export function createInboxCoordinator() {
     for (const message of messages) {
       const id = message && typeof message.id === 'string' ? message.id : '';
       if (!id.trim() || submitted.has(id)) continue;
-      // Reorder to the source inbox's current ordering on every successful read.
-      if (pending.has(id)) pending.delete(id);
-      pending.set(id, message);
+      // Reorder to the source inbox's current ordering while retaining the
+      // first-seen immutable record (notably the startup message type).
+      if (pending.has(id)) {
+        const existing = pending.get(id);
+        pending.delete(id);
+        pending.set(id, existing);
+      } else {
+        pending.set(id, message);
+      }
     }
   };
 
