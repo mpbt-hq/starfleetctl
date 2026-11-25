@@ -8,12 +8,41 @@
  */
 
 /** @param {unknown} message */
-export function isSupportedInboxMessage(message) {
-  if (!message || typeof message !== 'object') return false;
-  const rawType = message.type;
-  const type = rawType == null || rawType === '' ? 'ship' : rawType;
-  return typeof type === 'string' &&
-    ['ship', 'user', 'control', 'message', 'command'].includes(type);
+export function isSupportedEvent(event) {
+  return !!event && typeof event === 'object' &&
+    (event.type === 'prompt.inject' || event.type === 'command.execute');
+}
+
+/** @param {unknown} raw */
+export function normalizeEventResponse(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, error: 'dispatch returned no response object', protocol_version: 0, events: [] };
+  }
+  if (raw.ok !== true) {
+    return {
+      ok: false,
+      error: String(raw.error || 'event poll failed'),
+      protocol_version: Number(raw.protocol_version) || 0,
+      events: [],
+    };
+  }
+  if (raw.protocol_version !== 1) {
+    return {
+      ok: false,
+      error: `unsupported event protocol version: ${String(raw.protocol_version)}`,
+      protocol_version: Number(raw.protocol_version) || 0,
+      events: [],
+    };
+  }
+  if (raw.events !== undefined && !Array.isArray(raw.events)) {
+    return { ok: false, error: 'events must be an array', protocol_version: 1, events: [] };
+  }
+  return {
+    ok: true,
+    error: '',
+    protocol_version: 1,
+    events: Array.isArray(raw.events) ? raw.events : [],
+  };
 }
 
 export function createInboxCoordinator() {
@@ -60,7 +89,7 @@ export function createInboxCoordinator() {
         pollPromise = Promise.resolve()
           .then(readInbox)
           .then((response) => {
-            if (response?.ok && Array.isArray(response.messages)) add(response.messages);
+            if (response?.ok && Array.isArray(response.events)) add(response.events);
             return response;
           })
           .finally(() => {
