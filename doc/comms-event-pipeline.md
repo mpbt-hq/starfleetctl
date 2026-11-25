@@ -182,10 +182,12 @@ from `promptAsync` returning.
    plugin SDK 1.19.3; the V1 hooks, promptAsync endpoint, and session event
    shapes were checked against upstream tag v1.19.3.
 2. **Shared prompt preparation:** implemented on this branch — both existing
-   hooks now consume one PreparedPrompt and the same legacy prompt text; the
+   hooks consume one PreparedPrompt and identical legacy prompt text; the
    generic string/string[] payload validator is ready for the Go event
-   contract. The old inbox wire protocol remains unchanged. CI verification
-   is pending.
+   contract. The old inbox wire protocol remains unchanged. Helper packaging
+   uses an installed-but-unregistered .mjs module plus a build-only .d.mts
+   declaration. Exact-head CI passed: Go build/vet/tests on Go 1.22.x and
+   stable, plugin bundle/typecheck, 59 plugin tests, and bootstrap tests.
 3. **Generic dispatcher:** add one poller, validated event envelope, queue,
    ordering, and single-flight delivery coordination. Remove hook-local inbox
    polling only after parity tests exist.
