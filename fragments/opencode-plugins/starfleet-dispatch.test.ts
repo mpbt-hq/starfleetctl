@@ -7,7 +7,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
-import { prepareLegacyInboxPrompt, preparePrompt } from './prompt-preparation'
+import { prepareLegacyInboxPrompt, preparePrompt } from './prompt-preparation.mjs'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
