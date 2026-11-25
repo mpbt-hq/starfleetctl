@@ -80,7 +80,40 @@ export function prepareLegacyInboxPrompt(messages) {
     '',
     ...lines,
     '--- end fleet directives ---',
-  ].join('\n');
+  ].join('\n') + '\n\n';
 
   return preparePrompt(usable.map((message) => message.id), prompt, true);
+}
+
+
+/**
+ * Prepare all prompt.inject events in their supplied order. The Go side owns
+ * the text and separators; this helper only validates and concatenates parts.
+ *
+ * @param {unknown} events
+ * @returns {PreparedPrompt | null}
+ */
+export function preparePromptEvents(events) {
+  if (!Array.isArray(events) || events.length === 0) return null;
+
+  const eventIds = [];
+  const parts = [];
+  let startTurn = false;
+
+  for (const event of events) {
+    if (!event || typeof event !== 'object' || event.type !== 'prompt.inject') {
+      return null;
+    }
+    const prepared = preparePrompt(
+      [event.id],
+      event.payload?.prompt,
+      event.actions?.start_turn,
+    );
+    if (!prepared) return null;
+    eventIds.push(...prepared.eventIds);
+    parts.push(...prepared.parts);
+    startTurn = startTurn || prepared.startTurn;
+  }
+
+  return preparePrompt(eventIds, parts, startTurn);
 }
