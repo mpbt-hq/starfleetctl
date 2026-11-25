@@ -120,8 +120,11 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 	if resp.ProtocolVersion != dispatchEventProtocolVersion {
 		t.Fatalf("protocol version = %d, want %d", resp.ProtocolVersion, dispatchEventProtocolVersion)
 	}
-	if resp.Events == nil || len(*resp.Events) != len(inbox.Messages) || len(*resp.Events) != 2 {
-		t.Fatalf("events = %d, inbox messages = %d, want 2", len(resp.Events), len(inbox.Messages))
+	if resp.Events == nil {
+		t.Fatal("events.poll must return an explicit events array")
+	}
+	if len(*resp.Events) != len(inbox.Messages) || len(*resp.Events) != 2 {
+		t.Fatalf("events = %d, inbox messages = %d, want 2", len(*resp.Events), len(inbox.Messages))
 	}
 	if resp.Messages != nil {
 		t.Fatalf("events.poll must not return legacy messages: %#v", resp.Messages)
@@ -210,6 +213,17 @@ func TestDispatchEventsPollEmpty(t *testing.T) {
 		t.Fatalf("protocol version = %d, want %d", resp.ProtocolVersion, dispatchEventProtocolVersion)
 	}
 	if resp.Events == nil || len(*resp.Events) != 0 {
-		t.Fatalf("events = %#v, want empty", resp.Events)
+		t.Fatalf("events = %#v, want explicit empty array", resp.Events)
+	}
+	wire, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(wire, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if events, ok := envelope["events"].([]any); !ok || len(events) != 0 {
+		t.Fatalf("JSON events = %#v, want empty array", envelope["events"])
 	}
 }
