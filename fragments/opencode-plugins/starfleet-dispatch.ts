@@ -853,7 +853,7 @@ const logPollTimer = setInterval(async () => {
       const normalized = normalizeEventResponse(raw)
       if (normalized.ok) return normalized
 
-      if (raw?.ok === false && /unknown cmd:\\s*events\\.poll/i.test(String(raw.error || ''))) {
+      if (raw?.ok === false && /unknown cmd:\s*events\.poll/i.test(String(raw.error || ''))) {
         const legacy = normalizeInboxResponse(bus({ cmd: 'inbox' }))
         if (legacy.ok) {
           return {
