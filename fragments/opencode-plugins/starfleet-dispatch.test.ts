@@ -91,7 +91,7 @@ describe('shared inbox coordinator', () => {
   test('coalesces concurrent inbox reads and leases each message once', async () => {
     const coordinator = createInboxCoordinator()
     let calls = 0
-    let finishRead
+    let finishRead: (value: any) => void = () => {}
     const readInbox = () => {
       calls++
       return new Promise((resolve) => { finishRead = resolve })
@@ -144,6 +144,21 @@ describe('shared inbox coordinator', () => {
     assert.equal(isSupportedInboxMessage({ id: 'm3', type: 'command' }), true)
     assert.equal(isSupportedInboxMessage({ id: 'm4' }), true)
     assert.equal(isSupportedInboxMessage({ id: 'm5', type: 'future-unknown' }), false)
+    assert.equal(isSupportedInboxMessage({ id: 'm6', type: 42 }), false)
+  })
+
+  test('unsupported message types remain pending after an adapter releases its lease', async () => {
+    const coordinator = createInboxCoordinator()
+    const unsupported = { id: 'm-unknown', from: 'Enterprise', text: 'future event', type: 'future-unknown' }
+    const first = await coordinator.poll(async () => ({ ok: true, messages: [unsupported] }))
+    const claimed = coordinator.claim(first.messages)
+
+    assert.equal(claimed.length, 1)
+    assert.equal(isSupportedInboxMessage(claimed[0]), false)
+    coordinator.release(claimed.map((message) => message.id))
+
+    const retry = await coordinator.poll(async () => ({ ok: true, messages: [] }))
+    assert.deepStrictEqual(retry.messages, [unsupported])
   })
 })
 
