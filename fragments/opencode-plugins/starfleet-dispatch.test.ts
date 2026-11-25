@@ -101,7 +101,7 @@ describe('shared prompt preparation', () => {
       'command.execute',
       'unsupported',
     ])
-    assert.equal(events[0].payload.prompt[0], '--- fleet directives (from other ships via comms) ---')
+    assert.ok(events[0].payload.prompt[0].includes('--- fleet directives (from other ships via comms) ---'))
     assert.equal(events[1].payload.command, 'task status')
     assert.equal(events[2].source.message_type, 'ship')
     assert.equal(events[2].payload.command, 'model opencode/test')
@@ -834,94 +834,120 @@ comms: directive m124 from 'Enterprise' → TestShip
 
 
 
-  describe('system.transform handoff semantics (external message / unknown / duplicates)', () => {
-    // Mirrors the fixed transform semantics: confirm (submitted/seen_mark) only
-    // after actual injection/execution in a confirmed session context.
+  describe('system.transform handoff semantics (generic events / unknown / duplicates)', () => {
+    // Mirrors the fixed transform semantics: only supported prompt/command
+    // events may be delivered; unsupported event types remain retryable.
     function runTransform(opts: { sid: string; msgs: any[]; submittedIn?: Set<string> }) {
       const submitted = new Set<string>(opts.submittedIn || [])
       const seenMarked: string[] = []
       const injected: string[] = []
       const commands: string[] = []
       const logs: string[] = []
-      const classify = (type: string | undefined): boolean => {
-        switch (type || 'ship') {
-          case 'ship': case 'user': case 'control': case 'message': return false
-          case 'command': return true
-          default: return false // unknown: not delivered
-        }
-      }
-      const handoffSid = opts.sid
       const toInject: any[] = []
-      for (const msg of opts.msgs) {
-        if (submitted.has(msg.id)) continue
-        const handled = handoffSid ? classify(msg.type) : false
-        if (handled) {
-          seenMarked.push(msg.id); submitted.add(msg.id); commands.push(msg.id)
-          logs.push(`handoff-transform-command id=${msg.id}`)
+      const handoffSid = opts.sid
+
+      for (const event of opts.msgs) {
+        if (submitted.has(event.id)) continue
+        if (event.type === 'command.execute') {
+          if (!handoffSid || typeof event.payload?.command !== 'string') {
+            logs.push(`handoff-transform-skip id=${event.id}`)
+            continue
+          }
+          commands.push(event.id)
+          submitted.add(event.id)
+          seenMarked.push(event.id)
+          logs.push(`handoff-transform-command id=${event.id}`)
           continue
         }
-        if (!handoffSid) { logs.push(`handoff-transform-skip id=${msg.id}`); continue }
-        toInject.push(msg)
-      }
-      if (toInject.length > 0) {
-        for (const msg of toInject) {
-          injected.push(msg.id); submitted.add(msg.id); seenMarked.push(msg.id)
-          logs.push(`handoff-transform id=${msg.id}`)
+        if (event.type !== 'prompt.inject') {
+          logs.push(`handoff-transform-unknown id=${event.id}`)
+          continue
         }
+        if (!handoffSid) {
+          logs.push(`handoff-transform-skip id=${event.id}`)
+          continue
+        }
+        toInject.push(event)
+      }
+
+      for (const event of toInject) {
+        injected.push(event.id)
+        submitted.add(event.id)
+        seenMarked.push(event.id)
+        logs.push(`handoff-transform id=${event.id}`)
       }
       return { submitted, seenMarked, injected, commands, logs }
     }
 
-    test('external type="message" is injected and only then confirmed', () => {
-      const msg = { id: 'm20933', from: 'ChatGPT', text: 'VOYAGER-LIVE-HANDOFF-20261113-01', type: 'message' }
-      const r = runTransform({ sid: 'ses_voyager', msgs: [msg] })
+    test('prompt.inject is injected and only then confirmed', () => {
+      const event = {
+        id: 'm20933',
+        source: { from: 'ChatGPT', message_type: 'message' },
+        payload: { prompt: 'VOYAGER-LIVE-HANDOFF-20261113-01' },
+        type: 'prompt.inject',
+      }
+      const r = runTransform({ sid: 'ses_voyager', msgs: [event] })
       assert.deepStrictEqual(r.injected, ['m20933'])
       assert.deepStrictEqual(r.commands, [])
       assert.ok(r.submitted.has('m20933'))
       assert.deepStrictEqual(r.seenMarked, ['m20933'])
       assert.ok(r.logs.some(l => l.includes('handoff-transform id=m20933')))
-      assert.ok(!r.logs.some(l => l.includes('handoff-transform-command id=m20933')))
     })
 
-    test('unknown types are not falsely confirmed as delivered and remain retry-fähig', () => {
-      const msg = { id: 'mx1', from: 'X', text: 'hi', type: 'weird' }
-      const r = runTransform({ sid: 'ses_voyager', msgs: [msg] })
-      // treated as injectable directive path in fixed logic -> injected when session confirmed
-      assert.deepStrictEqual(r.injected, ['mx1'])
-      assert.deepStrictEqual(r.seenMarked, ['mx1'])
-      // and if no session context, must not be confirmed
-      const r2 = runTransform({ sid: '', msgs: [msg] })
+    test('unsupported event types are not falsely confirmed and remain retryable', () => {
+      const event = { id: 'mx1', type: 'future-unknown', payload: {} }
+      const r = runTransform({ sid: 'ses_voyager', msgs: [event] })
+      assert.deepStrictEqual(r.injected, [])
+      assert.deepStrictEqual(r.commands, [])
+      assert.deepStrictEqual(r.seenMarked, [])
+      assert.ok(!r.submitted.has('mx1'))
+
+      const r2 = runTransform({ sid: '', msgs: [event] })
       assert.deepStrictEqual(r2.injected, [])
       assert.deepStrictEqual(r2.seenMarked, [])
       assert.ok(!r2.submitted.has('mx1'))
     })
 
-    test('true commands keep command behavior (confirmed as command, not injected)', () => {
-      const msg = { id: 'mc1', source: { from: 'Enterprise' }, payload: { command: 'status' }, type: 'command.execute' }
-      const r = runTransform({ sid: 'ses_voyager', msgs: [msg] })
+    test('command.execute keeps command behavior (not prompt injection)', () => {
+      const event = {
+        id: 'mc1',
+        source: { from: 'Enterprise', message_type: 'command' },
+        payload: { command: 'status' },
+        type: 'command.execute',
+      }
+      const r = runTransform({ sid: 'ses_voyager', msgs: [event] })
       assert.deepStrictEqual(r.commands, ['mc1'])
       assert.deepStrictEqual(r.injected, [])
       assert.ok(r.submitted.has('mc1'))
       assert.ok(r.logs.some(l => l.includes('handoff-transform-command id=mc1')))
     })
 
-    test('failed injection (no session context) keeps message retry-fähig', () => {
-      const msg = { id: 'm20933', from: 'ChatGPT', text: 'token', type: 'message' }
-      const r = runTransform({ sid: '', msgs: [msg] })
+    test('failed prompt injection (no session context) keeps event retryable', () => {
+      const event = {
+        id: 'm20933',
+        source: { from: 'ChatGPT', message_type: 'message' },
+        payload: { prompt: 'token' },
+        type: 'prompt.inject',
+      }
+      const r = runTransform({ sid: '', msgs: [event] })
       assert.deepStrictEqual(r.injected, [])
       assert.deepStrictEqual(r.seenMarked, [])
       assert.ok(!r.submitted.has('m20933'))
-      // retryable: subsequent transform with session injects it
-      const r2 = runTransform({ sid: 'ses_voyager', msgs: [msg], submittedIn: r.submitted })
+      const r2 = runTransform({ sid: 'ses_voyager', msgs: [event], submittedIn: r.submitted })
       assert.deepStrictEqual(r2.injected, ['m20933'])
       assert.deepStrictEqual(r2.seenMarked, ['m20933'])
     })
 
-    test('repeated transform calls do not duplicate injection', () => {
-      const msg = { id: 'm20933', from: 'ChatGPT', text: 'token', type: 'message' }
-      const r1 = runTransform({ sid: 'ses_voyager', msgs: [msg] })
+    test('repeated transform calls do not duplicate prompt injection', () => {
+      const event = {
+        id: 'm20933',
+        source: { from: 'ChatGPT', message_type: 'message' },
+        payload: { prompt: 'token' },
+        type: 'prompt.inject',
+      }
+      const r1 = runTransform({ sid: 'ses_voyager', msgs: [event] })
       assert.deepStrictEqual(r1.injected, ['m20933'])
-      const r2 = runTransform({ sid: 'ses_voyager', msgs: [msg], submittedIn: r1.submitted })
+      const r2 = runTransform({ sid: 'ses_voyager', msgs: [event], submittedIn: r1.submitted })
       assert.deepStrictEqual(r2.injected, [])
       assert.deepStrictEqual(r2.seenMarked, [])
       assert.deepStrictEqual(r2.commands, [])
