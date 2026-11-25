@@ -97,3 +97,86 @@ func TestDecideAction_retryLogMonitorUnknown(t *testing.T) {
 		t.Error("decideAction returned empty reason")
 	}
 }
+
+func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
+	b := newTestBus(t, "Enterprise")
+
+	firstID, err := b.post(b.ShipID, "first directive", "", "", "", "ship")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondID, err := b.post(b.ShipID, "second directive", "", "", "", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inbox := b.dispatchInbox(dispatchRequest{})
+	resp := b.dispatch(dispatchRequest{Cmd: "events.poll"})
+	if !resp.OK {
+		t.Fatalf("events.poll failed: %s", resp.Error)
+	}
+	if resp.ProtocolVersion != dispatchEventProtocolVersion {
+		t.Fatalf("protocol version = %d, want %d", resp.ProtocolVersion, dispatchEventProtocolVersion)
+	}
+	if len(resp.Events) != len(inbox.Messages) || len(resp.Events) != 2 {
+		t.Fatalf("events = %d, inbox messages = %d, want 2", len(resp.Events), len(inbox.Messages))
+	}
+	if resp.Messages != nil {
+		t.Fatalf("events.poll must not return legacy messages: %#v", resp.Messages)
+	}
+
+	for i, message := range inbox.Messages {
+		event := resp.Events[i]
+		if event.ID != message.ID {
+			t.Errorf("event[%d].ID = %q, want %q (preserve inbox order)", i, event.ID, message.ID)
+		}
+		if event.Type != "prompt.inject" {
+			t.Errorf("event[%d].Type = %q, want prompt.inject", i, event.Type)
+		}
+		if event.Source.Kind != "comms.message" || event.Source.ID != message.ID {
+			t.Errorf("event[%d].Source = %#v, want Comms source for %s", i, event.Source, message.ID)
+		}
+		if event.Source.From != message.From || event.Source.Target != message.Target || event.Source.MessageType != message.Type {
+			t.Errorf("event[%d].Source metadata = %#v, want from/target/type from message %#v", i, event.Source, message)
+		}
+		prompt, ok := event.Payload.Prompt.([]string)
+		if !ok {
+			t.Fatalf("event[%d].payload.prompt type = %T, want []string", i, event.Payload.Prompt)
+		}
+		if want := formatCommsPrompt(message); !reflect.DeepEqual(prompt, want) {
+			t.Errorf("event[%d].prompt = %#v, want Go-formatted prompt %#v", i, prompt, want)
+		}
+		if !event.Actions.StartTurn {
+			t.Errorf("event[%d].actions.start_turn = false, want true", i)
+		}
+	}
+
+	// Polling is non-destructive: a second poll returns the same unread events.
+	again := b.dispatch(dispatchRequest{Cmd: "events.poll"})
+	if len(again.Events) != 2 || again.Events[0].ID != resp.Events[0].ID || again.Events[1].ID != resp.Events[1].ID {
+		t.Fatalf("second poll changed unread events: first=%#v second=%#v", resp.Events, again.Events)
+	}
+
+	// Acknowledging one event removes only that source message from later polls.
+	if err := b.DoAck(secondID, "test submitted"); err != nil {
+		t.Fatal(err)
+	}
+	afterAck := b.dispatch(dispatchRequest{Cmd: "events.poll"})
+	if len(afterAck.Events) != 1 || afterAck.Events[0].ID != firstID {
+		t.Fatalf("after ack events = %#v, want only %s", afterAck.Events, firstID)
+	}
+}
+
+func TestDispatchEventsPollEmpty(t *testing.T) {
+	b := newTestBus(t, "Enterprise")
+	resp := b.dispatch(dispatchRequest{Cmd: "events.poll"})
+	if !resp.OK {
+		t.Fatalf("events.poll failed: %s", resp.Error)
+	}
+	if resp.ProtocolVersion != dispatchEventProtocolVersion {
+		t.Fatalf("protocol version = %d, want %d", resp.ProtocolVersion, dispatchEventProtocolVersion)
+	}
+	if len(resp.Events) != 0 {
+		t.Fatalf("events = %#v, want empty", resp.Events)
+	}
+}
