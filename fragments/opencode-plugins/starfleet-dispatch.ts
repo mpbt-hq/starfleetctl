@@ -17,7 +17,7 @@ const APP_LOG_ENABLED = false
 import { execSync } from 'node:child_process'
 import { resolveLatestShipSession } from './session-resolution.mjs'
 import { normalizeInboxResponse } from './inbox-response.mjs'
-import { prepareLegacyInboxPrompt } from './prompt-preparation'
+import { prepareLegacyInboxPrompt } from './prompt-preparation.mjs'
 import { createFirstCommsReporter, createRuntimeIdentity, formatRuntimeIdentity } from './runtime-identity.mjs'
 
 const ROOT = process.cwd()
