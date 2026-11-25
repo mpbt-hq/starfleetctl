@@ -120,7 +120,7 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 	if resp.ProtocolVersion != dispatchEventProtocolVersion {
 		t.Fatalf("protocol version = %d, want %d", resp.ProtocolVersion, dispatchEventProtocolVersion)
 	}
-	if len(resp.Events) != len(inbox.Messages) || len(resp.Events) != 2 {
+	if resp.Events == nil || len(*resp.Events) != len(inbox.Messages) || len(*resp.Events) != 2 {
 		t.Fatalf("events = %d, inbox messages = %d, want 2", len(resp.Events), len(inbox.Messages))
 	}
 	if resp.Messages != nil {
@@ -159,7 +159,7 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 	}
 
 	for i, message := range inbox.Messages {
-		event := resp.Events[i]
+		event := (*resp.Events)[i]
 		if event.ID != message.ID {
 			t.Errorf("event[%d].ID = %q, want %q (preserve inbox order)", i, event.ID, message.ID)
 		}
@@ -186,7 +186,7 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 
 	// Polling is non-destructive: a second poll returns the same unread events.
 	again := b.dispatch(dispatchRequest{Cmd: "events.poll"})
-	if len(again.Events) != 2 || again.Events[0].ID != resp.Events[0].ID || again.Events[1].ID != resp.Events[1].ID {
+	if again.Events == nil || len(*again.Events) != 2 || (*again.Events)[0].ID != (*resp.Events)[0].ID || (*again.Events)[1].ID != (*resp.Events)[1].ID {
 		t.Fatalf("second poll changed unread events: first=%#v second=%#v", resp.Events, again.Events)
 	}
 
@@ -195,7 +195,7 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	afterAck := b.dispatch(dispatchRequest{Cmd: "events.poll"})
-	if len(afterAck.Events) != 1 || afterAck.Events[0].ID != firstID {
+	if afterAck.Events == nil || len(*afterAck.Events) != 1 || (*afterAck.Events)[0].ID != firstID {
 		t.Fatalf("after ack events = %#v, want only %s", afterAck.Events, firstID)
 	}
 }
@@ -209,7 +209,7 @@ func TestDispatchEventsPollEmpty(t *testing.T) {
 	if resp.ProtocolVersion != dispatchEventProtocolVersion {
 		t.Fatalf("protocol version = %d, want %d", resp.ProtocolVersion, dispatchEventProtocolVersion)
 	}
-	if len(resp.Events) != 0 {
+	if resp.Events == nil || len(*resp.Events) != 0 {
 		t.Fatalf("events = %#v, want empty", resp.Events)
 	}
 }
