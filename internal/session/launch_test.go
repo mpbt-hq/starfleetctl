@@ -60,20 +60,16 @@ func permAction(t *testing.T, cfg map[string]any, tool string) string {
 	return val
 }
 
-// TestGenerateOpencodeConfigExternalDirectory verifies that ships never hit an
-// unanswerable permission ask for paths outside the workspace.
-//
-// opencode's external_directory defaults to "ask" and fires for any path
-// outside the project working directory. On background/auto ships there is no
-// human to answer, so an ask hangs the ship and it then aborts after deny
-// (regression: Pasteur trying to read "/.starfleet-ai/...").
+// TestGenerateOpencodeConfigExternalDirectory verifies launch-type-specific
+// access outside the workspace. Background/auto ships must fail fast; console
+// ships may ask for arbitrary external paths but get /tmp without prompting.
 func TestGenerateOpencodeConfigExternalDirectory(t *testing.T) {
 	home := t.TempDir()
 	root := t.TempDir()
 	t.Setenv("HOME", home)
 	workspacePattern := root + "/**"
 
-	// terminal/background/auto ships: deny everything outside the workspace (fast
+	// Background/auto ships deny everything outside the workspace (fast
 	// failure, agent can recover) while keeping the workspace + ~/.local/bin
 	// allowed.
 	for _, launchType := range []string{"background", "auto"} {
@@ -98,8 +94,14 @@ func TestGenerateOpencodeConfigExternalDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateOpencodeConfig(terminal): %v", err)
 	}
-	if got := extDirRule(t, readShipConfig(t, cfgPath), "**"); got != "ask" {
+	terminalCfg := readShipConfig(t, cfgPath)
+	if got := extDirRule(t, terminalCfg, "**"); got != "ask" {
 		t.Errorf("terminal: external_directory ** = %q, want ask", got)
+	}
+	for _, pattern := range []string{"/tmp", "/tmp/**"} {
+		if got := extDirRule(t, terminalCfg, pattern); got != "allow" {
+			t.Errorf("terminal: external_directory %q = %q, want allow", pattern, got)
+		}
 	}
 
 	// unrestricted ships: allow everything.
