@@ -3,7 +3,10 @@
 
 package comms
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const dispatchEventProtocolVersion = 1
 
@@ -11,11 +14,11 @@ const dispatchEventProtocolVersion = 1
 // The event type describes the action; OpenCode-specific placement stays
 // entirely in the plugin adapter.
 type DispatchEvent struct {
-	ID      string                `json:"id"`
-	Type    string                `json:"type"`
-	Source  DispatchEventSource   `json:"source"`
-	Payload DispatchEventPayload  `json:"payload"`
-	Actions DispatchEventActions  `json:"actions,omitempty"`
+	ID      string               `json:"id"`
+	Type    string               `json:"type"`
+	Source  DispatchEventSource  `json:"source"`
+	Payload DispatchEventPayload `json:"payload"`
+	Actions DispatchEventActions `json:"actions,omitempty"`
 }
 
 // DispatchEventSource identifies the originating Comms record without
@@ -29,10 +32,12 @@ type DispatchEventSource struct {
 	MessageType string `json:"message_type,omitempty"`
 }
 
-// DispatchEventPayload carries the fully formatted prompt snippet. Prompt is
-// deliberately string-or-string[] JSON; the plugin only places these parts.
+// DispatchEventPayload carries either a fully formatted prompt snippet or a
+// command for the transitional command.execute event. Prompt is deliberately
+// string-or-string[] JSON; the plugin only places these parts.
 type DispatchEventPayload struct {
-	Prompt any `json:"prompt,omitempty"`
+	Prompt  any    `json:"prompt,omitempty"`
+	Command string `json:"command,omitempty"`
 }
 
 // DispatchEventActions describes generic delivery intent, not an OpenCode API
@@ -56,6 +61,53 @@ func formatCommsPrompt(message Message) []string {
 	}
 }
 
+func isModelSwitchMessage(message Message, messageType string) bool {
+	if messageType != "ship" && messageType != "user" && messageType != "control" {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(message.Text)), "model ")
+}
+
+// eventsFromMessages converts source records into typed, stable-ID events.
+// Prompt composition stays in Go; existing local commands are represented as
+// command.execute until their individual typed actions are introduced.
+func eventsFromMessages(messages []Message) []DispatchEvent {
+	events := make([]DispatchEvent, 0, len(messages))
+	for _, message := range messages {
+		messageType := message.Type
+		if messageType == "" {
+			messageType = "ship"
+		}
+
+		event := DispatchEvent{
+			ID:   message.ID,
+			Type: "unsupported",
+			Source: DispatchEventSource{
+				Kind:        "comms.message",
+				ID:          message.ID,
+				From:        message.From,
+				Target:      message.Target,
+				ReplyTo:     message.ReplyTo,
+				MessageType: messageType,
+			},
+		}
+
+		switch {
+		case messageType == "command" || isModelSwitchMessage(message, messageType):
+			event.Type = "command.execute"
+			event.Payload.Command = message.Text
+		case messageType == "ship" || messageType == "user" ||
+			messageType == "control" || messageType == "message":
+			event.Type = "prompt.inject"
+			event.Payload.Prompt = formatCommsPrompt(message)
+			event.Actions.StartTurn = true
+		}
+
+		events = append(events, event)
+	}
+	return events
+}
+
 // dispatchEventsPoll offers the unread inbox as a versioned generic event
 // stream. Polling is non-destructive: events remain available until the
 // consumer explicitly acknowledges them through the existing seen_mark path.
@@ -65,31 +117,10 @@ func (b *Bus) dispatchEventsPoll(req dispatchRequest) dispatchResponse {
 		return inbox
 	}
 
-	events := make([]DispatchEvent, 0, len(inbox.Messages))
-	for _, message := range inbox.Messages {
-		events = append(events, DispatchEvent{
-			ID:   message.ID,
-			Type: "prompt.inject",
-			Source: DispatchEventSource{
-				Kind:        "comms.message",
-				ID:          message.ID,
-				From:        message.From,
-				Target:      message.Target,
-				ReplyTo:     message.ReplyTo,
-				MessageType: message.Type,
-			},
-			Payload: DispatchEventPayload{
-				Prompt: formatCommsPrompt(message),
-			},
-			Actions: DispatchEventActions{
-				StartTurn: true,
-			},
-		})
-	}
-
+	events := eventsFromMessages(inbox.Messages)
 	return dispatchResponse{
 		OK:              true,
 		ProtocolVersion: dispatchEventProtocolVersion,
-		Events:           &events,
+		Events:          &events,
 	}
 }
