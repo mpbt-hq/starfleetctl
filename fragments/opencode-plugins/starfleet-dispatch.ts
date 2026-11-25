@@ -507,39 +507,60 @@ export const plugin = async ({ client, $ }: any) => {
 
   // One event dispatcher handles command-vs-prompt classification for both
   // OpenCode adapters. Unknown message types remain pending and retryable.
-  async function dispatchMessages(
-    messages: any[],
+  // One event dispatcher handles typed command events and prompt events for
+  // both adapters. Prompt text is already composed by Go; this layer only
+  // routes commands and returns prompt.inject events to the adapters.
+  async function dispatchEvents(
+    events: any[],
     sessionIDProvider: () => Promise<string>,
     mode: 'poll' | 'transform',
   ): Promise<any[]> {
-    const injectable: any[] = []
-    for (const msg of messages) {
-      if (!isSupportedInboxMessage(msg)) {
-        const diagnosticKey = `${String(msg?.id)}:${String(msg?.type)}`
+    const promptEvents: any[] = []
+    for (const event of events) {
+      if (!isSupportedEvent(event)) {
+        const diagnosticKey = `${String(event?.id)}:${String(event?.type)}`
         if (!unsupportedEventDiagnostics.has(diagnosticKey)) {
           unsupportedEventDiagnostics.add(diagnosticKey)
-          tickLog(`unknown message type=${String(msg?.type)} from=${msg?.from} id=${msg?.id} (left pending)`)
+          tickLog(`unknown event type=${String(event?.type)} id=${event?.id} (left pending)`)
         }
         continue
       }
-      appLog('info', `inbox: [${msg.id}] from=${msg.from} type=${msg.type || "ship"}: ${String(msg.text || '').slice(0, 80)}`)
+
+      if (event.type === 'prompt.inject') {
+        promptEvents.push(event)
+        continue
+      }
+
+      const command = event.payload?.command
+      if (typeof command !== 'string') {
+        tickLog(`handoff-${mode}-command-skip ship=${aid()} id=${event.id} reason=invalid-command-payload`)
+        continue
+      }
+      const message = {
+        id: event.id,
+        from: typeof event.source?.from === 'string' ? event.source.from : 'unknown',
+        text: command,
+        type: typeof event.source?.message_type === 'string' && event.source.message_type
+          ? event.source.message_type
+          : 'command',
+      }
       const sid = await sessionIDProvider()
       let handled = false
       try {
-        handled = await handleMessage(msg, client, sid)
+        handled = await handleMessage(message, client, sid)
       } catch (e) {
-        tickLog(`handoff-${mode}-dispatch-error ship=${aid()} id=${msg.id} error=${String(e).slice(0, 180)}`)
+        tickLog(`handoff-${mode}-dispatch-error ship=${aid()} id=${event.id} error=${String(e).slice(0, 180)}`)
         continue
       }
       if (handled) {
-        eventCoordinator.markSubmitted([msg.id])
-        const sr = bus({ cmd: 'seen_mark', id: msg.id })
-        tickLog(`handoff-${mode}-command ship=${aid()} sid=${sid || '-'} id=${msg.id} seen=${!!sr?.ok}`)
+        eventCoordinator.markSubmitted([event.id])
+        const sr = bus({ cmd: 'seen_mark', id: event.id })
+        tickLog(`handoff-${mode}-command ship=${aid()} sid=${sid || '-'} id=${event.id} seen=${!!sr?.ok}`)
       } else {
-        injectable.push(msg)
+        tickLog(`handoff-${mode}-command-unhandled ship=${aid()} sid=${sid || '-'} id=${event.id} (left pending)`)
       }
     }
-    return injectable
+    return promptEvents
   }
 
   // Execute a policy action returned by starfleetctl error-handle.
