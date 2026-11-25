@@ -143,6 +143,39 @@ Do not mix V1 and V2 API shapes or infer runtime behavior from current
 documentation alone. Record the observed version, hook signatures, and
 observable turn-start/completion events in tests or a compatibility note.
 
+### Observed deployment baseline (2026-11-25)
+
+The owner-requested read-only probe was performed on **Discovery**:
+
+- Command: `opencode --version`
+- Exact output: `1.19.3`
+- Timestamp: `2026-11-25T17:22:47Z`
+- Resolved SDK: `@opencode-ai/plugin 1.19.3`, read from
+  `.opencode/node_modules/@opencode-ai/plugin/package.json`
+- Wormhole correlation: request
+  `w0-20261125T172016Z-6cdb81958af49800`, Comms message `m25551`,
+  reply `m25554`, reported by Enterprise in
+  `w0-20261125T172427Z-213efe6684c9b70a`.
+
+The upstream OpenCode tag `v1.19.3` confirms the checked-in legacy adapter
+surface is present in this deployed version:
+
+- `Hooks` declares `chat.params` and
+  `experimental.chat.system.transform` in
+  `packages/plugin/src/index.ts`.
+- The generated SDK exposes `client.session.promptAsync()` at
+  `/session/{id}/prompt_async`; its API comment says it starts a session
+  message and returns immediately.
+- The event schema includes `message.updated` with the updated message and
+  `session.idle` with a session ID.
+
+This validates retaining the existing V1 hooks and `promptAsync` adapter for
+the first migration slice; do not switch to the V2 plugin API. The
+`session.idle` event is session-scoped and has no message/event ID, so it is
+not by itself proof that a particular Comms directive was processed. Turn
+start/completion still require explicit correlation and must not be inferred
+from `promptAsync` returning.
+
 ## Incremental implementation plan
 
 1. **Compatibility baseline:** obtain deployed OpenCode version/API evidence;
