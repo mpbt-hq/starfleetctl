@@ -6,6 +6,7 @@ package comms
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
