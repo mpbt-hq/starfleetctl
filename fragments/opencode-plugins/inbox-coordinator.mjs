@@ -3,11 +3,11 @@
 
 /**
  * A single in-memory coordinator for both OpenCode delivery adapters.
- * It coalesces concurrent inbox reads, de-duplicates startup/live messages,
- * and leases each message to at most one adapter at a time.
+ * It coalesces concurrent event polls, de-duplicates startup/live events,
+ * and leases each event to at most one adapter at a time.
  */
 
-/** @param {unknown} message */
+/** @param {unknown} event */
 export function isSupportedEvent(event) {
   return !!event && typeof event === 'object' &&
     (event.type === 'prompt.inject' || event.type === 'command.execute');
@@ -52,42 +52,42 @@ export function createEventCoordinator() {
   const inFlight = new Set();
   let pollPromise = null;
 
-  /** @param {unknown} messages */
-  const add = (messages) => {
-    if (!Array.isArray(messages)) return;
-    for (const message of messages) {
-      const id = message && typeof message.id === 'string' ? message.id : '';
+  /** @param {unknown} events */
+  const add = (events) => {
+    if (!Array.isArray(events)) return;
+    for (const event of events) {
+      const id = event && typeof event.id === 'string' ? event.id : '';
       if (!id.trim() || submitted.has(id)) continue;
-      // Reorder to the source inbox's current ordering while retaining the
-      // first-seen immutable record (notably the startup message type).
+      // Reorder to the source event stream's current ordering while retaining the
+      // first-seen immutable record (notably the startup event type).
       if (pending.has(id)) {
         const existing = pending.get(id);
         pending.delete(id);
         pending.set(id, existing);
       } else {
-        pending.set(id, message);
+        pending.set(id, event);
       }
     }
   };
 
-  const available = () => Array.from(pending.values()).filter((message) =>
-    !submitted.has(message.id) && !inFlight.has(message.id)
+  const available = () => Array.from(pending.values()).filter((event) =>
+    !submitted.has(event.id) && !inFlight.has(event.id)
   );
 
   return {
-    /** @param {unknown} messages */
-    seed(messages) {
-      add(messages);
+    /** @param {unknown} events */
+    seed(events) {
+      add(events);
     },
 
     /**
-     * @param {() => any | Promise<any>} readInbox
-     * @returns {Promise<{response: any, messages: any[]}>}
+     * @param {() => any | Promise<any>} readEvents
+     * @returns {Promise<{response: any, events: any[]}>}
      */
-    async poll(readInbox) {
+    async poll(readEvents) {
       if (!pollPromise) {
         pollPromise = Promise.resolve()
-          .then(readInbox)
+          .then(readEvents)
           .then((response) => {
             if (response?.ok && Array.isArray(response.events)) add(response.events);
             return response;
@@ -101,15 +101,15 @@ export function createEventCoordinator() {
       return { response, events: available() };
     },
 
-    /** @param {unknown} messages */
-    claim(messages) {
+    /** @param {unknown} events */
+    claim(events) {
       const claimed = [];
-      if (!Array.isArray(messages)) return claimed;
-      for (const message of messages) {
-        const id = message && typeof message.id === 'string' ? message.id : '';
+      if (!Array.isArray(events)) return claimed;
+      for (const event of events) {
+        const id = event && typeof event.id === 'string' ? event.id : '';
         if (!id.trim() || submitted.has(id) || inFlight.has(id)) continue;
         inFlight.add(id);
-        claimed.push(message);
+        claimed.push(event);
       }
       return claimed;
     },
