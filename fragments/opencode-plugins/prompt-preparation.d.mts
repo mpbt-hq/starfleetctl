@@ -16,3 +16,7 @@ export function preparePrompt(
 export function prepareLegacyInboxPrompt(
   messages: unknown,
 ): PreparedPrompt | null;
+
+export function preparePromptEvents(
+  events: unknown,
+): PreparedPrompt | null;
