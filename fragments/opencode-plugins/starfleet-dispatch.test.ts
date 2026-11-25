@@ -8,6 +8,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
 import { prepareLegacyInboxPrompt, preparePrompt } from './prompt-preparation.mjs'
+import { createInboxCoordinator, isSupportedInboxMessage } from './inbox-coordinator.mjs'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
@@ -65,6 +66,84 @@ describe('shared prompt preparation', () => {
       { id: 'm1', from: 'Enterprise', text: 'status please' },
       { id: 'm2', from: 'Voyager' },
     ]), null)
+  })
+})
+
+describe('shared inbox coordinator', () => {
+  test('merges startup backlog and live inbox without duplicate IDs', async () => {
+    const coordinator = createInboxCoordinator()
+    const startup = { id: 'm1', from: 'Enterprise', text: 'status', type: 'command' }
+    coordinator.seed([startup])
+
+    const result = await coordinator.poll(async () => ({
+      ok: true,
+      messages: [
+        { id: 'm1', from: 'Enterprise', text: 'status', type: 'ship' },
+        { id: 'm2', from: 'Voyager', text: 'check CI', type: 'message' },
+      ],
+    }))
+
+    assert.deepStrictEqual(result.messages.map((message) => message.id), ['m1', 'm2'])
+    assert.equal(result.messages[0].type, 'command')
+    assert.equal(result.messages[1].type, 'message')
+  })
+
+  test('coalesces concurrent inbox reads and leases each message once', async () => {
+    const coordinator = createInboxCoordinator()
+    let calls = 0
+    let finishRead
+    const readInbox = () => {
+      calls++
+      return new Promise((resolve) => { finishRead = resolve })
+    }
+
+    const firstPoll = coordinator.poll(readInbox)
+    const secondPoll = coordinator.poll(readInbox)
+    await Promise.resolve()
+    assert.equal(calls, 1)
+    finishRead({ ok: true, messages: [{ id: 'm1', from: 'Enterprise', text: 'status' }] })
+
+    const [first, second] = await Promise.all([firstPoll, secondPoll])
+    assert.deepStrictEqual(first.messages.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(second.messages.map((message) => message.id), ['m1'])
+
+    const firstClaim = coordinator.claim(first.messages)
+    const secondClaim = coordinator.claim(second.messages)
+    assert.deepStrictEqual(firstClaim.map((message) => message.id), ['m1'])
+    assert.deepStrictEqual(secondClaim, [])
+
+    coordinator.release(firstClaim.map((message) => message.id))
+    const retryClaim = coordinator.claim(second.messages)
+    assert.deepStrictEqual(retryClaim.map((message) => message.id), ['m1'])
+    coordinator.markSubmitted(retryClaim.map((message) => message.id))
+
+    const nextPoll = await coordinator.poll(async () => ({
+      ok: true,
+      messages: [{ id: 'm1', from: 'Enterprise', text: 'status' }],
+    }))
+    assert.deepStrictEqual(nextPoll.messages, [])
+  })
+
+  test('failed live poll does not discard startup backlog', async () => {
+    const coordinator = createInboxCoordinator()
+    coordinator.seed([{ id: 'm1', from: 'Enterprise', text: 'status' }])
+
+    const result = await coordinator.poll(async () => ({
+      ok: false,
+      error: 'temporary dispatch failure',
+      messages: [],
+    }))
+
+    assert.equal(result.response.ok, false)
+    assert.deepStrictEqual(result.messages.map((message) => message.id), ['m1'])
+  })
+
+  test('unknown message types stay unsupported and can remain retryable', () => {
+    assert.equal(isSupportedInboxMessage({ id: 'm1', type: 'ship' }), true)
+    assert.equal(isSupportedInboxMessage({ id: 'm2', type: 'message' }), true)
+    assert.equal(isSupportedInboxMessage({ id: 'm3', type: 'command' }), true)
+    assert.equal(isSupportedInboxMessage({ id: 'm4' }), true)
+    assert.equal(isSupportedInboxMessage({ id: 'm5', type: 'future-unknown' }), false)
   })
 })
 
