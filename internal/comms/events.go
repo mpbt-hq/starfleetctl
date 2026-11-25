@@ -49,8 +49,8 @@ type DispatchEventActions struct {
 // formatCommsPrompt owns all Comms-specific composition: context header,
 // sender prefix, body, grouping, and separators. The plugin must not recreate
 // or modify this text.
-func formatCommsPrompt(message Message) []string {
-	return []string{
+func formatCommsPrompt(message Message) string {
+	return strings.Join([]string{
 		"--- fleet directives (from other ships via comms) ---",
 		"Process each directive and carry out the requested action.",
 		"",
@@ -58,7 +58,8 @@ func formatCommsPrompt(message Message) []string {
 		message.Text,
 		"",
 		"--- end fleet directives ---",
-	}
+		"",
+	}, "\\n")
 }
 
 func isModelSwitchMessage(message Message, messageType string) bool {
