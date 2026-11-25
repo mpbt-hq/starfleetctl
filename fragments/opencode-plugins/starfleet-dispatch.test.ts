@@ -88,6 +88,25 @@ describe('shared inbox coordinator', () => {
     assert.equal(result.messages[1].type, 'message')
   })
 
+  test('refreshes pending order from the current inbox response', async () => {
+    const coordinator = createInboxCoordinator()
+    coordinator.seed([
+      { id: 'm1', from: 'Enterprise', text: 'one' },
+      { id: 'm2', from: 'Voyager', text: 'two' },
+    ])
+
+    const result = await coordinator.poll(async () => ({
+      ok: true,
+      messages: [
+        { id: 'm3', from: 'Discovery', text: 'three' },
+        { id: 'm1', from: 'Enterprise', text: 'one' },
+        { id: 'm2', from: 'Voyager', text: 'two' },
+      ],
+    }))
+
+    assert.deepStrictEqual(result.messages.map((message) => message.id), ['m3', 'm1', 'm2'])
+  })
+
   test('coalesces concurrent inbox reads and leases each message once', async () => {
     const coordinator = createInboxCoordinator()
     let calls = 0
