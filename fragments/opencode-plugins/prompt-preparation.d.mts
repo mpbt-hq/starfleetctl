@@ -20,3 +20,5 @@ export function prepareLegacyInboxPrompt(
 export function preparePromptEvents(
   events: unknown,
 ): PreparedPrompt | null;
+
+export function legacyInboxToEvents(messages: unknown): any[];
