@@ -45,7 +45,7 @@ export function normalizeEventResponse(raw) {
   };
 }
 
-export function createInboxCoordinator() {
+export function createEventCoordinator() {
   /** @type {Map<string, any>} */
   const pending = new Map();
   const submitted = new Set();
