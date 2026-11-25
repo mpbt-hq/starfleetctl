@@ -90,6 +90,6 @@ func (b *Bus) dispatchEventsPoll(req dispatchRequest) dispatchResponse {
 	return dispatchResponse{
 		OK:              true,
 		ProtocolVersion: dispatchEventProtocolVersion,
-		Events:           events,
+		Events:           &events,
 	}
 }
