@@ -117,3 +117,50 @@ export function preparePromptEvents(events) {
 
   return preparePrompt(eventIds, parts, startTurn);
 }
+
+
+/**
+ * Temporary adapter for older CLIs that expose raw Comms messages rather than
+ * the versioned event envelope. New binaries perform this classification and
+ * formatting in Go.
+ *
+ * @param {unknown} messages
+ * @returns {any[]}
+ */
+export function legacyInboxToEvents(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((message) => {
+    const id = typeof message?.id === 'string' ? message.id : '';
+    const messageType = typeof message?.type === 'string' && message.type
+      ? message.type
+      : 'ship';
+    const text = typeof message?.text === 'string' ? message.text : '';
+    const source = {
+      kind: 'comms.message',
+      id,
+      from: typeof message?.from === 'string' ? message.from : '',
+      target: typeof message?.target === 'string' ? message.target : '',
+      reply_to: typeof message?.reply_to === 'string' ? message.reply_to : '',
+      message_type: messageType,
+    };
+    const modelSwitch = ['ship', 'user', 'control'].includes(messageType) &&
+      text.trim().toLowerCase().startsWith('model ');
+
+    if (messageType === 'command' || modelSwitch) {
+      return { id, type: 'command.execute', source, payload: { command: text } };
+    }
+    if (['ship', 'user', 'control', 'message'].includes(messageType)) {
+      const prepared = prepareLegacyInboxPrompt([message]);
+      if (prepared) {
+        return {
+          id,
+          type: 'prompt.inject',
+          source,
+          payload: { prompt: prepared.parts },
+          actions: { start_turn: true },
+        };
+      }
+    }
+    return { id, type: 'unsupported', source, payload: {} };
+  });
+}
