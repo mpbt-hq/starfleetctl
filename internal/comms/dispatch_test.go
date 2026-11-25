@@ -4,6 +4,7 @@
 package comms
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -124,6 +125,37 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 	}
 	if resp.Messages != nil {
 		t.Fatalf("events.poll must not return legacy messages: %#v", resp.Messages)
+	}
+
+	wire, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(wire, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope["protocol_version"] != float64(dispatchEventProtocolVersion) {
+		t.Fatalf("JSON protocol_version = %#v, want %d", envelope["protocol_version"], dispatchEventProtocolVersion)
+	}
+	wireEvents, ok := envelope["events"].([]any)
+	if !ok || len(wireEvents) != 2 {
+		t.Fatalf("JSON events = %#v, want 2-element array", envelope["events"])
+	}
+	wireEvent, ok := wireEvents[0].(map[string]any)
+	if !ok || wireEvent["type"] != "prompt.inject" {
+		t.Fatalf("JSON event[0] = %#v, want prompt.inject object", wireEvents[0])
+	}
+	wirePayload, ok := wireEvent["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("JSON event[0].payload = %#v, want object", wireEvent["payload"])
+	}
+	if _, ok := wirePayload["prompt"].([]any); !ok {
+		t.Fatalf("JSON event[0].payload.prompt = %#v, want string array", wirePayload["prompt"])
+	}
+	wireActions, ok := wireEvent["actions"].(map[string]any)
+	if !ok || wireActions["start_turn"] != true {
+		t.Fatalf("JSON event[0].actions = %#v, want start_turn=true", wireEvent["actions"])
 	}
 
 	for i, message := range inbox.Messages {
