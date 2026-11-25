@@ -17,9 +17,50 @@ const APP_LOG_ENABLED = false
 import { execSync } from 'node:child_process'
 import { resolveLatestShipSession } from './session-resolution.mjs'
 import { normalizeInboxResponse } from './inbox-response.mjs'
-import { prepareLegacyInboxPrompt } from './prompt-preparation.mjs'
-import { createInboxCoordinator, isSupportedInboxMessage } from './inbox-coordinator.mjs'
+import { prepareLegacyInboxPrompt, preparePromptEvents } from './prompt-preparation.mjs'
+import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
 import { createFirstCommsReporter, createRuntimeIdentity, formatRuntimeIdentity } from './runtime-identity.mjs'
+
+// Compatibility adapter for older starfleetctl binaries that expose only
+// raw inbox messages. New binaries return fully formatted generic events from
+// Go; this fallback is removed after the compatibility window.
+function legacyInboxEvents(messages: any[]): any[] {
+  if (!Array.isArray(messages)) return []
+  return messages.map((message: any) => {
+    const id = typeof message?.id === 'string' ? message.id : ''
+    const messageType = typeof message?.type === 'string' && message.type
+      ? message.type
+      : 'ship'
+    const text = typeof message?.text === 'string' ? message.text : ''
+    const source = {
+      kind: 'comms.message',
+      id,
+      from: typeof message?.from === 'string' ? message.from : '',
+      target: typeof message?.target === 'string' ? message.target : '',
+      reply_to: typeof message?.reply_to === 'string' ? message.reply_to : '',
+      message_type: messageType,
+    }
+    const modelSwitch = ['ship', 'user', 'control'].includes(messageType) &&
+      text.trim().toLowerCase().startsWith('model ')
+
+    if (messageType === 'command' || modelSwitch) {
+      return { id, type: 'command.execute', source, payload: { command: text } }
+    }
+    if (['ship', 'user', 'control', 'message'].includes(messageType)) {
+      const prepared = prepareLegacyInboxPrompt([message])
+      if (prepared) {
+        return {
+          id,
+          type: 'prompt.inject',
+          source,
+          payload: { prompt: prepared.parts },
+          actions: { start_turn: true },
+        }
+      }
+    }
+    return { id, type: 'unsupported', source, payload: {} }
+  })
+}
 
 const ROOT = process.cwd()
 
@@ -161,8 +202,8 @@ export const plugin = async ({ client, $ }: any) => {
 
   let tuiReady = false
   let sessionNeedsIdentity = true
-  const inboxCoordinator = createInboxCoordinator()
-  const unsupportedMessageDiagnostics = new Set<string>()
+  const eventCoordinator = createInboxCoordinator()
+  const unsupportedEventDiagnostics = new Set<string>()
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
@@ -475,8 +516,8 @@ export const plugin = async ({ client, $ }: any) => {
     for (const msg of messages) {
       if (!isSupportedInboxMessage(msg)) {
         const diagnosticKey = `${String(msg?.id)}:${String(msg?.type)}`
-        if (!unsupportedMessageDiagnostics.has(diagnosticKey)) {
-          unsupportedMessageDiagnostics.add(diagnosticKey)
+        if (!unsupportedEventDiagnostics.has(diagnosticKey)) {
+          unsupportedEventDiagnostics.add(diagnosticKey)
           tickLog(`unknown message type=${String(msg?.type)} from=${msg?.from} id=${msg?.id} (left pending)`)
         }
         continue
@@ -491,7 +532,7 @@ export const plugin = async ({ client, $ }: any) => {
         continue
       }
       if (handled) {
-        inboxCoordinator.markSubmitted([msg.id])
+        eventCoordinator.markSubmitted([msg.id])
         const sr = bus({ cmd: 'seen_mark', id: msg.id })
         tickLog(`handoff-${mode}-command ship=${aid()} sid=${sid || '-'} id=${msg.id} seen=${!!sr?.ok}`)
       } else {
@@ -703,7 +744,7 @@ const logPollTimer = setInterval(async () => {
   if (!init.ok) {
     tickLog(`comms-init-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${init.error.slice(0, 180)}`)
   }
-  inboxCoordinator.seed(init.messages)
+  eventCoordinator.seed(init.messages)
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -776,7 +817,7 @@ const logPollTimer = setInterval(async () => {
   // All adapters go through this one poller. Concurrent calls share one
   // in-flight CLI read; the coordinator retains unsubmitted messages and
   // leases each message to only one adapter.
-  const pollInbox = () => inboxCoordinator.poll(() => {
+  const pollInbox = () => eventCoordinator.poll(() => {
     try {
       return normalizeInboxResponse(bus({ cmd: 'inbox' }))
     } catch (e) {
@@ -807,7 +848,7 @@ const logPollTimer = setInterval(async () => {
         logInboxPollDiagnostic('error', `error=${String(inbox.error || 'unknown').replace(/\s+/g, ' ').slice(0, 180)}`)
       }
       const inboxMessages = inbox.ok ? inbox.messages : []
-      const msgs = inboxCoordinator.claim(available)
+      const msgs = eventCoordinator.claim(available)
       claimedIds = msgs.map((m: any) => m.id)
       const inboxIds = inboxMessages.map((m: any) => m.id).join(',')
       if (inboxMessages.length > 0 || msgs.length > 0) {
@@ -858,7 +899,7 @@ const logPollTimer = setInterval(async () => {
         })
         const resErr = res && (res as any).error
         if (!resErr) {
-          inboxCoordinator.markSubmitted(prepared.eventIds)
+          eventCoordinator.markSubmitted(prepared.eventIds)
           for (const id of prepared.eventIds) {
             const sr = bus({ cmd: 'seen_mark', id })
             tickLog(`handoff-ok ship=${aid()} sid=${targetSid} id=${id} seen=${!!sr?.ok} prompt=${JSON.stringify(res).slice(0, 120)}`)
@@ -870,7 +911,7 @@ const logPollTimer = setInterval(async () => {
         tickLog(`handoff-exception ship=${aid()} sid=${targetSid} ids=[${ids}] error=${String(e).slice(0, 200)}`)
       }
     } finally {
-      inboxCoordinator.release(claimedIds)
+      eventCoordinator.release(claimedIds)
       pollRunning = false
     }
   }
@@ -946,7 +987,7 @@ const logPollTimer = setInterval(async () => {
         return
       }
 
-      const claimed = inboxCoordinator.claim(available)
+      const claimed = eventCoordinator.claim(available)
       const claimedIds = claimed.map((m: any) => m.id)
       try {
         const toInject = await dispatchMessages(claimed, async () => handoffSid, 'transform')
@@ -957,14 +998,14 @@ const logPollTimer = setInterval(async () => {
             return
           }
           output.system.push('', prepared.parts.join('\n'))
-          inboxCoordinator.markSubmitted(prepared.eventIds)
+          eventCoordinator.markSubmitted(prepared.eventIds)
           for (const id of prepared.eventIds) {
             const sr = bus({ cmd: 'seen_mark', id })
             tickLog(`handoff-transform ship=${aid()} sid=${handoffSid} id=${id} seen=${!!sr?.ok} mode=system-inject`)
           }
         }
       } finally {
-        inboxCoordinator.release(claimedIds)
+        eventCoordinator.release(claimedIds)
       }
     },
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
