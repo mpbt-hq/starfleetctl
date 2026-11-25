@@ -197,7 +197,7 @@ non-destructive event envelope:
         "message_type": "ship"
       },
       "payload": {
-        "prompt": "--- fleet directives ...\\nDirective m123 from Enterprise:\\n...\\n\\n--- end fleet directives ---\\n\\n"
+        "prompt": "--- fleet directives ...\nDirective m123 from Enterprise:\n...\n\n--- end fleet directives ---\n\n"
       },
       "actions": { "start_turn": true }
     },
