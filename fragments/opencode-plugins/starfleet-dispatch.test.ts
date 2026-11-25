@@ -62,19 +62,19 @@ describe('shared prompt preparation', () => {
       {
         id: 'e1',
         type: 'prompt.inject',
-        payload: { prompt: 'first block\\n\\n' },
+        payload: { prompt: 'first block\n\n' },
         actions: { start_turn: true },
       },
       {
         id: 'e2',
         type: 'prompt.inject',
-        payload: { prompt: ['second block', '\\n\\n'] },
+        payload: { prompt: ['second block', '\n\n'] },
         actions: { start_turn: false },
       },
     ])
     assert.deepStrictEqual(prepared, {
       eventIds: ['e1', 'e2'],
-      parts: ['first block\\n\\n', 'second block', '\\n\\n'],
+      parts: ['first block\n\n', 'second block', '\n\n'],
       startTurn: true,
     })
   })
