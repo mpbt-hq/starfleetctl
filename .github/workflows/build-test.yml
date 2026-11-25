@@ -51,6 +51,8 @@ jobs:
         with:
           node-version: 22
       - name: Install plugin check toolchain
-        run: npm install --global typescript @types/node esbuild
+        run: npm install --global typescript @types/node esbuild tsx
       - name: Check OpenCode plugin
         run: make check-plugin
+      - name: Test OpenCode plugin logic
+        run: make test-plugin
