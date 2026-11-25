@@ -830,10 +830,10 @@ const logPollTimer = setInterval(async () => {
         })
         const resErr = res && (res as any).error
         if (!resErr) {
-          for (const m of injectable) {
-            submitted.add(m.id)
-            const sr = bus({ cmd: 'seen_mark', id: m.id })
-            tickLog(`handoff-ok ship=${aid()} sid=${targetSid} id=${m.id} seen=${!!sr?.ok} prompt=${JSON.stringify(res).slice(0, 120)}`)
+          for (const id of prepared.eventIds) {
+            submitted.add(id)
+            const sr = bus({ cmd: 'seen_mark', id })
+            tickLog(`handoff-ok ship=${aid()} sid=${targetSid} id=${id} seen=${!!sr?.ok} prompt=${JSON.stringify(res).slice(0, 120)}`)
           }
         } else {
           tickLog(`handoff-fail ship=${aid()} sid=${targetSid} ids=[${ids}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
