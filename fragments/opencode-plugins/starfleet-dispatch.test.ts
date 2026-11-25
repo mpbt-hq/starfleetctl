@@ -7,10 +7,59 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
+import { prepareLegacyInboxPrompt, preparePrompt } from './prompt-preparation'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
 // ============================================================================
+
+describe('shared prompt preparation', () => {
+  test('accepts one complete prompt string without rewriting it', () => {
+    const prompt = '--- directives ---\\nDirective m1 from Enterprise:\\nstatus\\n--- end ---'
+    assert.deepStrictEqual(preparePrompt(['evt-1'], prompt, true), {
+      eventIds: ['evt-1'],
+      parts: [prompt],
+      startTurn: true,
+    })
+  })
+
+  test('preserves ordered prompt segments from the generic event contract', () => {
+    assert.deepStrictEqual(preparePrompt(['evt-1', 'evt-2'], ['first', 'second']), {
+      eventIds: ['evt-1', 'evt-2'],
+      parts: ['first', 'second'],
+      startTurn: false,
+    })
+  })
+
+  test('rejects malformed or empty generic prompt payloads', () => {
+    assert.equal(preparePrompt([], 'text'), null)
+    assert.equal(preparePrompt(['evt-1'], ''), null)
+    assert.equal(preparePrompt(['evt-1'], ['valid', 42]), null)
+    assert.equal(preparePrompt([' '], 'text'), null)
+  })
+
+  test('legacy inbox messages produce one shared prompt for both adapters', () => {
+    const prepared = prepareLegacyInboxPrompt([
+      { id: 'm1', from: 'Enterprise', text: 'status please' },
+      { id: 'm2', from: 'Voyager', text: 'check CI' },
+    ])
+    assert.deepStrictEqual(prepared, {
+      eventIds: ['m1', 'm2'],
+      parts: [
+        '--- fleet directives (from other ships via comms) ---\\n' +
+        'Process each directive and carry out the requested action.\\n\\n' +
+        'Directive m1 from Enterprise:\\nstatus please\\n\\n' +
+        'Directive m2 from Voyager:\\ncheck CI\\n\\n' +
+        '--- end fleet directives ---',
+      ],
+      startTurn: true,
+    })
+  })
+
+  test('legacy formatter rejects a non-array inbox response', () => {
+    assert.equal(prepareLegacyInboxPrompt({ messages: [] }), null)
+  })
+})
 
 describe('starfleet-dispatch plugin pure logic', () => {
 
