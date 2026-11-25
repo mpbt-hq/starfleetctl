@@ -153,8 +153,8 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 	if !ok {
 		t.Fatalf("JSON event[0].payload = %#v, want object", wireEvent["payload"])
 	}
-	if _, ok := wirePayload["prompt"].([]any); !ok {
-		t.Fatalf("JSON event[0].payload.prompt = %#v, want string array", wirePayload["prompt"])
+	if _, ok := wirePayload["prompt"].(string); !ok {
+		t.Fatalf("JSON event[0].payload.prompt = %#v, want formatted string", wirePayload["prompt"])
 	}
 	wireActions, ok := wireEvent["actions"].(map[string]any)
 	if !ok || wireActions["start_turn"] != true {
@@ -175,12 +175,16 @@ func TestDispatchEventsPollReturnsFormattedPromptEvents(t *testing.T) {
 		if event.Source.From != message.From || event.Source.Target != message.Target || event.Source.MessageType != message.Type {
 			t.Errorf("event[%d].Source metadata = %#v, want from/target/type from message %#v", i, event.Source, message)
 		}
-		prompt, ok := event.Payload.Prompt.([]string)
+		prompt, ok := event.Payload.Prompt.(string)
 		if !ok {
-			t.Fatalf("event[%d].payload.prompt type = %T, want []string", i, event.Payload.Prompt)
+			t.Fatalf("event[%d].payload.prompt type = %T, want string", i, event.Payload.Prompt)
 		}
-		if want := formatCommsPrompt(message); !reflect.DeepEqual(prompt, want) {
-			t.Errorf("event[%d].prompt = %#v, want Go-formatted prompt %#v", i, prompt, want)
+		want := "--- fleet directives (from other ships via comms) ---\\n" +
+			"Process each directive and carry out the requested action.\\n\\n" +
+			"Directive " + message.ID + " from " + message.From + ":\\n" +
+			message.Text + "\\n\\n--- end fleet directives ---\\n\\n"
+		if prompt != want {
+			t.Errorf("event[%d].prompt = %q, want Go-formatted prompt %q", i, prompt, want)
 		}
 		if !event.Actions.StartTurn {
 			t.Errorf("event[%d].actions.start_turn = false, want true", i)
