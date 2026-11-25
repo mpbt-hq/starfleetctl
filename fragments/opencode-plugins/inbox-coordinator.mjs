@@ -28,7 +28,9 @@ export function createInboxCoordinator() {
     if (!Array.isArray(messages)) return;
     for (const message of messages) {
       const id = message && typeof message.id === 'string' ? message.id : '';
-      if (!id.trim() || submitted.has(id) || pending.has(id)) continue;
+      if (!id.trim() || submitted.has(id)) continue;
+      // Reorder to the source inbox's current ordering on every successful read.
+      if (pending.has(id)) pending.delete(id);
       pending.set(id, message);
     }
   };
