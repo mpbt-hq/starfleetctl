@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright © 2026 Enrico Weigelt, metux IT consult
 //
-// Auto-installed by `starfleetctl bootstrap --fix` from
-// github.com/mpbt-hq/starfleetctl (fragments/opencode-plugins/).
-// Do NOT hand-edit — changes are overwritten on the next bootstrap.
-// Edit the canonical copy in the starfleetctl repo instead.
+// Canonical source in fragments/opencode-plugins/.
+// `starfleetctl bootstrap --fix` installs this file as
+// .opencode/plugins/starfleet-dispatch.ts. Edit this fragment, never the
+// deployed copy under .opencode/plugins.
 
 const PLUGIN_VERSION = '2.5.19'
 
