@@ -227,3 +227,56 @@ func TestDispatchEventsPollEmpty(t *testing.T) {
 		t.Fatalf("JSON events = %#v, want empty array", envelope["events"])
 	}
 }
+
+func TestEventsFromMessagesClassifiesCommandsAndUnknownTypes(t *testing.T) {
+	messages := []Message{
+		{ID: "m-command", From: "Enterprise", Type: "command", Text: "task registry"},
+		{ID: "m-model", From: "Voyager", Type: "ship", Text: "model opencode/test"},
+		{ID: "m-unknown", From: "Discovery", Type: "future-type", Text: "future payload"},
+	}
+
+	events := eventsFromMessages(messages)
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
+	}
+	if events[0].Type != "command.execute" || events[0].Payload.Command != "task registry" {
+		t.Errorf("command event = %#v, want command.execute with original command text", events[0])
+	}
+	if events[1].Type != "command.execute" || events[1].Payload.Command != "model opencode/test" {
+		t.Errorf("model shorthand event = %#v, want command.execute with original text", events[1])
+	}
+	if events[1].Source.MessageType != "ship" {
+		t.Errorf("model shorthand source type = %q, want ship", events[1].Source.MessageType)
+	}
+	if events[2].Type != "unsupported" {
+		t.Errorf("unknown message type event = %#v, want unsupported", events[2])
+	}
+	if events[2].Payload.Prompt != nil || events[2].Payload.Command != "" {
+		t.Errorf("unsupported event must not carry an injectable payload: %#v", events[2])
+	}
+}
+
+func TestDispatchInitIncludesEventsAndLegacyMessages(t *testing.T) {
+	b := newTestBus(t, "Enterprise")
+	id, err := b.post(b.ShipID, "startup directive", "", "", "", "ship")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := b.dispatch(dispatchRequest{Cmd: "init", Note: "test startup"})
+	if !resp.OK {
+		t.Fatalf("init failed: %s", resp.Error)
+	}
+	if len(resp.Messages) != 1 || resp.Messages[0].ID != id {
+		t.Fatalf("legacy messages = %#v, want message %s", resp.Messages, id)
+	}
+	if resp.ProtocolVersion != dispatchEventProtocolVersion || resp.Events == nil || len(*resp.Events) != 1 {
+		t.Fatalf("init event envelope = version %d events %#v", resp.ProtocolVersion, resp.Events)
+	}
+	if (*resp.Events)[0].Type != "prompt.inject" {
+		t.Fatalf("startup event = %#v, want prompt.inject", (*resp.Events)[0])
+	}
+	if b.acked(id, b.ShipID) {
+		t.Fatal("init must not acknowledge the startup event")
+	}
+}
