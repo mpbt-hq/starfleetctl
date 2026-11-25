@@ -250,6 +250,7 @@ describe('shared event coordinator', () => {
 
     assert.equal(normalizeEventResponse({ ok: true, protocol_version: 2, events: [] }).ok, false)
     assert.equal(normalizeEventResponse({ ok: true, protocol_version: 1, events: {} }).ok, false)
+    assert.equal(normalizeEventResponse({ ok: true, protocol_version: 1 }).ok, false)
     assert.equal(normalizeEventResponse(null).ok, false)
   })
 })
