@@ -10,8 +10,10 @@
 /** @param {unknown} message */
 export function isSupportedInboxMessage(message) {
   if (!message || typeof message !== 'object') return false;
-  const type = typeof message.type === 'string' && message.type ? message.type : 'ship';
-  return ['ship', 'user', 'control', 'message', 'command'].includes(type);
+  const rawType = message.type;
+  const type = rawType == null || rawType === '' ? 'ship' : rawType;
+  return typeof type === 'string' &&
+    ['ship', 'user', 'control', 'message', 'command'].includes(type);
 }
 
 export function createInboxCoordinator() {
