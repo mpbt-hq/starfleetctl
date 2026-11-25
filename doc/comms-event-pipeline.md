@@ -176,29 +176,90 @@ not by itself proof that a particular Comms directive was processed. Turn
 start/completion still require explicit correlation and must not be inferred
 from `promptAsync` returning.
 
+## Implemented event wire contract (protocol v1)
+
+The plugin polls with `{"cmd":"events.poll"}`. The response is a versioned,
+non-destructive event envelope:
+
+```json
+{
+  "ok": true,
+  "protocol_version": 1,
+  "events": [
+    {
+      "id": "m123",
+      "type": "prompt.inject",
+      "source": {
+        "kind": "comms.message",
+        "id": "m123",
+        "from": "Enterprise",
+        "target": "Voyager",
+        "message_type": "ship"
+      },
+      "payload": {
+        "prompt": "--- fleet directives ...\\nDirective m123 from Enterprise:\\n...\\n\\n--- end fleet directives ---\\n\\n"
+      },
+      "actions": { "start_turn": true }
+    },
+    {
+      "id": "m124",
+      "type": "command.execute",
+      "source": {
+        "kind": "comms.message",
+        "id": "m124",
+        "from": "Enterprise",
+        "message_type": "command"
+      },
+      "payload": { "command": "task status" }
+    },
+    {
+      "id": "m125",
+      "type": "unsupported",
+      "source": {
+        "kind": "comms.message",
+        "id": "m125",
+        "message_type": "future-type"
+      },
+      "payload": {}
+    }
+  ]
+}
+```
+
+- Event IDs are stable Comms message IDs; source metadata is preserved.
+- Go owns the complete prompt text, including sender/context prefix and
+  separators. A prompt may be a string or string array; the plugin concatenates
+  supplied parts without adding Comms-specific formatting.
+- `prompt.inject` carries `payload.prompt` and generic `actions.start_turn`.
+- `command.execute` preserves existing command and model-shorthand behavior
+  during migration. Later work can replace individual commands with typed
+  events such as model switch, quit, or reset.
+- Unknown source message types become `unsupported`; the plugin does not
+  acknowledge them, so they remain pending for explicit handling.
+- Polling is non-destructive. Existing `seen_mark` remains the submission
+  acknowledgement and is not evidence of turn start or completion.
+- `init` returns the same versioned `events` plus legacy `messages`, so old
+  plugins continue to work. The new plugin falls back to `inbox` only when
+  paired with a CLI that does not implement `events.poll`.
+
 ## Incremental implementation plan
 
 1. **Compatibility baseline:** complete — Discovery reports OpenCode and
    plugin SDK 1.19.3; the V1 hooks, promptAsync endpoint, and session event
    shapes were checked against upstream tag v1.19.3.
-2. **Shared prompt preparation:** implemented on this branch — both existing
-   hooks consume one PreparedPrompt and identical legacy prompt text; the
-   generic string/string[] payload validator is ready for the Go event
-   contract. The old inbox wire protocol remains unchanged. Helper packaging
-   uses an installed-but-unregistered .mjs module plus a build-only .d.mts
-   declaration. Exact-head CI passed: Go build/vet/tests on Go 1.22.x and
-   stable, plugin bundle/typecheck, 65 plugin tests, and bootstrap tests.
-3. **Shared poller and event dispatcher:** implemented on this branch — both
-   OpenCode hooks call one single-flight inbox reader and coordinator. Startup
-   backlog and live inbox are deduplicated; one adapter claims a message at a
-   time; failed handoffs release the lease; unknown message types remain
-   pending. The shared dispatcher owns command-vs-prompt classification.
-4. **Generic Go event contract:** next — add a versioned event-poll response
-   with Go-owned Comms prompt formatting. Keep the legacy inbox command for
-   older plugin compatibility while migrating the new plugin to the event
-   envelope.
-5. **Lifecycle:** add distinct applied, turn-started, completed, and failed
-   reporting with durable idempotency and restart recovery.
+2. **Shared prompt preparation:** complete — both adapters consume one
+   OpenCode-independent PreparedPrompt; string/string[] payloads are validated
+   without modifying the Go-owned prompt text.
+3. **Shared poller and event dispatcher:** complete — both OpenCode hooks use
+   one single-flight event poller/coordinator. Startup events and live polls
+   are deduplicated; one adapter leases an event at a time; failed handoffs
+   release leases; unsupported event types remain pending.
+4. **Generic Go event contract:** complete — protocol v1 is implemented in
+   `events.poll`; Go formats prompt strings and classifies prompt, command,
+   and unsupported events. `init` returns both events and legacy messages.
+   The old inbox command remains for older plugins.
+5. **Lifecycle:** next — add distinct submitted, turn-started, completed, and
+   failed reporting with durable idempotency and restart recovery.
 6. **Future actions:** model switch, quit, reset, and similar operations become
    typed event handlers; they do not become special cases in the polling loop.
 
