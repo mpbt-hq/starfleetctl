@@ -59,7 +59,7 @@ func formatCommsPrompt(message Message) string {
 		"",
 		"--- end fleet directives ---",
 		"",
-	}, "\\n")
+	}, "\n")
 }
 
 func isModelSwitchMessage(message Message, messageType string) bool {
