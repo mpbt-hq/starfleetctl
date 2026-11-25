@@ -1185,6 +1185,11 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, 
 	if unrestricted {
 		externalDirRules["**"] = "allow"
 	} else if launchType == "terminal" {
+		// Console-attached ships have a human available for genuinely
+		// unrestricted paths, but /tmp is a routine scratch area and should
+		// not trigger a permission prompt on every access.
+		externalDirRules["/tmp"] = "allow"
+		externalDirRules["/tmp/**"] = "allow"
 		externalDirRules["**"] = "ask"
 	} else {
 		externalDirRules["**"] = "deny"
