@@ -6,7 +6,7 @@
 // Do NOT hand-edit — changes are overwritten on the next bootstrap.
 // Edit the canonical copy in the starfleetctl repo instead.
 
-const PLUGIN_VERSION = '2.5.16'
+const PLUGIN_VERSION = '2.5.17'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -16,6 +16,7 @@ const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
 import { resolveLatestShipSession } from './session-resolution.mjs'
+import { normalizeInboxResponse } from './inbox-response.mjs'
 import { createFirstCommsReporter, createRuntimeIdentity, formatRuntimeIdentity } from './runtime-identity.mjs'
 
 const ROOT = process.cwd()
@@ -657,13 +658,13 @@ const logPollTimer = setInterval(async () => {
   }
 }, LOG_POLL_MS)
 
-  // Init: ack all inbox, load seen, prune stale, set status — one bus call.
-  const init = bus({ cmd: 'init', note: 'opencode ship' })
-  for (const id of (init.seen || [])) { submitted.add(id) }
-  // DoInit acks the whole unread inbox and returns it in `messages`; it must
-  // still be DELIVERED (the agent never saw it), otherwise every directive
-  // that arrived while the ship was down is silently lost.
-  for (const m of (init.messages || [])) {
+  // Init snapshots unread messages without acknowledging them. Delivery
+  // (prompt + seen_mark) remains the poller's responsibility.
+  const init = normalizeInboxResponse(bus({ cmd: 'init', note: 'opencode ship' }))
+  if (!init.ok) {
+    tickLog(`comms-init-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${init.error.slice(0, 180)}`)
+  }
+  for (const m of init.messages) {
     if (m && m.id && !submitted.has(m.id)) bootBacklog.push({ id: m.id, from: m.from, text: m.text, type: 'ship' })
   }
 
@@ -736,24 +737,42 @@ const logPollTimer = setInterval(async () => {
   }
 
   let pollRunning = false
+  let lastInboxPollDiagnosticAt = 0
+  let lastInboxPollDiagnosticState = ''
+  const logInboxPollDiagnostic = (state: string, detail: string) => {
+    const now = Date.now()
+    if (state === lastInboxPollDiagnosticState && now - lastInboxPollDiagnosticAt < 60000) return
+    lastInboxPollDiagnosticState = state
+    lastInboxPollDiagnosticAt = now
+    tickLog(`inbox-poll-${state} ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} pid=${process.pid} tui_ready=${tuiReady} sid=${currentSessionID || '-'} ${detail}`)
+  }
+
   const poll = async () => {
-    if (!tuiReady) return
-    // Reentrancy guard: poll() is async and runs on a short interval. Without
-    // this, a slow injection could overlap the next tick and inject the same
-    // (unclaimed) directives twice.
+    // Comms polling is deliberately independent of TUI/session lifecycle
+    // events. resolveSessionId() below handles reused sessions and retries
+    // when no safe session can be identified.
     if (pollRunning) return
     pollRunning = true
     try {
-      const r = bus({ cmd: 'inbox' })
+      const inbox = normalizeInboxResponse(bus({ cmd: 'inbox' }))
+      if (!inbox.ok) {
+        logInboxPollDiagnostic('error', `error=${inbox.error.replace(/\s+/g, ' ').slice(0, 180)}`)
+      }
+      // A failed live inbox read must not block messages captured at startup.
+      const inboxMessages = inbox.ok ? inbox.messages : []
       const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
-      const inboxMsgs = (r.messages || []).filter((m: any) => !submitted.has(m.id))
+      const inboxMsgs = inboxMessages.filter((m: any) => !submitted.has(m.id))
       const msgs = [...boot, ...inboxMsgs]
-      const inboxIds = (r.messages || []).map((m: any) => m.id).join(',')
-      if ((r.messages || []).length > 0 || boot.length > 0) {
+      const inboxIds = inboxMessages.map((m: any) => m.id).join(',')
+      if (inboxMessages.length > 0 || boot.length > 0) {
         const runtime = formatRuntimeIdentity(RUNTIME_IDENTITY)
         tickLog(`inbox-poll ${runtime} ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inboxIds}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
       }
-      if (msgs.length === 0) return
+      if (msgs.length === 0) {
+        logInboxPollDiagnostic('idle', 'messages=0 boot=0')
+        return
+      }
+      lastInboxPollDiagnosticState = 'messages'
 
       // Emit one process-scoped receipt on the first actual Comms message.
       // This happens before session resolution/promptAsync and therefore also
@@ -834,6 +853,8 @@ const logPollTimer = setInterval(async () => {
   }
 
   const pollTimer = setInterval(poll, POLL_MS)
+  // Run once immediately; do not wait for a TUI event or the first interval.
+  void poll()
 
   // Sync cleanup on process exit (can't await here).
   process.on('exit', () => {
@@ -891,11 +912,14 @@ const logPollTimer = setInterval(async () => {
       // context. Mark submitted/seen only AFTER a directive is actually injected
       // (or a command executed) in this confirmed session context, so messages
       // remain retry-fähig if injection is not possible.
-      const r = bus({ cmd: 'inbox' })
+      const inbox = normalizeInboxResponse(bus({ cmd: 'inbox' }))
+      if (!inbox.ok) {
+        tickLog(`inbox-transform-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${inbox.error.slice(0, 180)}`)
+      }
       const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
-      const pendingMsgs = [...boot, ...(r.messages || []).filter((m: any) => !submitted.has(m.id))]
-      if ((r.messages || []).length > 0 || boot.length > 0) {
-        tickLog(`inbox-transform ship=${aid()} sid=${currentSessionID || '-'} inbox=[${(r.messages || []).map((m: any) => m.id).join(',')}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
+      const pendingMsgs = [...boot, ...inbox.messages.filter((m: any) => !submitted.has(m.id))]
+      if (inbox.messages.length > 0 || boot.length > 0) {
+        tickLog(`inbox-transform ship=${aid()} sid=${currentSessionID || '-'} inbox=[${inbox.messages.map((m: any) => m.id).join(',')}] boot=[${boot.map((m: any) => m.id).join(',')}]`)
       }
       const handoffSid = currentSessionID
       const toInject: any[] = []
