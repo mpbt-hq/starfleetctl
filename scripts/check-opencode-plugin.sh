@@ -92,10 +92,10 @@ fi
 
 # --- 3) focused runtime tests for session recovery and plugin identity ---
 if command -v node >/dev/null 2>&1; then
-    if node --test fragments/opencode-plugins/session-resolution.test.mjs fragments/opencode-plugins/runtime-identity.test.mjs; then
-        note "session recovery and runtime identity tests OK"
+    if node --test fragments/opencode-plugins/session-resolution.test.mjs fragments/opencode-plugins/runtime-identity.test.mjs fragments/opencode-plugins/inbox-response.test.mjs; then
+        note "session recovery, runtime identity and inbox response tests OK"
     else
-        note "session recovery and runtime identity tests FAILED"
+        note "session recovery, runtime identity and inbox response tests FAILED"
         FAILED=1
     fi
 else
