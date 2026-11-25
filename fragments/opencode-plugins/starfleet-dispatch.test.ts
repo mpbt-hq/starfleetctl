@@ -59,6 +59,13 @@ describe('shared prompt preparation', () => {
   test('legacy formatter rejects a non-array inbox response', () => {
     assert.equal(prepareLegacyInboxPrompt({ messages: [] }), null)
   })
+
+  test('legacy formatter rejects a partially malformed batch without dropping peers', () => {
+    assert.equal(prepareLegacyInboxPrompt([
+      { id: 'm1', from: 'Enterprise', text: 'status please' },
+      { id: 'm2', from: 'Voyager' },
+    ]), null)
+  })
 })
 
 describe('starfleet-dispatch plugin pure logic', () => {
