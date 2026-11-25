@@ -178,12 +178,14 @@ from `promptAsync` returning.
 
 ## Incremental implementation plan
 
-1. **Compatibility baseline:** obtain deployed OpenCode version/API evidence;
-   document the current two paths and their observable lifecycle signals.
-2. **Shared prompt preparation:** introduce the `PreparedPrompt` type and one
-   formatter-to-prompt conversion path. Keep both existing hooks, but make them
-   thin adapters over the same prepared value. This is the first safe code
-   slice and should not change the wire protocol yet.
+1. **Compatibility baseline:** complete — Discovery reports OpenCode and
+   plugin SDK 1.19.3; the V1 hooks, promptAsync endpoint, and session event
+   shapes were checked against upstream tag v1.19.3.
+2. **Shared prompt preparation:** implemented on this branch — both existing
+   hooks now consume one PreparedPrompt and the same legacy prompt text; the
+   generic string/string[] payload validator is ready for the Go event
+   contract. The old inbox wire protocol remains unchanged. CI verification
+   is pending.
 3. **Generic dispatcher:** add one poller, validated event envelope, queue,
    ordering, and single-flight delivery coordination. Remove hook-local inbox
    polling only after parity tests exist.
