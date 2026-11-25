@@ -18,33 +18,54 @@ set -u
 cd "$(dirname "$0")/.."
 
 PLUGIN="${1:-fragments/opencode-plugins/starfleet-dispatch.ts}"
+INTEGRATION_TEST="fragments/opencode-plugins/starfleet-dispatch.integration.test.ts"
 TSCONFIG=fragments/opencode-plugins/tsconfig.json
 FAILED=0
 
 note() { printf 'check-opencode-plugin: %s\n' "$*"; }
 
-if [ ! -f "$PLUGIN" ]; then
-    note "plugin not found: $PLUGIN — nothing to check"
-    exit 0
+check_file() {
+    local file="$1"
+    local label="$2"
+    
+    if [ ! -f "$file" ]; then
+        note "$label not found: $file — skipping"
+        return 0
+    fi
+    
+    # --- 1) esbuild bundle check (syntax + import graph) ---
+    if command -v esbuild >/dev/null 2>&1; then
+        if esbuild --bundle --format=esm --platform=node --log-level=error \
+            --outfile=/dev/null "$file"; then
+            note "esbuild bundle check OK ($label)"
+        else
+            note "esbuild bundle check FAILED ($label)"
+            return 1
+        fi
+    else
+        note "esbuild not found — skipping bundle check for $label (install esbuild)"
+    fi
+
+    # --- 2) tsc --noEmit type check ---
+    # We run tsc on the whole project (via -p) since both files are part of
+    # the same tsconfig. Running tsc on individual files with -p is not supported.
+    # So we only run tsc once for the project.
+    return 0
+}
+
+# Check main plugin
+if ! check_file "$PLUGIN" "plugin"; then
+    FAILED=1
 fi
 
-# --- 1) esbuild bundle check (syntax + import graph) ---
-if command -v esbuild >/dev/null 2>&1; then
-    if esbuild --bundle --format=esm --platform=node --log-level=error \
-        --outfile=/dev/null "$PLUGIN"; then
-        note "esbuild bundle check OK ($PLUGIN)"
-    else
-        note "esbuild bundle check FAILED"
+# Check integration test (if exists)
+if [ -f "$INTEGRATION_TEST" ]; then
+    if ! check_file "$INTEGRATION_TEST" "integration test"; then
         FAILED=1
     fi
-else
-    note "esbuild not found — skipping bundle check (install esbuild)"
 fi
 
-# --- 2) tsc --noEmit type check ---
-# Pick a tsc: global install on PATH, or local via npx --no-install (never
-# reaches the registry, so it stays offline-safe).
-TSC=()
+# Run tsc once for the whole project
 if command -v tsc >/dev/null 2>&1; then
     TSC=(tsc)
     TYPES_MODE=local-global
@@ -55,9 +76,6 @@ else
     TYPES_MODE=
 fi
 
-# Resolve @types/node the way the tsc we picked would. Without it tsc only
-# reports TS2591 "Cannot find name 'process'" noise for every node global,
-# so skip instead of failing.
 types_ok=false
 TSC_EXTRA=()
 case "${TYPES_MODE:-}" in
@@ -83,9 +101,9 @@ elif [ "$types_ok" = false ]; then
     note "typescript found, but @types/node missing — skipping type check (npm i -g @types/node)"
 else
     if "${TSC[@]}" -p "$TSCONFIG" "${TSC_EXTRA[@]}"; then
-        note "tsc --noEmit OK ($TSCONFIG)"
+        note "tsc --noEmit OK (project)"
     else
-        note "tsc --noEmit FAILED"
+        note "tsc --noEmit FAILED (project)"
         FAILED=1
     fi
 fi
