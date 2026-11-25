@@ -17,50 +17,9 @@ const APP_LOG_ENABLED = false
 import { execSync } from 'node:child_process'
 import { resolveLatestShipSession } from './session-resolution.mjs'
 import { normalizeInboxResponse } from './inbox-response.mjs'
-import { prepareLegacyInboxPrompt, preparePromptEvents } from './prompt-preparation.mjs'
+import { legacyInboxToEvents, preparePromptEvents } from './prompt-preparation.mjs'
 import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
 import { createFirstCommsReporter, createRuntimeIdentity, formatRuntimeIdentity } from './runtime-identity.mjs'
-
-// Compatibility adapter for older starfleetctl binaries that expose only
-// raw inbox messages. New binaries return fully formatted generic events from
-// Go; this fallback is removed after the compatibility window.
-function legacyInboxEvents(messages: any[]): any[] {
-  if (!Array.isArray(messages)) return []
-  return messages.map((message: any) => {
-    const id = typeof message?.id === 'string' ? message.id : ''
-    const messageType = typeof message?.type === 'string' && message.type
-      ? message.type
-      : 'ship'
-    const text = typeof message?.text === 'string' ? message.text : ''
-    const source = {
-      kind: 'comms.message',
-      id,
-      from: typeof message?.from === 'string' ? message.from : '',
-      target: typeof message?.target === 'string' ? message.target : '',
-      reply_to: typeof message?.reply_to === 'string' ? message.reply_to : '',
-      message_type: messageType,
-    }
-    const modelSwitch = ['ship', 'user', 'control'].includes(messageType) &&
-      text.trim().toLowerCase().startsWith('model ')
-
-    if (messageType === 'command' || modelSwitch) {
-      return { id, type: 'command.execute', source, payload: { command: text } }
-    }
-    if (['ship', 'user', 'control', 'message'].includes(messageType)) {
-      const prepared = prepareLegacyInboxPrompt([message])
-      if (prepared) {
-        return {
-          id,
-          type: 'prompt.inject',
-          source,
-          payload: { prompt: prepared.parts },
-          actions: { start_turn: true },
-        }
-      }
-    }
-    return { id, type: 'unsupported', source, payload: {} }
-  })
-}
 
 const ROOT = process.cwd()
 
@@ -768,7 +727,7 @@ const logPollTimer = setInterval(async () => {
   if (init.ok) {
     startupEvents = init.events
   } else if (rawInit?.ok && rawInit.protocol_version == null && Array.isArray(rawInit.messages)) {
-    startupEvents = legacyInboxEvents(rawInit.messages)
+    startupEvents = legacyInboxToEvents(rawInit.messages)
     tickLog(`comms-init-legacy ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} events=${startupEvents.length}`)
   } else {
     tickLog(`comms-init-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${String(init.error || 'invalid event envelope').slice(0, 180)}`)
@@ -860,7 +819,7 @@ const logPollTimer = setInterval(async () => {
             ok: true,
             error: '',
             protocol_version: 1,
-            events: legacyInboxEvents(legacy.messages),
+            events: legacyInboxToEvents(legacy.messages),
           }
         }
         return { ok: false, error: legacy.error, protocol_version: 1, events: [] }
