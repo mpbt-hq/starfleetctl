@@ -7,6 +7,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
+import { readFileSync } from 'node:fs'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
@@ -230,18 +231,14 @@ comms: directive m124 from 'Enterprise' → TestShip
       assert.strictEqual(parts[0], 'warning')
     })
 
-    test('should auto-adopt task from dashboard-topic reference with backticks', () => {
-      const text = 'Please work on (Dashboard-Topic `starfleet/task-example`) now.'
-      const topic = /Dashboard-Topic[ \t]*[`']([^`']+)[`']/.exec(text)
-      assert.ok(topic !== null)
-      assert.strictEqual(topic![1], 'starfleet/task-example')
-    })
-
-    test('should auto-adopt task from dashboard-topic reference with single quotes', () => {
-      const text = "See (Dashboard-Topic 'starfleet/task-example') for details."
-      const topic = /Dashboard-Topic[ \t]*[`']([^`']+)[`']/.exec(text)
-      assert.ok(topic !== null)
-      assert.strictEqual(topic![1], 'starfleet/task-example')
+    test('dashboard-topic markers are references, never automatic task adoption', () => {
+      // Guard the real plugin source: merely receiving/injecting a directive
+      // must not update currentTask or the board. Explicit task commands and
+      // the task lifecycle are the only supported status-changing paths.
+      const source = readFileSync(new URL('./starfleet-dispatch.ts', import.meta.url), 'utf8')
+      assert.doesNotMatch(source, /Dashboard-Topic/)
+      assert.doesNotMatch(source, /task-adopt/)
+      assert.match(source, /case 'task':/)
     })
   })
 
