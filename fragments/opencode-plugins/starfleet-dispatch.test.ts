@@ -9,6 +9,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert'
 import { legacyInboxToEvents, prepareLegacyInboxPrompt, preparePrompt, preparePromptEvents } from './prompt-preparation.mjs'
 import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
+import { classifyAssistantUpdate, classifyRecoveredTurn, completeEventBatch, createTurnCorrelationQueue, deterministicMessageID, resolveLifecycleSessionID } from './event-lifecycle.mjs'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
@@ -147,6 +148,50 @@ describe('shared event coordinator', () => {
     assert.equal(result.events[1].type, 'prompt.inject')
   })
 
+  test('successful poll drops startup events not leased to this consumer', async () => {
+    const coordinator = createEventCoordinator()
+    coordinator.seed([
+      { id: 'e1', type: 'prompt.inject', payload: { prompt: 'leased elsewhere' } },
+      { id: 'e2', type: 'prompt.inject', payload: { prompt: 'ours' } },
+    ])
+
+    const result = await coordinator.poll(async () => ({
+      ok: true,
+      events: [{ id: 'e2', type: 'prompt.inject', payload: { prompt: 'ours' }, lifecycle: { state: 'received' } }],
+    }))
+
+    assert.deepStrictEqual(result.events.map((event) => event.id), ['e2'])
+  })
+
+  test('refreshes lifecycle metadata on startup events without replacing their payload', async () => {
+    const coordinator = createEventCoordinator()
+    coordinator.seed([{
+      id: 'e1',
+      type: 'command.execute',
+      source: { from: 'Enterprise' },
+      payload: { command: 'status' },
+    }])
+
+    const result = await coordinator.poll(async () => ({
+      ok: true,
+      events: [{
+        id: 'e1',
+        type: 'prompt.inject',
+        source: { from: 'Other' },
+        payload: { prompt: 'replacement must not win' },
+        lifecycle: { state: 'submitted', session_ref: 'ses_a', message_ref: 'msg_a' },
+      }],
+    }))
+
+    assert.equal(result.events[0].type, 'command.execute')
+    assert.deepStrictEqual(result.events[0].payload, { command: 'status' })
+    assert.deepStrictEqual(result.events[0].lifecycle, {
+      state: 'submitted',
+      session_ref: 'ses_a',
+      message_ref: 'msg_a',
+    })
+  })
+
   test('refreshes pending order from the current event response', async () => {
     const coordinator = createEventCoordinator()
     coordinator.seed([
@@ -202,18 +247,31 @@ describe('shared event coordinator', () => {
     assert.deepStrictEqual(nextPoll.events, [])
   })
 
-  test('failed live poll does not discard startup events', async () => {
+  test('failed live poll retains startup events but does not make them dispatchable', async () => {
     const coordinator = createEventCoordinator()
     coordinator.seed([{ id: 'e1', type: 'prompt.inject', payload: { prompt: 'status' } }])
 
-    const result = await coordinator.poll(async () => ({
+    const failed = await coordinator.poll(async () => ({
       ok: false,
       error: 'temporary dispatch failure',
       events: [],
     }))
 
-    assert.equal(result.response.ok, false)
-    assert.deepStrictEqual(result.events.map((event) => event.id), ['e1'])
+    assert.equal(failed.response.ok, false)
+    assert.deepStrictEqual(failed.events, [])
+
+    const retry = await coordinator.poll(async () => ({
+      ok: true,
+      events: [{
+        id: 'e1',
+        type: 'prompt.inject',
+        payload: { prompt: 'status' },
+        lifecycle: { state: 'received' },
+      }],
+    }))
+    assert.equal(retry.response.ok, true)
+    assert.deepStrictEqual(retry.events.map((event) => event.id), ['e1'])
+    assert.equal(retry.events[0].lifecycle.state, 'received')
   })
 
   test('only known event types are dispatched', () => {
@@ -234,7 +292,7 @@ describe('shared event coordinator', () => {
     assert.equal(isSupportedEvent(claimed[0]), false)
     coordinator.release(claimed.map((event) => event.id))
 
-    const retry = await coordinator.poll(async () => ({ ok: true, events: [] }))
+    const retry = await coordinator.poll(async () => ({ ok: true, events: [unsupported] }))
     assert.deepStrictEqual(retry.events, [unsupported])
   })
 
@@ -950,3 +1008,213 @@ comms: directive m124 from 'Enterprise' → TestShip
 // tests would require the full opencode runtime.
 //
 // To run: npx tsx starfleet-dispatch.test.ts
+
+
+describe('durable event turn correlation', () => {
+  test('deterministic OpenCode message IDs are stable and order-independent', () => {
+    const first = deterministicMessageID('ses_enterprise', ['m100', 'm101'])
+    assert.equal(first, deterministicMessageID('ses_enterprise', ['m101', 'm100']))
+    assert.equal(first, deterministicMessageID('ses_enterprise', ['m100', 'm100', 'm101']))
+    assert.match(first, /^msg_[0-9a-f]{32}$/)
+    assert.notEqual(first, deterministicMessageID('ses_voyager', ['m100', 'm101']))
+    assert.notEqual(first, deterministicMessageID('ses_enterprise', ['m100']))
+  })
+  test('message correlation is FIFO and isolated by session', () => {
+    const queue = createTurnCorrelationQueue()
+    queue.capture('ses_a', 'msg_a1', { kind: 'current' }, 1000)
+    queue.capture('ses_a', 'msg_a2', { kind: 'current' }, 1001)
+    queue.capture('ses_b', 'msg_b1', { kind: 'current' }, 1002)
+    assert.equal(queue.consume('ses_b', 1003).messageID, 'msg_b1')
+    assert.equal(queue.consume('ses_a', 1003).messageID, 'msg_a1')
+    assert.equal(queue.consume('ses_a', 1003).messageID, 'msg_a2')
+    assert.equal(queue.consume('ses_a', 1003), null)
+  })
+  test('stale correlations are discarded and duplicate captures are idempotent', () => {
+    const queue = createTurnCorrelationQueue({ maxAgeMs: 100 })
+    queue.capture('ses_a', 'msg_old', { kind: 'current' }, 1000)
+    queue.capture('ses_a', 'msg_old', { kind: 'current' }, 1050)
+    assert.equal(queue.consume('ses_a', 1101), null)
+    assert.equal(queue.capture('', 'msg_invalid'), false)
+    assert.equal(queue.capture('ses_a', ''), false)
+  })
+})
+
+
+describe('event coordinator retry release', () => {
+  test('forget makes a failed submitted event eligible for a later poll', async () => {
+    const coordinator = createEventCoordinator()
+    coordinator.seed([{ id: 'm_retry', type: 'prompt.inject' }])
+    const first = coordinator.claim([{ id: 'm_retry', type: 'prompt.inject' }])
+    assert.equal(first.length, 1)
+    coordinator.markSubmitted(['m_retry'])
+    assert.equal(coordinator.claim([{ id: 'm_retry', type: 'prompt.inject' }]).length, 0)
+    coordinator.forget(['m_retry'])
+    const refreshed = await coordinator.poll(async () => ({
+      ok: true, protocol_version: 1, events: [{ id: 'm_retry', type: 'prompt.inject' }],
+    }))
+    assert.equal(refreshed.events.length, 1)
+    assert.equal(coordinator.claim(refreshed.events).length, 1)
+  })
+})
+
+
+describe('durable completion transition retry', () => {
+  test('retries a partially completed batch without regressing completed events', () => {
+    const states = new Map([['m1', 'submitted'], ['m2', 'submitted']])
+    let failSecondCompletion = true
+    const transition = (id: string, next: 'submitted' | 'turn_started' | 'completed') => {
+      const current = states.get(id)
+      if (next === 'submitted' && ['submitted', 'turn_started', 'completed'].includes(current || '')) return true
+      if (next === 'turn_started' && current === 'completed') return true
+      if (next === 'turn_started' && current === 'submitted') {
+        states.set(id, 'turn_started')
+        return true
+      }
+      if (next === 'completed' && current === 'turn_started') {
+        if (id === 'm2' && failSecondCompletion) {
+          failSecondCompletion = false
+          return false
+        }
+        states.set(id, 'completed')
+        return true
+      }
+      return next === current
+    }
+
+    assert.equal(completeEventBatch(['m1', 'm2'], transition), false)
+    assert.equal(states.get('m1'), 'completed')
+    assert.equal(states.get('m2'), 'turn_started')
+    assert.equal(completeEventBatch(['m1', 'm2'], transition), true)
+    assert.equal(states.get('m1'), 'completed')
+    assert.equal(states.get('m2'), 'completed')
+  })
+})
+
+
+describe('current-turn submission recovery', () => {
+  test('completion reasserts submitted before starting a turn whose first write failed', () => {
+    const states = new Map([['m1', 'prepared']])
+    const transitions: string[] = []
+    const transition = (id: string, next: 'submitted' | 'turn_started' | 'completed') => {
+      transitions.push(next)
+      const current = states.get(id)
+      if (next === 'submitted' && current === 'prepared') {
+        states.set(id, 'submitted')
+        return true
+      }
+      if (next === 'submitted' && ['submitted', 'turn_started', 'completed'].includes(current || '')) return true
+      if (next === 'turn_started' && current === 'submitted') {
+        states.set(id, 'turn_started')
+        return true
+      }
+      if (next === 'turn_started' && current === 'completed') return true
+      if (next === 'completed' && current === 'turn_started') {
+        states.set(id, 'completed')
+        return true
+      }
+      return false
+    }
+
+    assert.equal(completeEventBatch(['m1'], transition), true)
+    assert.deepStrictEqual(transitions, ['submitted', 'turn_started', 'completed'])
+    assert.equal(states.get('m1'), 'completed')
+  })
+})
+
+describe('persisted session recovery', () => {
+  test('uses the lifecycle session reference instead of the currently active session', () => {
+    assert.equal(
+      resolveLifecycleSessionID({ session_ref: 'ses_original' }, 'ses_current'),
+      'ses_original',
+    )
+    assert.equal(resolveLifecycleSessionID({ session_ref: '' }, 'ses_current'), 'ses_current')
+    assert.equal(resolveLifecycleSessionID(undefined, 'ses_current'), 'ses_current')
+    assert.equal(resolveLifecycleSessionID({ session_ref: '  ' }, ''), '')
+  })
+})
+
+describe('durable Comms delivery integration', () => {
+  test('a leased Comms event reaches correlated assistant completion before acknowledgement', async () => {
+    const event = {
+      id: 'm_e2e_24',
+      type: 'prompt.inject',
+      payload: { prompt: 'integration directive' },
+      lifecycle: { state: 'received' },
+    }
+    const coordinator = createEventCoordinator()
+    const poll = await coordinator.poll(async () => ({
+      ok: true,
+      protocol_version: 1,
+      events: [event],
+    }))
+    assert.deepStrictEqual(poll.events.map((entry) => entry.id), ['m_e2e_24'])
+    const [claimed] = coordinator.claim(poll.events)
+    assert.equal(claimed.id, event.id)
+
+    const sessionID = 'ses_e2e_24'
+    const messageID = deterministicMessageID(sessionID, [event.id])
+    const states = new Map([[event.id, 'received']])
+    const history: string[] = []
+    const acknowledged = new Set<string>()
+    const order: Record<string, number> = {
+      offered: 0, received: 1, prepared: 2, submitted: 3,
+      turn_started: 4, completed: 5,
+    }
+    const transition = (id: string, next: 'submitted' | 'turn_started' | 'completed') => {
+      const current = states.get(id)
+      if (!current) return false
+      history.push(next)
+      if (order[next] <= order[current]) return true
+      if (order[next] !== order[current] + 1) return false
+      states.set(id, next)
+      if (next === 'completed') acknowledged.add(id)
+      return true
+    }
+
+    assert.equal(states.get(event.id), 'received')
+    states.set(event.id, 'prepared')
+    assert.equal(transition(event.id, 'submitted'), true)
+    coordinator.markSubmitted([event.id])
+    assert.equal(coordinator.claim([event]).length, 0)
+
+    const correlations = createTurnCorrelationQueue()
+    correlations.capture(sessionID, messageID, { eventIDs: [event.id] })
+    const correlation = correlations.consume(sessionID)
+    assert.equal(correlation.messageID, messageID)
+
+    const assistant = {
+      role: 'assistant',
+      sessionID,
+      parentID: messageID,
+      time: { completed: 1234 },
+    }
+    assert.equal(classifyAssistantUpdate(assistant, sessionID, messageID), 'completed')
+    assert.equal(completeEventBatch([event.id], transition), true)
+    assert.deepStrictEqual(history, ['submitted', 'submitted', 'turn_started', 'completed'])
+    assert.equal(states.get(event.id), 'completed')
+    assert.ok(acknowledged.has(event.id))
+  })
+})
+
+describe('assistant turn completion correlation', () => {
+  const base = { role: 'assistant', sessionID: 'ses_a', parentID: 'msg_a', time: {} }
+
+  test('only matching assistant parent and session can complete a Comms turn', () => {
+    assert.equal(classifyAssistantUpdate({ ...base, time: { completed: 123 } }, 'ses_a', 'msg_a'), 'completed')
+    assert.equal(classifyAssistantUpdate({ ...base, time: { completed: 123 } }, 'ses_b', 'msg_a'), 'unrelated')
+    assert.equal(classifyAssistantUpdate({ ...base, time: { completed: 123 } }, 'ses_a', 'msg_other'), 'unrelated')
+    assert.equal(classifyAssistantUpdate({ ...base, role: 'user', time: { completed: 123 } }, 'ses_a', 'msg_a'), 'unrelated')
+  })
+
+  test('assistant updates without completion only establish started; errors fail', () => {
+    assert.equal(classifyAssistantUpdate(base, 'ses_a', 'msg_a'), 'started')
+    assert.equal(classifyAssistantUpdate({ ...base, error: { name: 'ProviderError' } }, 'ses_a', 'msg_a'), 'failed')
+  })
+
+  test('idle without a correlated assistant is failure, but a started assistant remains active', () => {
+    assert.equal(classifyRecoveredTurn(undefined, { type: 'idle' }, 'ses_a', 'msg_a'), 'failed')
+    assert.equal(classifyRecoveredTurn(base, { type: 'idle' }, 'ses_a', 'msg_a'), 'active')
+    assert.equal(classifyRecoveredTurn(undefined, { type: 'busy' }, 'ses_a', 'msg_a'), 'active')
+    assert.equal(classifyRecoveredTurn({ ...base, time: { completed: 456 } }, { type: 'idle' }, 'ses_a', 'msg_a'), 'completed')
+  })
+})

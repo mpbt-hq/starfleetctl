@@ -14,11 +14,21 @@ const dispatchEventProtocolVersion = 1
 // The event type describes the action; OpenCode-specific placement stays
 // entirely in the plugin adapter.
 type DispatchEvent struct {
-	ID      string               `json:"id"`
-	Type    string               `json:"type"`
-	Source  DispatchEventSource  `json:"source"`
-	Payload DispatchEventPayload `json:"payload"`
-	Actions DispatchEventActions `json:"actions,omitempty"`
+	ID        string                   `json:"id"`
+	Type      string                   `json:"type"`
+	Source    DispatchEventSource      `json:"source"`
+	Payload   DispatchEventPayload     `json:"payload"`
+	Actions   DispatchEventActions     `json:"actions,omitempty"`
+	Lifecycle *DispatchEventLifecycle  `json:"lifecycle,omitempty"`
+}
+
+// DispatchEventLifecycle carries opaque durable state back to a plugin so it
+// can recover correlations after a process restart without Go knowing their
+// OpenCode-specific meaning.
+type DispatchEventLifecycle struct {
+	State      string `json:"state"`
+	SessionRef string `json:"session_ref,omitempty"`
+	MessageRef string `json:"message_ref,omitempty"`
 }
 
 // DispatchEventSource identifies the originating Comms record without
@@ -110,15 +120,19 @@ func eventsFromMessages(messages []Message) []DispatchEvent {
 }
 
 // dispatchEventsPoll offers the unread inbox as a versioned generic event
-// stream. Polling is non-destructive: events remain available until the
-// consumer explicitly acknowledges them through the existing seen_mark path.
+// stream. New plugins provide a consumer identity and receive exclusive,
+// expiring lifecycle leases; legacy callers without one retain non-destructive
+// polling compatibility.
 func (b *Bus) dispatchEventsPoll(req dispatchRequest) dispatchResponse {
 	inbox := b.dispatchInbox(req)
 	if !inbox.OK {
 		return inbox
 	}
 
-	events := eventsFromMessages(inbox.Messages)
+	events, err := b.claimDispatchEvents(inbox.Messages, req.Consumer)
+	if err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
 	return dispatchResponse{
 		OK:              true,
 		ProtocolVersion: dispatchEventProtocolVersion,

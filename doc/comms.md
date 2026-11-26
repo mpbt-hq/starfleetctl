@@ -186,6 +186,43 @@ starfleetctl comms events 20
 starfleetctl comms prune
 ```
 
+## OpenCode delivery lifecycle
+
+The OpenCode plugin uses a durable lifecycle for injectable Comms events. State
+is stored per target ship under `event-lifecycle/<ship>/<event-id>.json` in the
+Comms bus directory. Writes use a temporary file, fsync, atomic rename, and the
+same bus lock used by message acknowledgement.
+
+The normal path is:
+
+`offered -> received -> prepared -> submitted -> turn_started -> completed`
+
+An event can instead enter `failed`; it becomes pollable again after bounded
+exponential backoff. Polling takes a two-minute, exclusive consumer lease.
+Expired leases can be recovered after a plugin/process restart. The generic
+dispatch API exposes `events.transition` and `events.release`; session and
+message correlation values are opaque strings to Go.
+
+OpenCode correlation is adapter-owned:
+
+- New-turn delivery passes a deterministic `msg_...` `messageID` to
+  `session.promptAsync`. Retrying the same event batch in the same session
+  reuses that ID.
+- Current-turn delivery captures `output.message.id` and `sessionID` in the
+  awaited `chat.message` hook, then consumes only the matching session's
+  pending correlation in `experimental.chat.system.transform`.
+- A matching assistant `message.updated` with `parentID` equal to the
+  correlated user message and `time.completed` present is the completion
+  signal. A correlated assistant/session error moves the event to `failed`.
+  Session `busy` may establish `turn_started`; `idle` never proves
+  completion.
+- Only `completed` moves the Comms message to `seen`. The legacy
+  `seen_mark` command remains for older plugins and locally handled command
+  messages; it is not model-turn completion evidence.
+
+A completed model turn is not the same as a completed agent task. Task status
+remains governed by the explicit task lifecycle and its acceptance evidence.
+
 ## Interoperability
 
 Reads/writes JSON message format. Go and bash sessions can operate on the same bus concurrently.
