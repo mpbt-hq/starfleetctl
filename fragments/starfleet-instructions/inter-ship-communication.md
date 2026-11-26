@@ -59,7 +59,9 @@ on `dashboard/topics/*.md`.
   board status. A ship that decides to take the task must explicitly run
   `starfleetctl task begin <slug>`; this is the acceptance/status transition.
   Plugin heartbeats refresh liveness only; they must not reset a task's
-  explicit board state. Use `task progress` / `task done` for lifecycle
+  explicit board state. Plugin startup/session recreation must preserve an
+  existing task state (a new ship with no record defaults to idle). Use
+  `task progress` / `task done` for lifecycle
   transitions, and explicit Comms status updates for one-off work.
 
 ### Work coordination (avoiding concurrent edits + exchanging findings)
