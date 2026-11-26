@@ -63,6 +63,26 @@ func discoverPluginRuntimeAssets(fsys fs.FS, root string) (map[string]bool, erro
 	return assets, err
 }
 
+
+func discoverAllFiles(fsys fs.FS, root string) (map[string]bool, error) {
+	files := make(map[string]bool)
+	err := fs.WalkDir(fsys, root, func(file string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(filepath.FromSlash(root), filepath.FromSlash(file))
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	return files, err
+}
+
 func pluginAssetSetDifference(want, got map[string]bool) (missing, unexpected []string) {
 	for name := range want {
 		if !got[name] {
@@ -136,11 +156,14 @@ func TestOpencodePluginAssetsMatchSourceEmbeddedAndBootstrapInstall(t *testing.T
 	}
 	installedRoot := filepath.Join(root, ".opencode", "plugins")
 	installedFS := os.DirFS(installedRoot)
-	installedAssets, err := discoverPluginRuntimeAssets(installedFS, ".")
+	installedAssets, err := discoverAllFiles(installedFS, ".")
 	if err != nil {
-		t.Fatalf("discover installed plugin assets: %v", err)
+		t.Fatalf("discover installed plugin files: %v", err)
 	}
-	assertPluginAssetSetsEqual(t, "embedded vs installed", embeddedAssets, installedAssets)
+	// The temporary install starts empty, so this exact comparison also
+	// proves source-side tests/config/declaration files were not copied into
+	// the runtime plugin directory.
+	assertPluginAssetSetsEqual(t, "runtime source vs complete installed tree", sourceAssets, installedAssets)
 
 	for name := range sourceAssets {
 		sourceBytes, err := fs.ReadFile(sourceFS, path.Join(sourceDir, name))
