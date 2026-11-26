@@ -286,15 +286,6 @@ export const plugin = async ({ client, $ }: any) => {
       case 'user':
       case 'control':
       case 'message': {
-        // Auto-report: task-commission directives reference the dashboard
-        // topic ("(Dashboard-Topic `slug`)"). Adopt it as the current task so
-        // the fleet can see what this ship is working on right now.
-        const topic = /Dashboard-Topic[ \t]*[`']([^`']+)[`']/.exec(text)
-        if (topic) {
-          currentTask = topic[1]
-          bus({ cmd: 'task', task: topic[1] })
-          tickLog(`[task-adopt] ${msg.from}: → ${topic[1]}`)
-        }
         return false
       }
 
