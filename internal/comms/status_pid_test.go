@@ -142,8 +142,22 @@ func TestDoInitKeepsLiveShipPIDAndFields(t *testing.T) {
 	if rec.Task != "task-x" || rec.Progress != 42 || rec.Model != "some/model" {
 		t.Fatalf("ack path dropped status fields: %+v", rec)
 	}
+	if rec.State != "working" {
+		t.Fatalf("init must preserve the existing task state: %+v", rec)
+	}
+}
+
+func TestDoInitDefaultsNewShipToIdle(t *testing.T) {
+	b := newTestBus(t, "NewShip")
+	if _, err := b.DoInit("startup"); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("no status file after DoInit")
+	}
 	if rec.State != "idle" {
-		t.Fatalf("ack path must still set the state to idle: %+v", rec)
+		t.Fatalf("new ship state = %q, want idle: %+v", rec.State, rec)
 	}
 }
 
