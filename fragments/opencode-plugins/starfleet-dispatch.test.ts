@@ -238,7 +238,12 @@ comms: directive m124 from 'Enterprise' → TestShip
       const source = readFileSync(new URL('./starfleet-dispatch.ts', import.meta.url), 'utf8')
       assert.doesNotMatch(source, /Dashboard-Topic/)
       assert.doesNotMatch(source, /task-adopt/)
+      assert.doesNotMatch(source, /currentTask/)
       assert.match(source, /case 'task':/)
+      const heartbeat = source.match(/const heartbeatTimer = setInterval\(\(\) => \{([\s\S]*?)\n  \}, HEARTBEAT_MS\)/)
+      assert.ok(heartbeat, 'heartbeat handler must exist')
+      assert.doesNotMatch(heartbeat[1], /\bstate\s*:/)
+      assert.doesNotMatch(heartbeat[1], /\btask\s*:/)
     })
   })
 
