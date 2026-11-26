@@ -42,8 +42,8 @@ starfleetctl task orphans [--json]                     # tasks assigned to vanis
 
 ## Commission messages and Dashboard-Topic references
 
-A commission message may contain a marker such as
-`(Dashboard-Topic \`<slug>\`)`. This is a **reference to the task record only**.
+A commission message may contain a `Dashboard-Topic` marker with a slug
+in backticks or single quotes. This is a **reference to the task record only**.
 Receiving, importing, or injecting that message does not mean the task has been
 accepted or started, and must not by itself change the ship's current task or
 board status.
