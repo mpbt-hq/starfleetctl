@@ -498,3 +498,29 @@ func TestRunOrphansCLI(t *testing.T) {
 		t.Fatalf("task orphans exited with code %d", code)
 	}
 }
+
+func TestCommissionMessageRequiresExplicitTaskAcceptance(t *testing.T) {
+	msg := commissionMessage("starfleet/task-example", "Example task", "Voyager", "Enterprise", false)
+	for _, want := range []string{
+		"(Dashboard-Topic `starfleet/task-example`; nur Referenz, keine automatische Übernahme)",
+		".starfleet-ai/bin/starfleetctl task begin starfleet/task-example",
+		"Falls du sie nicht übernehmen kannst, melde dich via Comms.",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("commission message missing %q: %s", want, msg)
+		}
+	}
+}
+
+func TestFlagshipCommissionMessageOffersDelegationWithoutImplicitAcceptance(t *testing.T) {
+	msg := commissionMessage("starfleet/task-example", "Example task", "Enterprise", "Enterprise", false)
+	for _, want := range []string{
+		"nur Referenz, keine automatische Übernahme",
+		".starfleet-ai/bin/starfleetctl task begin starfleet/task-example",
+		".starfleet-ai/bin/starfleetctl task assign starfleet/task-example <ship>",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("flagship commission message missing %q: %s", want, msg)
+		}
+	}
+}
