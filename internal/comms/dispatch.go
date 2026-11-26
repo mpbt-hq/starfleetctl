@@ -60,11 +60,13 @@ type dispatchRequest struct {
 
 // dispatchResponse is the JSON returned to the plugin.
 type dispatchResponse struct {
-	OK       bool      `json:"ok"`
-	Error    string    `json:"error,omitempty"`
-	Messages []Message `json:"messages,omitempty"`
-	Seen     []string  `json:"seen,omitempty"`
-	Tag      string    `json:"tag,omitempty"`
+	OK              bool             `json:"ok"`
+	Error           string           `json:"error,omitempty"`
+	Messages        []Message        `json:"messages,omitempty"`
+	ProtocolVersion int              `json:"protocol_version,omitempty"`
+	Events          *[]DispatchEvent `json:"events,omitempty"`
+	Seen            []string         `json:"seen,omitempty"`
+	Tag             string           `json:"tag,omitempty"`
 
 	// config response
 	HeartbeatMS     int    `json:"heartbeat_ms,omitempty"`
@@ -136,6 +138,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchHealth(req)
 	case "inbox":
 		return b.dispatchInbox(req)
+	case "events.poll":
+		return b.dispatchEventsPoll(req)
 	case "ack":
 		return b.dispatchAck(req)
 	case "tell":
@@ -195,7 +199,13 @@ func (b *Bus) dispatchInit(req dispatchRequest) dispatchResponse {
 	if err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
-	return dispatchResponse{OK: true, Messages: orEmptyInbox(messages)}
+	events := eventsFromMessages(messages)
+	return dispatchResponse{
+		OK:              true,
+		Messages:        orEmptyInbox(messages),
+		ProtocolVersion: dispatchEventProtocolVersion,
+		Events:          &events,
+	}
 }
 
 func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {

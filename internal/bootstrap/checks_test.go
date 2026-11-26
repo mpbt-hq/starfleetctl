@@ -163,7 +163,7 @@ func TestFixOpencodePluginsInstallsModuleAssets(t *testing.T) {
 		t.Fatalf("fixOpencodePlugins: %v", err)
 	}
 
-	helperNames := []string{"session-resolution.mjs", "runtime-identity.mjs"}
+	helperNames := []string{"session-resolution.mjs", "runtime-identity.mjs", "prompt-preparation.mjs", "inbox-coordinator.mjs"}
 	for _, helperName := range helperNames {
 		embeddedPath := filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, helperName)
 		want, err := fs.ReadFile(starfleetctl.Fragments, embeddedPath)
