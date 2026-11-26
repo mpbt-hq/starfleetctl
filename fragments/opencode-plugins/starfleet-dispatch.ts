@@ -154,11 +154,6 @@ function tickLog(line: string): void {
 export const plugin = async ({ client, $ }: any) => {
   loadConfig()
 
-  // Refresh process identity without resetting task/status state. A new
-  // status record defaults to idle in Go; an existing task lifecycle survives
-  // plugin restarts and session recreation.
-  bus({ cmd: 'health', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
-
   let tuiReady = false
   let sessionNeedsIdentity = true
   let submitted = new Set<string>()
@@ -659,6 +654,11 @@ const logPollTimer = setInterval(async () => {
   for (const m of init.messages) {
     if (m && m.id && !submitted.has(m.id)) bootBacklog.push({ id: m.id, from: m.from, text: m.text, type: 'ship' })
   }
+
+  // DoInit must run before refreshing the plugin PID/heartbeat so stale
+  // status records are pruned before this process makes them look live again.
+  // Its state/task/note decision is preserved by this liveness-only update.
+  bus({ cmd: 'health', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
 
   setTimeout(() => {
     if (!tuiReady) {

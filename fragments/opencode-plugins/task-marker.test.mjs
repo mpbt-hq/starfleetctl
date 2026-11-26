@@ -22,8 +22,10 @@ test('plugin heartbeat cannot overwrite explicit task lifecycle state', () => {
 })
 
 test('plugin lifecycle events preserve task status instead of inferring it', () => {
-  assert.match(plugin, /cmd: 'health', plugin_last_run:/)
   assert.doesNotMatch(plugin, /reset: true/)
   assert.doesNotMatch(plugin, /state: 'idle'/)
   assert.doesNotMatch(plugin, /state: 'working'/)
+  const initAt = plugin.indexOf("cmd: 'init'")
+  const startupHealthAt = plugin.indexOf("bus({ cmd: 'health', plugin_last_run:", initAt)
+  assert.ok(initAt >= 0 && startupHealthAt > initAt, 'comms init must prune stale status before PID/heartbeat refresh')
 })
