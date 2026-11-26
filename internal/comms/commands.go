@@ -735,7 +735,10 @@ func (b *Bus) DoInit(note string) ([]Message, error) {
 	}
 	rec.PID = statusPIDForWrite(prev.PID)
 	rec.Handle = hh
-	rec.Note = clean(note)
+	rec.Note = prev.Note
+	if rec.Note == "" {
+		rec.Note = clean(note)
+	}
 	data, _ := json.MarshalIndent(rec, "", "  ")
 	_ = os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644)
 
