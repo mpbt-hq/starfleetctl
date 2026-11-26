@@ -7,10 +7,253 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
+import { legacyInboxToEvents, prepareLegacyInboxPrompt, preparePrompt, preparePromptEvents } from './prompt-preparation.mjs'
+import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
 // ============================================================================
+
+describe('shared prompt preparation', () => {
+  test('accepts one complete prompt string without rewriting it', () => {
+    const prompt = '--- directives ---\nDirective m1 from Enterprise:\nstatus\n--- end ---'
+    assert.deepStrictEqual(preparePrompt(['evt-1'], prompt, true), {
+      eventIds: ['evt-1'],
+      parts: [prompt],
+      startTurn: true,
+    })
+  })
+
+  test('preserves ordered prompt segments from the generic event contract', () => {
+    assert.deepStrictEqual(preparePrompt(['evt-1', 'evt-2'], ['first', 'second']), {
+      eventIds: ['evt-1', 'evt-2'],
+      parts: ['first', 'second'],
+      startTurn: false,
+    })
+  })
+
+  test('rejects malformed or empty generic prompt payloads', () => {
+    assert.equal(preparePrompt([], 'text'), null)
+    assert.equal(preparePrompt(['evt-1'], ''), null)
+    assert.equal(preparePrompt(['evt-1'], ['valid', 42]), null)
+    assert.equal(preparePrompt([' '], 'text'), null)
+  })
+
+  test('legacy inbox messages produce one shared prompt for both adapters', () => {
+    const prepared = prepareLegacyInboxPrompt([
+      { id: 'm1', from: 'Enterprise', text: 'status please' },
+      { id: 'm2', from: 'Voyager', text: 'check CI' },
+    ])
+    assert.deepStrictEqual(prepared, {
+      eventIds: ['m1', 'm2'],
+      parts: [
+        '--- fleet directives (from other ships via comms) ---\n' +
+        'Process each directive and carry out the requested action.\n\n' +
+        'Directive m1 from Enterprise:\nstatus please\n\n' +
+        'Directive m2 from Voyager:\ncheck CI\n\n' +
+        '--- end fleet directives ---\n\n',
+      ],
+      startTurn: true,
+    })
+  })
+
+  test('prepares Go-formatted prompt events without adding separators', () => {
+    const prepared = preparePromptEvents([
+      {
+        id: 'e1',
+        type: 'prompt.inject',
+        payload: { prompt: 'first block\n\n' },
+        actions: { start_turn: true },
+      },
+      {
+        id: 'e2',
+        type: 'prompt.inject',
+        payload: { prompt: ['second block', '\n\n'] },
+        actions: { start_turn: false },
+      },
+    ])
+    assert.deepStrictEqual(prepared, {
+      eventIds: ['e1', 'e2'],
+      parts: ['first block\n\n', 'second block', '\n\n'],
+      startTurn: true,
+    })
+  })
+
+  test('rejects unsupported or malformed prompt events as a whole batch', () => {
+    assert.equal(preparePromptEvents([{ id: 'e1', type: 'command.execute', payload: { command: 'quit' } }]), null)
+    assert.equal(preparePromptEvents([
+      { id: 'e1', type: 'prompt.inject', payload: { prompt: 'valid' } },
+      { id: 'e2', type: 'prompt.inject', payload: { prompt: 42 } },
+    ]), null)
+  })
+
+  test('legacy CLI messages adapt to generic prompt and command events', () => {
+    const events = legacyInboxToEvents([
+      { id: 'm-prompt', from: 'Enterprise', target: 'Defiant', text: 'check registry', type: 'ship' },
+      { id: 'm-command', from: 'Voyager', text: 'task status', type: 'command' },
+      { id: 'm-model', from: 'Discovery', text: 'model opencode/test', type: 'ship' },
+      { id: 'm-unknown', from: 'Enterprise', text: 'future', type: 'future-type' },
+    ])
+
+    assert.deepStrictEqual(events.map((event) => event.type), [
+      'prompt.inject',
+      'command.execute',
+      'command.execute',
+      'unsupported',
+    ])
+    assert.ok(events[0].payload.prompt[0].includes('--- fleet directives (from other ships via comms) ---'))
+    assert.equal(events[1].payload.command, 'task status')
+    assert.equal(events[2].source.message_type, 'ship')
+    assert.equal(events[2].payload.command, 'model opencode/test')
+    assert.equal(events[3].payload.prompt, undefined)
+  })
+
+  test('legacy CLI event adapter rejects malformed prompt messages without acknowledging them', () => {
+    const [event] = legacyInboxToEvents([
+      { id: 'm-bad', from: 'Enterprise', text: 42, type: 'ship' },
+    ])
+    assert.equal(event.type, 'unsupported')
+    assert.equal(legacyInboxToEvents({ messages: [] }).length, 0)
+  })
+
+  test('legacy formatter rejects a non-array inbox response', () => {
+    assert.equal(prepareLegacyInboxPrompt({ events: [] }), null)
+  })
+
+  test('legacy formatter rejects a partially malformed batch without dropping peers', () => {
+    assert.equal(prepareLegacyInboxPrompt([
+      { id: 'm1', from: 'Enterprise', text: 'status please' },
+      { id: 'm2', from: 'Voyager' },
+    ]), null)
+  })
+})
+
+describe('shared event coordinator', () => {
+  test('merges startup events and live poll without duplicate IDs', async () => {
+    const coordinator = createEventCoordinator()
+    const startup = { id: 'e1', type: 'command.execute', source: { from: 'Enterprise' }, payload: { command: 'status' } }
+    coordinator.seed([startup])
+
+    const result = await coordinator.poll(async () => ({
+      ok: true,
+      events: [
+        { id: 'e1', type: 'prompt.inject', source: { from: 'Enterprise' }, payload: { prompt: 'status' } },
+        { id: 'e2', type: 'prompt.inject', source: { from: 'Voyager' }, payload: { prompt: 'check CI' } },
+      ],
+    }))
+
+    assert.deepStrictEqual(result.events.map((event) => event.id), ['e1', 'e2'])
+    assert.equal(result.events[0].type, 'command.execute')
+    assert.equal(result.events[1].type, 'prompt.inject')
+  })
+
+  test('refreshes pending order from the current event response', async () => {
+    const coordinator = createEventCoordinator()
+    coordinator.seed([
+      { id: 'e1', type: 'prompt.inject', payload: { prompt: 'one' } },
+      { id: 'e2', type: 'prompt.inject', payload: { prompt: 'two' } },
+    ])
+
+    const result = await coordinator.poll(async () => ({
+      ok: true,
+      events: [
+        { id: 'e3', type: 'prompt.inject', payload: { prompt: 'three' } },
+        { id: 'e1', type: 'prompt.inject', payload: { prompt: 'one' } },
+        { id: 'e2', type: 'prompt.inject', payload: { prompt: 'two' } },
+      ],
+    }))
+
+    assert.deepStrictEqual(result.events.map((event) => event.id), ['e3', 'e1', 'e2'])
+  })
+
+  test('coalesces concurrent event reads and leases each event once', async () => {
+    const coordinator = createEventCoordinator()
+    let calls = 0
+    let finishRead: (value: any) => void = () => {}
+    const readEvents = () => {
+      calls++
+      return new Promise((resolve) => { finishRead = resolve })
+    }
+
+    const firstPoll = coordinator.poll(readEvents)
+    const secondPoll = coordinator.poll(readEvents)
+    await Promise.resolve()
+    assert.equal(calls, 1)
+    finishRead({ ok: true, events: [{ id: 'e1', type: 'prompt.inject', payload: { prompt: 'status' } }] })
+
+    const [first, second] = await Promise.all([firstPoll, secondPoll])
+    assert.deepStrictEqual(first.events.map((event) => event.id), ['e1'])
+    assert.deepStrictEqual(second.events.map((event) => event.id), ['e1'])
+
+    const firstClaim = coordinator.claim(first.events)
+    const secondClaim = coordinator.claim(second.events)
+    assert.deepStrictEqual(firstClaim.map((event) => event.id), ['e1'])
+    assert.deepStrictEqual(secondClaim, [])
+
+    coordinator.release(firstClaim.map((event) => event.id))
+    const retryClaim = coordinator.claim(second.events)
+    assert.deepStrictEqual(retryClaim.map((event) => event.id), ['e1'])
+    coordinator.markSubmitted(retryClaim.map((event) => event.id))
+
+    const nextPoll = await coordinator.poll(async () => ({
+      ok: true,
+      events: [{ id: 'e1', type: 'prompt.inject', payload: { prompt: 'status' } }],
+    }))
+    assert.deepStrictEqual(nextPoll.events, [])
+  })
+
+  test('failed live poll does not discard startup events', async () => {
+    const coordinator = createEventCoordinator()
+    coordinator.seed([{ id: 'e1', type: 'prompt.inject', payload: { prompt: 'status' } }])
+
+    const result = await coordinator.poll(async () => ({
+      ok: false,
+      error: 'temporary dispatch failure',
+      events: [],
+    }))
+
+    assert.equal(result.response.ok, false)
+    assert.deepStrictEqual(result.events.map((event) => event.id), ['e1'])
+  })
+
+  test('only known event types are dispatched', () => {
+    assert.equal(isSupportedEvent({ id: 'e1', type: 'prompt.inject' }), true)
+    assert.equal(isSupportedEvent({ id: 'e2', type: 'command.execute' }), true)
+    assert.equal(isSupportedEvent({ id: 'e3', type: 'future-unknown' }), false)
+    assert.equal(isSupportedEvent({ id: 'e4', type: 42 }), false)
+    assert.equal(isSupportedEvent({ id: 'e5' }), false)
+  })
+
+  test('unsupported event types remain pending after an adapter releases its lease', async () => {
+    const coordinator = createEventCoordinator()
+    const unsupported = { id: 'e-unknown', type: 'future-unknown', payload: {} }
+    const first = await coordinator.poll(async () => ({ ok: true, events: [unsupported] }))
+    const claimed = coordinator.claim(first.events)
+
+    assert.equal(claimed.length, 1)
+    assert.equal(isSupportedEvent(claimed[0]), false)
+    coordinator.release(claimed.map((event) => event.id))
+
+    const retry = await coordinator.poll(async () => ({ ok: true, events: [] }))
+    assert.deepStrictEqual(retry.events, [unsupported])
+  })
+
+  test('validates the versioned event response envelope', () => {
+    const valid = normalizeEventResponse({
+      ok: true,
+      protocol_version: 1,
+      events: [{ id: 'e1', type: 'prompt.inject' }],
+    })
+    assert.equal(valid.ok, true)
+    assert.equal(valid.protocol_version, 1)
+    assert.equal(valid.events.length, 1)
+
+    assert.equal(normalizeEventResponse({ ok: true, protocol_version: 2, events: [] }).ok, false)
+    assert.equal(normalizeEventResponse({ ok: true, protocol_version: 1, events: {} }).ok, false)
+    assert.equal(normalizeEventResponse({ ok: true, protocol_version: 1 }).ok, false)
+    assert.equal(normalizeEventResponse(null).ok, false)
+  })
+})
 
 describe('starfleet-dispatch plugin pure logic', () => {
 
@@ -456,10 +699,10 @@ comms: directive m124 from 'Enterprise' → TestShip
     test('spooled inbox message is found by poller and not dropped by submitted/seen/bootBacklog filters', () => {
       const submitted = new Set<string>(['m-seen'])
       const bootBacklog = [{ id: 'm-boot', from: 'Enterprise', text: 'boot', type: 'ship' }]
-      const inbox = { messages: [{ id: 'm-spool', from: 'ChatGPT', text: 'hello', type: 'ship' }, { id: 'm-seen', from: 'X', text: 'old', type: 'ship' }] }
+      const inbox = { events: [{ id: 'm-spool', from: 'ChatGPT', text: 'hello', type: 'ship' }, { id: 'm-seen', from: 'X', text: 'old', type: 'ship' }] }
 
       const boot = bootBacklog.filter((m: any) => !submitted.has(m.id))
-      const msgs = [...boot, ...(inbox.messages || []).filter((m: any) => !submitted.has(m.id))]
+      const msgs = [...boot, ...(inbox.events || []).filter((m: any) => !submitted.has(m.id))]
       const ids = msgs.map((m: any) => m.id)
 
       assert.deepStrictEqual(ids, ['m-boot', 'm-spool'])
@@ -578,100 +821,125 @@ comms: directive m124 from 'Enterprise' → TestShip
 
 
 
-  describe('system.transform handoff semantics (external message / unknown / duplicates)', () => {
-    // Mirrors the fixed transform semantics: confirm (submitted/seen_mark) only
-    // after actual injection/execution in a confirmed session context.
+  describe('system.transform handoff semantics (generic events / unknown / duplicates)', () => {
+    // Mirrors the fixed transform semantics: only supported prompt/command
+    // events may be delivered; unsupported event types remain retryable.
     function runTransform(opts: { sid: string; msgs: any[]; submittedIn?: Set<string> }) {
       const submitted = new Set<string>(opts.submittedIn || [])
       const seenMarked: string[] = []
       const injected: string[] = []
       const commands: string[] = []
       const logs: string[] = []
-      const classify = (type: string | undefined): boolean => {
-        switch (type || 'ship') {
-          case 'ship': case 'user': case 'control': case 'message': return false
-          case 'command': return true
-          default: return false // unknown: not delivered
-        }
-      }
-      const handoffSid = opts.sid
       const toInject: any[] = []
-      for (const msg of opts.msgs) {
-        if (submitted.has(msg.id)) continue
-        const handled = handoffSid ? classify(msg.type) : false
-        if (handled) {
-          seenMarked.push(msg.id); submitted.add(msg.id); commands.push(msg.id)
-          logs.push(`handoff-transform-command id=${msg.id}`)
+      const handoffSid = opts.sid
+
+      for (const event of opts.msgs) {
+        if (submitted.has(event.id)) continue
+        if (event.type === 'command.execute') {
+          if (!handoffSid || typeof event.payload?.command !== 'string') {
+            logs.push(`handoff-transform-skip id=${event.id}`)
+            continue
+          }
+          commands.push(event.id)
+          submitted.add(event.id)
+          seenMarked.push(event.id)
+          logs.push(`handoff-transform-command id=${event.id}`)
           continue
         }
-        if (!handoffSid) { logs.push(`handoff-transform-skip id=${msg.id}`); continue }
-        toInject.push(msg)
-      }
-      if (toInject.length > 0) {
-        for (const msg of toInject) {
-          injected.push(msg.id); submitted.add(msg.id); seenMarked.push(msg.id)
-          logs.push(`handoff-transform id=${msg.id}`)
+        if (event.type !== 'prompt.inject') {
+          logs.push(`handoff-transform-unknown id=${event.id}`)
+          continue
         }
+        if (!handoffSid) {
+          logs.push(`handoff-transform-skip id=${event.id}`)
+          continue
+        }
+        toInject.push(event)
+      }
+
+      for (const event of toInject) {
+        injected.push(event.id)
+        submitted.add(event.id)
+        seenMarked.push(event.id)
+        logs.push(`handoff-transform id=${event.id}`)
       }
       return { submitted, seenMarked, injected, commands, logs }
     }
 
-    test('external type="message" is injected and only then confirmed', () => {
-      const msg = { id: 'm20933', from: 'ChatGPT', text: 'VOYAGER-LIVE-HANDOFF-20261113-01', type: 'message' }
-      const r = runTransform({ sid: 'ses_voyager', msgs: [msg] })
+    test('prompt.inject is injected and only then confirmed', () => {
+      const event = {
+        id: 'm20933',
+        source: { from: 'ChatGPT', message_type: 'message' },
+        payload: { prompt: 'VOYAGER-LIVE-HANDOFF-20261113-01' },
+        type: 'prompt.inject',
+      }
+      const r = runTransform({ sid: 'ses_voyager', msgs: [event] })
       assert.deepStrictEqual(r.injected, ['m20933'])
       assert.deepStrictEqual(r.commands, [])
       assert.ok(r.submitted.has('m20933'))
       assert.deepStrictEqual(r.seenMarked, ['m20933'])
       assert.ok(r.logs.some(l => l.includes('handoff-transform id=m20933')))
-      assert.ok(!r.logs.some(l => l.includes('handoff-transform-command id=m20933')))
     })
 
-    test('unknown types are not falsely confirmed as delivered and remain retry-fähig', () => {
-      const msg = { id: 'mx1', from: 'X', text: 'hi', type: 'weird' }
-      const r = runTransform({ sid: 'ses_voyager', msgs: [msg] })
-      // treated as injectable directive path in fixed logic -> injected when session confirmed
-      assert.deepStrictEqual(r.injected, ['mx1'])
-      assert.deepStrictEqual(r.seenMarked, ['mx1'])
-      // and if no session context, must not be confirmed
-      const r2 = runTransform({ sid: '', msgs: [msg] })
+    test('unsupported event types are not falsely confirmed and remain retryable', () => {
+      const event = { id: 'mx1', type: 'future-unknown', payload: {} }
+      const r = runTransform({ sid: 'ses_voyager', msgs: [event] })
+      assert.deepStrictEqual(r.injected, [])
+      assert.deepStrictEqual(r.commands, [])
+      assert.deepStrictEqual(r.seenMarked, [])
+      assert.ok(!r.submitted.has('mx1'))
+
+      const r2 = runTransform({ sid: '', msgs: [event] })
       assert.deepStrictEqual(r2.injected, [])
       assert.deepStrictEqual(r2.seenMarked, [])
       assert.ok(!r2.submitted.has('mx1'))
     })
 
-    test('true commands keep command behavior (confirmed as command, not injected)', () => {
-      const msg = { id: 'mc1', from: 'Enterprise', text: 'status', type: 'command' }
-      const r = runTransform({ sid: 'ses_voyager', msgs: [msg] })
+    test('command.execute keeps command behavior (not prompt injection)', () => {
+      const event = {
+        id: 'mc1',
+        source: { from: 'Enterprise', message_type: 'command' },
+        payload: { command: 'status' },
+        type: 'command.execute',
+      }
+      const r = runTransform({ sid: 'ses_voyager', msgs: [event] })
       assert.deepStrictEqual(r.commands, ['mc1'])
       assert.deepStrictEqual(r.injected, [])
       assert.ok(r.submitted.has('mc1'))
       assert.ok(r.logs.some(l => l.includes('handoff-transform-command id=mc1')))
     })
 
-    test('failed injection (no session context) keeps message retry-fähig', () => {
-      const msg = { id: 'm20933', from: 'ChatGPT', text: 'token', type: 'message' }
-      const r = runTransform({ sid: '', msgs: [msg] })
+    test('failed prompt injection (no session context) keeps event retryable', () => {
+      const event = {
+        id: 'm20933',
+        source: { from: 'ChatGPT', message_type: 'message' },
+        payload: { prompt: 'token' },
+        type: 'prompt.inject',
+      }
+      const r = runTransform({ sid: '', msgs: [event] })
       assert.deepStrictEqual(r.injected, [])
       assert.deepStrictEqual(r.seenMarked, [])
       assert.ok(!r.submitted.has('m20933'))
-      // retryable: subsequent transform with session injects it
-      const r2 = runTransform({ sid: 'ses_voyager', msgs: [msg], submittedIn: r.submitted })
+      const r2 = runTransform({ sid: 'ses_voyager', msgs: [event], submittedIn: r.submitted })
       assert.deepStrictEqual(r2.injected, ['m20933'])
       assert.deepStrictEqual(r2.seenMarked, ['m20933'])
     })
 
-    test('repeated transform calls do not duplicate injection', () => {
-      const msg = { id: 'm20933', from: 'ChatGPT', text: 'token', type: 'message' }
-      const r1 = runTransform({ sid: 'ses_voyager', msgs: [msg] })
+    test('repeated transform calls do not duplicate prompt injection', () => {
+      const event = {
+        id: 'm20933',
+        source: { from: 'ChatGPT', message_type: 'message' },
+        payload: { prompt: 'token' },
+        type: 'prompt.inject',
+      }
+      const r1 = runTransform({ sid: 'ses_voyager', msgs: [event] })
       assert.deepStrictEqual(r1.injected, ['m20933'])
-      const r2 = runTransform({ sid: 'ses_voyager', msgs: [msg], submittedIn: r1.submitted })
+      const r2 = runTransform({ sid: 'ses_voyager', msgs: [event], submittedIn: r1.submitted })
       assert.deepStrictEqual(r2.injected, [])
       assert.deepStrictEqual(r2.seenMarked, [])
       assert.deepStrictEqual(r2.commands, [])
     })
   })
-
 
 
 // ============================================================================
