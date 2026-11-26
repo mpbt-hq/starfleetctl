@@ -405,8 +405,8 @@ func commitAndReindex(d *dashboard.Dashboard, slug, msg string, push bool) {
 func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
 	reference := " (Dashboard-Topic `" + slug + "`; nur Referenz, keine automatische Übernahme)."
 	begin := " Bei Übernahme bitte `.starfleet-ai/bin/starfleetctl task begin " + slug + "` ausführen."
-	delegate := reference + " Du kannst sie selbst übernehmen (dann mit task begin starten)" +
-		" oder an einen freien Worker delegieren (z.B. via `.starfleet-ai/bin/starfleetctl task assign " + slug + " <ship>`)."
+	delegate := reference + " Du kannst sie selbst übernehmen." + begin +
+		" Oder an einen freien Worker delegieren (z.B. via `.starfleet-ai/bin/starfleetctl task assign " + slug + " <ship>`)."
 	var msg string
 	if ship == shipnames.FlagshipName(root) {
 		if wasAssigned {
