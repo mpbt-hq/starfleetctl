@@ -63,7 +63,10 @@ export function createEventCoordinator() {
       if (pending.has(id)) {
         const existing = pending.get(id);
         pending.delete(id);
-        pending.set(id, existing);
+        // Startup init events do not carry lifecycle metadata. Refresh only
+        // the mutable lease/correlation fields from the authoritative poll,
+        // while retaining the first-seen immutable event payload and order.
+        pending.set(id, event.lifecycle ? { ...existing, lifecycle: event.lifecycle } : existing);
       } else {
         pending.set(id, event);
       }
@@ -98,7 +101,24 @@ export function createEventCoordinator() {
       }
 
       const response = await pollPromise;
-      return { response, events: available() };
+      if (response?.ok === true) {
+        // A successful response is the authoritative set leased to this
+        // consumer. Drop stale startup/poll snapshots that another consumer
+        // now owns or that have already been acknowledged. Keep only local
+        // in-flight claims until their adapter releases them.
+        const leased = new Set(
+          Array.isArray(response.events)
+            ? response.events.map((event) => event && typeof event.id === 'string' ? event.id : '').filter(Boolean)
+            : [],
+        );
+        for (const id of pending.keys()) {
+          if (!leased.has(id) && !inFlight.has(id)) pending.delete(id);
+        }
+      }
+      // Startup-seeded events are not leased. Never dispatch them from a
+      // failed poll; retain them internally until a successful poll refreshes
+      // their lifecycle metadata and grants this consumer a lease.
+      return { response, events: response?.ok === true ? available() : [] };
     },
 
     /** @param {unknown} events */
@@ -126,6 +146,18 @@ export function createEventCoordinator() {
       for (const id of ids) {
         if (typeof id !== 'string' || !id.trim()) continue;
         submitted.add(id);
+        pending.delete(id);
+        inFlight.delete(id);
+      }
+    },
+
+    // Forget a failed lifecycle item so a later durable poll can re-add it
+    // after its Go-owned retry backoff expires.
+    forget(ids) {
+      if (!Array.isArray(ids)) return;
+      for (const id of ids) {
+        if (typeof id !== 'string' || !id.trim()) continue;
+        submitted.delete(id);
         pending.delete(id);
         inFlight.delete(id);
       }

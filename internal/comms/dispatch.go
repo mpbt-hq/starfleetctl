@@ -56,6 +56,14 @@ type dispatchRequest struct {
 	// task status (cmd: "task")
 	Task      string `json:"task,omitempty"`
 	TaskClear bool   `json:"task_clear,omitempty"`
+
+	// durable event lifecycle (transport-neutral opaque references)
+	Consumer       string   `json:"consumer,omitempty"`
+	IDs            []string `json:"ids,omitempty"`
+	LifecycleState string   `json:"lifecycle_state,omitempty"`
+	SessionRef     string   `json:"session_ref,omitempty"`
+	MessageRef     string   `json:"message_ref,omitempty"`
+	LifecycleError string   `json:"lifecycle_error,omitempty"`
 }
 
 // dispatchResponse is the JSON returned to the plugin.
@@ -67,6 +75,7 @@ type dispatchResponse struct {
 	Events          *[]DispatchEvent `json:"events,omitempty"`
 	Seen            []string         `json:"seen,omitempty"`
 	Tag             string           `json:"tag,omitempty"`
+	Lifecycle       *EventLifecycle  `json:"lifecycle,omitempty"`
 
 	// config response
 	HeartbeatMS     int    `json:"heartbeat_ms,omitempty"`
@@ -140,6 +149,10 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchInbox(req)
 	case "events.poll":
 		return b.dispatchEventsPoll(req)
+	case "events.transition":
+		return b.transitionEvent(req)
+	case "events.release":
+		return b.releaseEvents(req)
 	case "ack":
 		return b.dispatchAck(req)
 	case "tell":
@@ -515,11 +528,10 @@ func (b *Bus) dispatchTick(req dispatchRequest) dispatchResponse {
 	return dispatchResponse{OK: true}
 }
 
-// dispatchSeenMark implements `cmd: "seen_mark"` — marks a message as seen/acked
-// for the current ship by moving it from unseen/ to seen/. This is the
-// lightweight "I've processed this message" counterpart to the full DoAck
-// (which prints a human-facing line). The plugin calls this after injecting
-// a directive so it doesn't reappear on the next inbox poll.
+// dispatchSeenMark implements the legacy `cmd: "seen_mark"` acknowledgement.
+// It remains for older plugin versions and locally handled command messages.
+// The durable lifecycle adapter must not use it for prompt submission: only a
+// correlated assistant completion may acknowledge a model-turn event.
 func (b *Bus) dispatchSeenMark(req dispatchRequest) dispatchResponse {
 	if req.ID == "" {
 		return dispatchResponse{OK: false, Error: "seen_mark: need id"}

@@ -34,6 +34,7 @@ export interface EventCoordinator {
   claim(events: unknown): DispatchEvent[];
   release(ids: unknown): void;
   markSubmitted(ids: unknown): void;
+  forget(ids: unknown): void;
 }
 
 export function createEventCoordinator(): EventCoordinator;

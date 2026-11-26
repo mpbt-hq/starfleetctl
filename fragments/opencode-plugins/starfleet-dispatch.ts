@@ -6,7 +6,7 @@
 // .opencode/plugins/starfleet-dispatch.ts. Edit this fragment, never the
 // deployed copy under .opencode/plugins.
 
-const PLUGIN_VERSION = '2.5.19'
+const PLUGIN_VERSION = '2.5.20'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -15,6 +15,7 @@ const PLUGIN_VERSION = '2.5.19'
 const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
+import { classifyAssistantUpdate, classifyRecoveredTurn, completeEventBatch, createTurnCorrelationQueue, deterministicMessageID, resolveLifecycleSessionID } from './event-lifecycle.mjs'
 import { resolveLatestShipSession } from './session-resolution.mjs'
 import { normalizeInboxResponse } from './inbox-response.mjs'
 import { legacyInboxToEvents, preparePromptEvents } from './prompt-preparation.mjs'
@@ -161,7 +162,99 @@ export const plugin = async ({ client, $ }: any) => {
   let tuiReady = false
   let sessionNeedsIdentity = true
   const eventCoordinator = createEventCoordinator()
+  const consumerID = `${aid()}:${process.pid}`
+  const turnCorrelationQueue = createTurnCorrelationQueue()
+  const pendingByMessage = new Map<string, { sessionID: string; eventIDs: string[]; submitted?: boolean; startSeen?: boolean; completionSeen?: boolean }>()
+  const syntheticMessageIDs = new Set<string>()
+  const lastReconcileAt = new Map<string, number>()
   const unsupportedEventDiagnostics = new Set<string>()
+
+  const transitionEvent = (id: string, state: string, sessionID = '', messageID = '', detail = ''): boolean => {
+    const response = bus({ cmd: 'events.transition', id, consumer: consumerID, lifecycle_state: state,
+      session_ref: sessionID, message_ref: messageID, lifecycle_error: detail })
+    if (!response?.ok) {
+      tickLog(`event-lifecycle-fail ship=${aid()} id=${id} state=${state} error=${String(response?.error || 'unknown').slice(0, 160)}`)
+      return false
+    }
+    return true
+  }
+  const releaseEvents = (ids: string[]): void => {
+    if (!ids.length) return
+    const response = bus({ cmd: 'events.release', consumer: consumerID, ids })
+    if (!response?.ok) tickLog(`event-release-fail ship=${aid()} ids=[${ids.join(',')}] error=${String(response?.error || 'unknown').slice(0, 160)}`)
+  }
+  const markTurnStarted = (messageID: string, correlation: { sessionID: string; eventIDs: string[]; submitted?: boolean; startSeen?: boolean; completionSeen?: boolean }): boolean => {
+    if (!correlation.submitted) { correlation.startSeen = true; return true }
+    let accepted = true
+    for (const id of correlation.eventIDs) {
+      // Reassert submission before start: current-turn injection may already
+      // have reached OpenCode even if its first durable submitted write failed.
+      if (!transitionEvent(id, 'submitted', correlation.sessionID, messageID)) {
+        accepted = false
+        continue
+      }
+      if (!transitionEvent(id, 'turn_started', correlation.sessionID, messageID)) accepted = false
+    }
+    return accepted
+  }
+  const completeCorrelation = (messageID: string, correlation: { sessionID: string; eventIDs: string[]; submitted?: boolean; startSeen?: boolean; completionSeen?: boolean }): boolean => {
+    if (!correlation.submitted) { correlation.startSeen = true; correlation.completionSeen = true; return false }
+    // Completion implies start, but each durable transition can fail transiently.
+    // Keep the correlation until every event is durably completed so polling can
+    // retry after a CLI/IO error instead of leaving an unacknowledged event stuck.
+    const accepted = completeEventBatch(correlation.eventIDs, (id, state) =>
+      transitionEvent(id, state, correlation.sessionID, messageID))
+    if (accepted) {
+      pendingByMessage.delete(messageID)
+      lastReconcileAt.delete(messageID)
+      // Keep the coordinator's submitted tombstone: a poll already in flight
+      // may still return its pre-ack snapshot after this completion callback.
+    }
+    return accepted
+  }
+  const reconcileCorrelation = async (sessionID: string, messageID: string, eventIDs: string[]): Promise<'active' | 'completed' | 'failed' | 'unknown'> => {
+    if (typeof client.session.messages !== 'function') return 'unknown'
+    const now = Date.now()
+    if (now - (lastReconcileAt.get(messageID) || 0) < 10000) return 'active'
+    lastReconcileAt.set(messageID, now)
+    try {
+      const response = await client.session.messages({ path: { id: sessionID } })
+      const body = response?.body ?? response
+      const messages = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : []
+      const assistant = messages.map((entry: any) => entry?.info ?? entry)
+        .find((info: any) => info?.role === 'assistant' && info?.parentID === messageID)
+      const correlation = pendingByMessage.get(messageID) || { sessionID, eventIDs, submitted: true }
+      // A restart may leave a submitted user message without an active request.
+      // Busy is positive turn-start evidence; idle only triggers retry and never
+      // completion. The deterministic message ID makes that retry idempotent.
+      const statusResponse = await client.session.status()
+      const statusBody = statusResponse?.body ?? statusResponse
+      const statusData = statusBody?.data ?? statusBody
+      const sessionStatus = statusData?.[sessionID]
+      const recoveryState = classifyRecoveredTurn(assistant, sessionStatus, sessionID, messageID)
+      if (recoveryState === 'completed') {
+        return completeCorrelation(messageID, correlation) ? 'completed' : 'unknown'
+      }
+      if (recoveryState === 'failed') {
+        const detail = assistant?.error
+          ? String(assistant.error).slice(0, 512)
+          : 'submitted turn recovered with idle session and no correlated assistant completion'
+        for (const id of eventIDs) transitionEvent(id, 'failed', sessionID, messageID, detail)
+        pendingByMessage.delete(messageID)
+        lastReconcileAt.delete(messageID)
+        eventCoordinator.forget(eventIDs)
+        return 'failed'
+      }
+      if (recoveryState === 'active') {
+        markTurnStarted(messageID, correlation)
+        return 'active'
+      }
+      return 'unknown'
+    } catch (e) {
+      tickLog(`event-reconcile-fail ship=${aid()} sid=${sessionID} message=${messageID} error=${String(e).slice(0, 160)}`)
+      return 'unknown'
+    }
+  }
   let turnCount = 0
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
@@ -497,9 +590,11 @@ export const plugin = async ({ client, $ }: any) => {
         continue
       }
       if (handled) {
+        // Local command execution is not an assistant model turn; retain its
+        // handled/seen semantics until typed actions are a separate extension.
         eventCoordinator.markSubmitted([event.id])
-        const sr = bus({ cmd: 'seen_mark', id: event.id })
-        tickLog(`handoff-${mode}-command ship=${aid()} sid=${sid || '-'} id=${event.id} seen=${!!sr?.ok}`)
+        bus({ cmd: 'seen_mark', id: event.id })
+        tickLog(`handoff-${mode}-command ship=${aid()} sid=${sid || '-'} id=${event.id} handled=true`)
       } else {
         tickLog(`handoff-${mode}-command-unhandled ship=${aid()} sid=${sid || '-'} id=${event.id} (left pending)`)
       }
@@ -796,7 +891,7 @@ const logPollTimer = setInterval(async () => {
   // compatibility fallback for older starfleetctl binaries.
   const pollEvents = () => eventCoordinator.poll(() => {
     try {
-      const raw = bus({ cmd: 'events.poll' })
+      const raw = bus({ cmd: 'events.poll', consumer: consumerID })
       const normalized = normalizeEventResponse(raw)
       if (normalized.ok) return normalized
 
@@ -830,82 +925,135 @@ const logPollTimer = setInterval(async () => {
   }
 
   const poll = async () => {
-    // The timer is one consumer of the shared event poller; the current-turn
-    // hook uses the same coordinator and cannot claim the same event twice.
     if (pollRunning) return
     pollRunning = true
     let claimedIds: string[] = []
+    const durableSubmitted = new Set<string>()
     try {
-      const { response: eventResponse, events: available } = await pollEvents()
-      if (!eventResponse.ok) {
-        logInboxPollDiagnostic('error', `error=${String(eventResponse.error || 'unknown').replace(/\s+/g, ' ').slice(0, 180)}`)
+      // Keep outstanding correlations observable even after the in-memory
+      // coordinator has marked their event submitted. This recovers missing
+      // completion events and idle-after-restart cases without replaying prompts.
+      for (const [messageID, correlation] of pendingByMessage) {
+        if (correlation.submitted) await reconcileCorrelation(correlation.sessionID, messageID, correlation.eventIDs)
       }
+      const { response: eventResponse, events: available } = await pollEvents()
+      if (!eventResponse.ok) logInboxPollDiagnostic('error', `error=${String(eventResponse.error || 'unknown').replace(/\s+/g, ' ').slice(0, 180)}`)
       const liveEvents = eventResponse.ok ? eventResponse.events : []
       const events = eventCoordinator.claim(available)
       claimedIds = events.map((event: any) => event.id)
       const liveIDs = liveEvents.map((event: any) => event.id).join(',')
-      if (liveEvents.length > 0 || events.length > 0) {
-        tickLog(`event-poll ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${currentSessionID || '-'} live=[${liveIDs}] pending=[${claimedIds.join(',')}]`)
-      }
-      if (events.length === 0) {
-        logInboxPollDiagnostic('idle', 'events=0 pending=0')
-        return
-      }
+      if (liveEvents.length || events.length) tickLog(`event-poll ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${currentSessionID || '-'} live=[${liveIDs}] pending=[${claimedIds.join(',')}]`)
+      if (!events.length) { logInboxPollDiagnostic('idle', 'events=0 pending=0'); return }
       lastInboxPollDiagnosticState = 'messages'
 
-      const firstCommsReport = reportFirstComms({
-        ship: aid(),
-        sessionID: currentSessionID,
-        messageIDs: events.map((event: any) => event.id),
-      })
+      const firstCommsReport = reportFirstComms({ ship: aid(), sessionID: currentSessionID, messageIDs: events.map((event: any) => event.id) })
       if (firstCommsReport) tickLog(firstCommsReport)
 
       const promptEvents = await dispatchEvents(events, () => resolveSessionId(), 'poll')
-      if (promptEvents.length === 0) return
-
+      if (!promptEvents.length) return
       const targetSid = await resolveSessionId()
-      const ids = promptEvents.map((event: any) => event.id).join(',')
-      if (!targetSid) {
-        tickLog(`handoff-skip ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=<missing|unresolved> ids=[${ids}] reason=no-latest-ship-session`)
-        return
+
+      // Persisted lifecycle references take precedence over the currently
+      // active session. A ship may have switched/recreated sessions since the
+      // event was submitted; recovery must inspect the original OpenCode turn.
+      const batches = new Map<string, { sessionID: string; messageID: string; resume: boolean; events: any[] }>()
+      for (const event of promptEvents) {
+        const lifecycle = event.lifecycle
+        const resume = Boolean(lifecycle?.message_ref && (lifecycle.state === 'submitted' || lifecycle.state === 'turn_started'))
+        const sessionID = resolveLifecycleSessionID(lifecycle, targetSid)
+        const messageID = resume ? lifecycle.message_ref : ''
+        const key = resume ? `resume:${sessionID}:${messageID}` : `new:${sessionID}`
+        const batch: { sessionID: string; messageID: string; resume: boolean; events: any[] } = batches.get(key) || { sessionID, messageID, resume, events: [] as any[] }
+        batch.events.push(event)
+        batches.set(key, batch)
       }
 
-      const prepared = preparePromptEvents(promptEvents)
-      if (!prepared) {
-        tickLog(`handoff-skip ship=${aid()} sid=${targetSid} ids=[${ids}] reason=invalid-event-prompt`)
-        return
-      }
-      if (!prepared.startTurn) {
-        tickLog(`handoff-skip ship=${aid()} sid=${targetSid} ids=[${ids}] reason=start-turn-not-requested`)
-        return
-      }
-      const promptText = prepared.parts.join('')
-      tickLog(`handoff-prompt ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${targetSid} ids=[${prepared.eventIds.join(',')}] calling=promptAsync`)
-      try {
-        const res = await client.session.promptAsync({
-          path: { id: targetSid },
-          body: {
-            parts: [{
-              type: 'text', synthetic: true,
-              text: promptText,
-            }],
-          },
-        })
-        const resErr = res && (res as any).error
-        if (!resErr) {
-          eventCoordinator.markSubmitted(prepared.eventIds)
-          for (const id of prepared.eventIds) {
-            const sr = bus({ cmd: 'seen_mark', id })
-            tickLog(`handoff-ok ship=${aid()} sid=${targetSid} id=${id} seen=${!!sr?.ok} prompt=${JSON.stringify(res).slice(0, 120)}`)
-          }
-        } else {
-          tickLog(`handoff-fail ship=${aid()} sid=${targetSid} ids=[${ids}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
+      for (const batch of batches.values()) {
+        const { sessionID, messageID: recoveredMessageID, resume, events: batchEvents } = batch
+        if (!sessionID) {
+          tickLog(`handoff-skip ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=<missing|unresolved> ids=[${batchEvents.map((e: any) => e.id).join(',')}] reason=no-persisted-or-current-session`)
+          continue
         }
-      } catch (e) {
-        tickLog(`handoff-exception ship=${aid()} sid=${targetSid} ids=[${ids}] error=${String(e).slice(0, 200)}`)
+        const prepared = preparePromptEvents(batchEvents)
+        if (!prepared || !prepared.startTurn) {
+          tickLog(`handoff-skip ship=${aid()} sid=${sessionID} ids=[${batchEvents.map((e: any) => e.id).join(',')}] reason=invalid-or-non-starting-prompt`)
+          continue
+        }
+        const currentMessageID = resume ? recoveredMessageID : deterministicMessageID(sessionID, prepared.eventIds)
+        pendingByMessage.set(currentMessageID, { sessionID, eventIDs: prepared.eventIds, submitted: resume })
+
+        if (resume) {
+          const recovery = await reconcileCorrelation(sessionID, currentMessageID, prepared.eventIds)
+          if (recovery === 'failed') {
+            tickLog(`handoff-recovery-retry ship=${aid()} sid=${sessionID} message=${currentMessageID} ids=[${prepared.eventIds.join(',')}]`)
+          } else {
+            // Unknown status is not evidence of failure; keep the durable
+            // submission leased and let correlated events or later polling
+            // establish completion instead of replaying the prompt blindly.
+            eventCoordinator.markSubmitted(prepared.eventIds)
+            for (const id of prepared.eventIds) durableSubmitted.add(id)
+          }
+          tickLog(`handoff-recovered ship=${aid()} sid=${sessionID} message=${currentMessageID} ids=[${prepared.eventIds.join(',')}]`)
+          continue
+        }
+
+        let preparedOK = true
+        for (const id of prepared.eventIds) {
+          const event = batchEvents.find((entry: any) => entry.id === id)
+          if (event?.lifecycle && !transitionEvent(id, 'prepared', sessionID, currentMessageID)) { preparedOK = false; break }
+        }
+        if (!preparedOK) continue
+
+        tickLog(`handoff-prompt ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} sid=${sessionID} message=${currentMessageID} ids=[${prepared.eventIds.join(',')}] calling=promptAsync`)
+        syntheticMessageIDs.add(currentMessageID)
+        try {
+          const res = await client.session.promptAsync({
+            path: { id: sessionID },
+            body: { messageID: currentMessageID, parts: [{ type: 'text', synthetic: true, text: prepared.parts.join('') }] },
+          })
+          const resErr = res && (res as any).error
+          if (!resErr) {
+            let accepted = true
+            for (const id of prepared.eventIds) {
+              const event = batchEvents.find((entry: any) => entry.id === id)
+              if (event?.lifecycle && !transitionEvent(id, 'submitted', sessionID, currentMessageID)) accepted = false
+              if (!event?.lifecycle) bus({ cmd: 'seen_mark', id })
+            }
+            if (accepted) {
+              eventCoordinator.markSubmitted(prepared.eventIds)
+              for (const id of prepared.eventIds) durableSubmitted.add(id)
+              const pending = pendingByMessage.get(currentMessageID)
+              if (pending) {
+                pending.submitted = true
+                if (pending.startSeen) markTurnStarted(currentMessageID, pending)
+                if (pending.completionSeen) completeCorrelation(currentMessageID, pending)
+              }
+              tickLog(`handoff-submitted ship=${aid()} sid=${sessionID} message=${currentMessageID} ids=[${prepared.eventIds.join(',')}]`)
+            }
+          } else {
+            syntheticMessageIDs.delete(currentMessageID)
+            for (const id of prepared.eventIds) {
+              const event = batchEvents.find((entry: any) => entry.id === id)
+              if (event?.lifecycle) transitionEvent(id, 'failed', sessionID, currentMessageID, String(resErr).slice(0, 512))
+            }
+            pendingByMessage.delete(currentMessageID)
+            eventCoordinator.forget(prepared.eventIds)
+            tickLog(`handoff-fail ship=${aid()} sid=${sessionID} ids=[${prepared.eventIds.join(',')}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
+          }
+        } catch (e) {
+          syntheticMessageIDs.delete(currentMessageID)
+          for (const id of prepared.eventIds) {
+            const event = batchEvents.find((entry: any) => entry.id === id)
+            if (event?.lifecycle) transitionEvent(id, 'failed', sessionID, currentMessageID, String(e).slice(0, 512))
+          }
+          pendingByMessage.delete(currentMessageID)
+          eventCoordinator.forget(prepared.eventIds)
+          tickLog(`handoff-exception ship=${aid()} sid=${sessionID} ids=[${prepared.eventIds.join(',')}] error=${String(e).slice(0, 200)}`)
+        }
       }
     } finally {
       eventCoordinator.release(claimedIds)
+      releaseEvents(claimedIds.filter((id) => !durableSubmitted.has(id)))
       pollRunning = false
     }
   }
@@ -931,6 +1079,19 @@ const logPollTimer = setInterval(async () => {
     // Authoritative session id for the current turn — opencode passes it to
     // every chat hook. session.status() (used by resolveSessionId) can return
     // stale/foreign ids, so prefer this whenever it is available.
+    'chat.message': async (input: any, output: { message: any; parts: any[] }) => {
+      const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : ''
+      const messageID = typeof output?.message?.id === 'string' ? output.message.id : ''
+      if (!sessionID || !messageID) return
+      currentSessionID = sessionID
+      if (syntheticMessageIDs.has(messageID)) {
+        syntheticMessageIDs.delete(messageID)
+        const correlation = pendingByMessage.get(messageID)
+        if (correlation) turnCorrelationQueue.capture(sessionID, messageID, { kind: 'synthetic', eventIDs: correlation.eventIDs })
+        return
+      }
+      turnCorrelationQueue.capture(sessionID, messageID, { kind: 'current' })
+    },
     'chat.params': async (input: any) => {
       if (input?.sessionID && input.sessionID !== currentSessionID) {
         currentSessionID = input.sessionID
@@ -941,17 +1102,10 @@ const logPollTimer = setInterval(async () => {
       output: { system: string[] },
     ) => {
       turnCount++
-      if (input?.sessionID && input.sessionID !== currentSessionID) {
-        currentSessionID = input.sessionID
-      }
-      bus({
-        cmd: 'health',
-        plugin_last_run: new Date().toISOString(),
-        model_last_action: turnCount > 1 ? new Date().toISOString() : undefined,
-        pid: process.pid,
-      })
+      if (input?.sessionID && input.sessionID !== currentSessionID) currentSessionID = input.sessionID
+      bus({ cmd: 'health', plugin_last_run: new Date().toISOString(),
+        model_last_action: turnCount > 1 ? new Date().toISOString() : undefined, pid: process.pid })
 
-      // Fleet identity injection.
       const hasIdentity = output.system.some(l => l.includes('--- fleet identity ---'))
       if (sessionNeedsIdentity || !hasIdentity) {
         sessionNeedsIdentity = false
@@ -964,42 +1118,64 @@ const logPollTimer = setInterval(async () => {
         output.system.push('', '--- fleet identity ---', ...parts, '--- end fleet identity ---')
       }
 
-      // This adapter only places Go-formatted prompt text into the active
-      // turn. Polling, command dispatch, ordering and leasing are shared.
-      const { response: eventResponse, events: available } = await pollEvents()
-      if (!eventResponse.ok) {
-        tickLog(`event-transform-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${String(eventResponse.error || 'unknown').slice(0, 180)}`)
-      }
       const handoffSid = currentSessionID
-      if (available.length > 0) {
-        tickLog(`event-transform ship=${aid()} sid=${handoffSid || '-'} pending=[${available.map((event: any) => event.id).join(',')}]`)
+      if (!handoffSid) return
+      const turnCorrelation = turnCorrelationQueue.consume(handoffSid)
+      if (!turnCorrelation) {
+        tickLog(`event-transform-skip ship=${aid()} sid=${handoffSid} reason=no-awaited-chat-message-correlation`)
+        return
       }
-      if (!handoffSid) {
-        if (available.length > 0) {
-          tickLog(`event-transform-skip ship=${aid()} sid=<missing> ids=[${available.map((event: any) => event.id).join(',')}] reason=no-session-context`)
-        }
+      const correlation = turnCorrelation.metadata || {}
+      if (correlation.kind === 'synthetic') {
+        const eventIDs = Array.isArray(correlation.eventIDs) ? correlation.eventIDs : []
+        const pending = pendingByMessage.get(turnCorrelation.messageID)
+        if (pending) markTurnStarted(turnCorrelation.messageID, pending)
+        tickLog(`event-turn-started ship=${aid()} sid=${handoffSid} message=${turnCorrelation.messageID} ids=[${eventIDs.join(',')}]`)
         return
       }
 
+      const { response: eventResponse, events: available } = await pollEvents()
+      if (!eventResponse.ok) tickLog(`event-transform-error ${formatRuntimeIdentity(RUNTIME_IDENTITY)} ship=${aid()} error=${String(eventResponse.error || 'unknown').slice(0, 180)}`)
       const claimed = eventCoordinator.claim(available)
       const claimedIds = claimed.map((event: any) => event.id)
+      const durableSubmitted = new Set<string>()
       try {
         const promptEvents = await dispatchEvents(claimed, async () => handoffSid, 'transform')
-        if (promptEvents.length > 0) {
-          const prepared = preparePromptEvents(promptEvents)
-          if (!prepared) {
-            tickLog(`handoff-transform-skip ship=${aid()} sid=${handoffSid} reason=invalid-event-prompt`)
-            return
-          }
-          output.system.push(prepared.parts.join(''))
-          eventCoordinator.markSubmitted(prepared.eventIds)
-          for (const id of prepared.eventIds) {
-            const sr = bus({ cmd: 'seen_mark', id })
-            tickLog(`handoff-transform ship=${aid()} sid=${handoffSid} id=${id} seen=${!!sr?.ok} mode=system-inject`)
-          }
+        if (!promptEvents.length) return
+        const prepared = preparePromptEvents(promptEvents)
+        if (!prepared) {
+          tickLog(`handoff-transform-skip ship=${aid()} sid=${handoffSid} reason=invalid-event-prompt`)
+          return
+        }
+        let preparedOK = true
+        for (const id of prepared.eventIds) {
+          const event = promptEvents.find((entry: any) => entry.id === id)
+          if (event?.lifecycle && !transitionEvent(id, 'prepared', handoffSid, turnCorrelation.messageID)) { preparedOK = false; break }
+        }
+        if (!preparedOK) return
+
+        output.system.push(prepared.parts.join(''))
+        pendingByMessage.set(turnCorrelation.messageID, { sessionID: handoffSid, eventIDs: prepared.eventIds, submitted: true })
+        // The system prompt is now part of this active turn. Keep a local
+        // tombstone and the durable lease even if a lifecycle write fails;
+        // the correlated turn callbacks/poller will retry persistence. Releasing
+        // here could let another adapter inject the same directive twice.
+        eventCoordinator.markSubmitted(prepared.eventIds)
+        for (const id of prepared.eventIds) durableSubmitted.add(id)
+        let accepted = true
+        for (const id of prepared.eventIds) {
+          const event = promptEvents.find((entry: any) => entry.id === id)
+          if (event?.lifecycle && !transitionEvent(id, 'submitted', handoffSid, turnCorrelation.messageID)) accepted = false
+          if (!event?.lifecycle) bus({ cmd: 'seen_mark', id })
+        }
+        if (accepted) {
+          tickLog(`handoff-transform-submitted ship=${aid()} sid=${handoffSid} message=${turnCorrelation.messageID} ids=[${prepared.eventIds.join(',')}]`)
+        } else {
+          tickLog(`handoff-transform-submit-pending ship=${aid()} sid=${handoffSid} message=${turnCorrelation.messageID} ids=[${prepared.eventIds.join(',')}]`)
         }
       } finally {
         eventCoordinator.release(claimedIds)
+        releaseEvents(claimedIds.filter((id) => !durableSubmitted.has(id)))
       }
     },
     event: async ({ event }: { event: { type: string; properties?: Record<string, unknown> } }) => {
@@ -1042,16 +1218,57 @@ const logPollTimer = setInterval(async () => {
       }
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
-        if (info?.role === 'assistant' && info?.modelID) {
-          currentModel = { model: info.modelID, server: info.providerID }
-          if (hasSwitchedToFallback.v) {
-            tickLog(`MODEL RECOVERY: session recovered on ${info.modelID} — fallback worked`)
-            hasSwitchedToFallback.v = false
+        if (info?.role === 'assistant') {
+          const correlation = pendingByMessage.get(info.parentID)
+          if (correlation) {
+            const updateState = classifyAssistantUpdate(info, correlation.sessionID, info.parentID)
+            if (updateState === 'failed') {
+              for (const id of correlation.eventIDs) transitionEvent(id, 'failed', correlation.sessionID, info.parentID, String(info.error).slice(0, 512))
+              pendingByMessage.delete(info.parentID)
+              lastReconcileAt.delete(info.parentID)
+              eventCoordinator.forget(correlation.eventIDs)
+            } else if (updateState === 'completed') {
+              if (completeCorrelation(info.parentID, correlation)) {
+                tickLog(`event-turn-completed ship=${aid()} sid=${correlation.sessionID} message=${info.parentID} ids=[${correlation.eventIDs.join(',')}]`)
+              } else {
+                tickLog(`event-turn-completion-pending ship=${aid()} sid=${correlation.sessionID} message=${info.parentID} ids=[${correlation.eventIDs.join(',')}]`)
+              }
+            } else if (updateState === 'started') {
+              markTurnStarted(info.parentID, correlation)
+            }
           }
-          bus({ cmd: 'health', error_tag: undefined, plugin_last_run: new Date().toISOString() })
+          if (info.modelID) {
+            currentModel = { model: info.modelID, server: info.providerID }
+            if (hasSwitchedToFallback.v) {
+              tickLog(`MODEL RECOVERY: session recovered on ${info.modelID} — fallback worked`)
+              hasSwitchedToFallback.v = false
+            }
+            bus({ cmd: 'health', error_tag: undefined, plugin_last_run: new Date().toISOString() })
+          }
+        }
+      }
+      if (event.type === 'session.status') {
+        const props = event.properties as any
+        if (props?.status?.type === 'busy') {
+          for (const [messageID, correlation] of pendingByMessage) {
+            if (correlation.sessionID !== props.sessionID) continue
+            markTurnStarted(messageID, correlation)
+            break // session busy identifies the oldest pending turn in this session
+          }
         }
       }
 if (event.type === 'session.error') {
+         const failedSessionID = String((event.properties as any)?.sessionID || currentSessionID)
+         const correlatedError = (event.properties?.error as any)?.message ||
+           (event.properties?.error as any)?.code || 'correlated session.error'
+         for (const [messageID, correlation] of pendingByMessage) {
+           if (correlation.sessionID !== failedSessionID) continue
+           for (const id of correlation.eventIDs) transitionEvent(id, 'failed', correlation.sessionID, messageID, String(correlatedError).slice(0, 512))
+           pendingByMessage.delete(messageID)
+           lastReconcileAt.delete(messageID)
+           eventCoordinator.forget(correlation.eventIDs)
+           break // session.error applies to the active (oldest) correlated turn
+         }
          // opencode's session.error often surfaces a generic "unknown error" for
          // stream/API errors like ResourceExhausted — the real detail is only in
          // the opencode.log (handled by LOG-MONITOR). Only dispatch if we have

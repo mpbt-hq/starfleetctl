@@ -628,7 +628,7 @@ func (b *Bus) DoExit(reason string) error {
 //
 // It deliberately does NOT ack them: acknowledging at startup would consume
 // work the agent never saw (the classic "messages lost across restart" bug).
-// Delivery (prompt + seen_mark) is the consumer's job.
+// Delivery (prompt + correlated lifecycle completion; legacy seen_mark for old consumers) is the consumer's job.
 func (b *Bus) DoInit(note string) ([]Message, error) {
 	lock, err := b.lockBus()
 	if err != nil {
