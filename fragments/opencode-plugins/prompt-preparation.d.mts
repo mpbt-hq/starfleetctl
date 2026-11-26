@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright © 2026 Enrico Weigelt, metux IT consult
+
+export interface PreparedPrompt {
+  eventIds: string[];
+  parts: string[];
+  startTurn: boolean;
+}
+
+export function preparePrompt(
+  eventIds: unknown,
+  prompt: unknown,
+  startTurn?: boolean,
+): PreparedPrompt | null;
+
+export function prepareLegacyInboxPrompt(
+  messages: unknown,
+): PreparedPrompt | null;
+
+export function preparePromptEvents(
+  events: unknown,
+): PreparedPrompt | null;
+
+export function legacyInboxToEvents(messages: unknown): any[];

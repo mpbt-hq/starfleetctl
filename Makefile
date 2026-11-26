@@ -14,9 +14,9 @@ TOOL := starfleetctl
 # See scripts/check-opencode-plugin.sh.
 PLUGIN_CHECK := scripts/check-opencode-plugin.sh
 
-.PHONY: all build test fmt vet clean check-plugin
+.PHONY: all build test fmt vet clean check-plugin test-plugin
 
-all: clean build vet fmt test check-plugin
+all: clean build vet fmt test check-plugin test-plugin
 
 # Go's embedded VCS info (buildvcs) recognises only a .git DIRECTORY, not the
 # .git FILE of a linked worktree. Building inside a worktree that sits under
@@ -44,3 +44,6 @@ clean:
 
 check-plugin:
 	@$(PLUGIN_CHECK)
+
+test-plugin:
+	@scripts/test-opencode-plugin.sh

@@ -17,23 +17,15 @@ if [ ! -f "$PLUGIN_TEST" ]; then
     exit 1
 fi
 
-# Check if tsx is available
-if ! command -v npx >/dev/null 2>&1; then
-    note "npx not found — skipping tests (install node/npm)"
-    exit 0
-fi
-
-# Try to run tests with tsx (installed as dev dependency)
-if npx --no-install tsx --version >/dev/null 2>&1; then
+# Prefer a directly installed runner (used by CI), then a local npx runner.
+if command -v tsx >/dev/null 2>&1; then
     note "Running plugin unit tests with tsx..."
-    if npx --no-install tsx "$PLUGIN_TEST"; then
-        note "Plugin unit tests PASSED"
-        exit 0
-    else
-        note "Plugin unit tests FAILED"
-        exit 1
-    fi
+    tsx "$PLUGIN_TEST"
+    note "Plugin unit tests PASSED"
+elif command -v npx >/dev/null 2>&1 && npx --no-install tsx --version >/dev/null 2>&1; then
+    note "Running plugin unit tests with local tsx..."
+    npx --no-install tsx "$PLUGIN_TEST"
+    note "Plugin unit tests PASSED"
 else
-    note "tsx not installed — skipping tests (run 'npm install' in starfleetctl dir)"
-    exit 0
+    note "tsx not installed — skipping tests (install tsx to run them)"
 fi
