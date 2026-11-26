@@ -232,9 +232,9 @@ comms: directive m124 from 'Enterprise' → TestShip
     })
 
     test('dashboard-topic markers are references, never automatic task adoption', () => {
-      // Guard the real plugin source: merely receiving/injecting a directive
-      // must not update currentTask or the board. Explicit task commands and
-      // the task lifecycle are the only supported status-changing paths.
+      // Guard the real plugin source: a delivered directive must not adopt
+      // its referenced task, and heartbeats must not overwrite lifecycle state.
+      // Task association is changed only by explicit task commands/lifecycle.
       const source = readFileSync(new URL('./starfleet-dispatch.ts', import.meta.url), 'utf8')
       assert.doesNotMatch(source, /Dashboard-Topic/)
       assert.doesNotMatch(source, /task-adopt/)
