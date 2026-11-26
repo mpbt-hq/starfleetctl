@@ -272,3 +272,89 @@ func TestPluginAssetClassifierRejectsUnclassifiedExtensions(t *testing.T) {
 		t.Fatalf("new runtime extension silently classified: runtime=%v err=%v", runtimeAsset, err)
 	}
 }
+
+
+func TestFixOpencodePluginsRemovesLegacyTestAssetsAndRegistration(t *testing.T) {
+	root := t.TempDir()
+	installedRoot := filepath.Join(root, ".opencode", "plugins")
+	if err := os.MkdirAll(installedRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	embeddedDir := path.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir)
+	entries, err := fs.ReadDir(starfleetctl.Fragments, embeddedDir)
+	if err != nil {
+		t.Fatalf("read embedded plugin source directory: %v", err)
+	}
+	var staleTests []string
+	for _, entry := range entries {
+		if entry.IsDir() || !isOpencodePluginTestAsset(entry.Name()) {
+			continue
+		}
+		staleTests = append(staleTests, entry.Name())
+		if err := os.WriteFile(filepath.Join(installedRoot, entry.Name()), []byte("legacy test asset"), 0o644); err != nil {
+			t.Fatalf("create legacy installed test asset %s: %v", entry.Name(), err)
+		}
+	}
+	if len(staleTests) == 0 {
+		t.Fatal("expected source-side test assets to exercise legacy cleanup")
+	}
+
+	configPath := filepath.Join(root, ".opencode", "opencode.json")
+	configBytes, err := json.Marshal(map[string]any{
+		"plugin": []string{
+			pluginConfigSpec("starfleet-dispatch.test.ts"),
+			"./plugins/user-owned.ts",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, configBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := New(root)
+	if ok, detail := verifyOpencodePlugins(b); ok || !strings.Contains(detail, "stale test assets") {
+		t.Fatalf("verifier before migration = (%v, %q), want stale test asset finding", ok, detail)
+	}
+	if err := fixOpencodePlugins(b); err != nil {
+		t.Fatalf("bootstrap plugin migration: %v", err)
+	}
+	if ok, detail := verifyOpencodePlugins(b); !ok {
+		t.Fatalf("verifier after migration = (%v, %q), want clean install", ok, detail)
+	}
+	for _, name := range staleTests {
+		if _, err := os.Stat(filepath.Join(installedRoot, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("legacy test asset %s remains installed (stat err=%v)", name, err)
+		}
+	}
+
+	configBytes, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Plugin []string `json:"plugin"`
+	}
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range config.Plugin {
+		if spec == pluginConfigSpec("starfleet-dispatch.test.ts") {
+			t.Errorf("legacy test entry point remains registered: %q", spec)
+		}
+	}
+	if !containsString(config.Plugin, "./plugins/user-owned.ts") {
+		t.Errorf("bootstrap removed unrelated user plugin registration: %v", config.Plugin)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
