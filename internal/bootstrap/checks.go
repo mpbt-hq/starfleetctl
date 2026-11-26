@@ -589,11 +589,24 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 		// If the directory doesn't exist in the embedded FS, that's OK — no plugins to install.
 		return true, "no embedded opencode plugins"
 	}
-	var missing, stale, unregistered []string
+	var missing, stale, unregistered, staleTests []string
 	registered := loadOpencodePluginConfig(b)
 	assetCount := 0
 	for _, e := range entries {
-		if e.IsDir() || !isOpencodePluginAsset(e.Name()) {
+		if e.IsDir() {
+			continue
+		}
+		installedPath := filepath.Join(b.Root, ".opencode", "plugins", e.Name())
+		if isOpencodePluginTestAsset(e.Name()) {
+			if _, err := os.Stat(installedPath); err == nil {
+				staleTests = append(staleTests, e.Name())
+			}
+			if isOpencodePluginTestEntryPoint(e.Name()) && registered[pluginConfigSpec(e.Name())] {
+				staleTests = append(staleTests, e.Name()+" (still registered)")
+			}
+			continue
+		}
+		if !isOpencodePluginAsset(e.Name()) {
 			continue
 		}
 		assetCount++
@@ -601,7 +614,6 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 		if err != nil {
 			return false, err.Error()
 		}
-		installedPath := filepath.Join(b.Root, ".opencode", "plugins", e.Name())
 		data, err := os.ReadFile(installedPath)
 		if err != nil {
 			missing = append(missing, e.Name())
@@ -617,7 +629,7 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 			unregistered = append(unregistered, e.Name())
 		}
 	}
-	if len(missing) == 0 && len(stale) == 0 && len(unregistered) == 0 {
+	if len(missing) == 0 && len(stale) == 0 && len(unregistered) == 0 && len(staleTests) == 0 {
 		return true, fmt.Sprintf("%d/%d plugin assets present and up to date; plugins registered", assetCount, assetCount)
 	}
 	var parts []string
@@ -630,6 +642,9 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 	if len(unregistered) > 0 {
 		parts = append(parts, fmt.Sprintf("unregistered: %s", strings.Join(unregistered, ", ")))
 	}
+	if len(staleTests) > 0 {
+		parts = append(parts, fmt.Sprintf("stale test assets: %s", strings.Join(staleTests, ", ")))
+	}
 	return false, strings.Join(parts, "; ")
 }
 
@@ -640,10 +655,20 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 func isOpencodePluginAsset(name string) bool {
 	// Source-side tests live beside runtime code but must never be copied into
 	// .opencode/plugins/ or exposed to OpenCode as executable plugins.
-	if strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, ".test.mjs") {
+	if isOpencodePluginTestAsset(name) {
 		return false
 	}
 	return isOpencodePluginEntryPoint(name) || strings.HasSuffix(name, ".mjs")
+}
+
+// isOpencodePluginTestAsset identifies colocated tests that older bootstrap
+// versions mistakenly installed as runtime files.
+func isOpencodePluginTestAsset(name string) bool {
+	return strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, ".test.mjs")
+}
+
+func isOpencodePluginTestEntryPoint(name string) bool {
+	return strings.HasSuffix(name, ".test.ts")
 }
 
 // isOpencodePluginEntryPoint identifies executable TypeScript plugin entry
@@ -707,6 +732,17 @@ func fixOpencodePlugins(b *Bootstrap) error {
 		}
 	}
 
+	for _, e := range entries {
+		if e.IsDir() || !isOpencodePluginTestAsset(e.Name()) {
+			continue
+		}
+		// Older bootstrap versions installed test files beside runtime assets.
+		// Remove those managed leftovers during upgrade, not just on fresh installs.
+		if err := os.Remove(filepath.Join(destDir, e.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
 	// Remove a previously-installed plugin under its OLD name, so a rename
 	// doesn't leave two copies loaded at once (duplicate inbox injection).
 	// Keep this list in sync with any fragment renames in
@@ -765,7 +801,25 @@ func fixOpencodePlugins(b *Bootstrap) error {
 			}
 		}
 	}
+	// Drop test entry points left in the config by older bootstrap versions.
+	testSpecs := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() && isOpencodePluginTestEntryPoint(e.Name()) {
+			testSpecs[pluginConfigSpec(e.Name())] = true
+		}
+	}
 	changed := false
+	filteredSpecs := specs[:0]
+	for _, spec := range specs {
+		if testSpecs[spec] {
+			changed = true
+			delete(registered, spec)
+			continue
+		}
+		filteredSpecs = append(filteredSpecs, spec)
+	}
+	specs = filteredSpecs
+
 	for _, e := range entries {
 		if e.IsDir() || !isOpencodePluginEntryPoint(e.Name()) {
 			continue
