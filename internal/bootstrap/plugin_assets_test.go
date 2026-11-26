@@ -23,15 +23,15 @@ import (
 // the canonical plugin source directory must be classified explicitly rather
 // than silently escaping the source/embed/install parity check.
 func classifyPluginSourceAsset(name string) (bool, error) {
+	if isOpencodePluginAsset(name) {
+		return true, nil
+	}
 	switch {
 	case name == "tsconfig.json",
 		strings.HasSuffix(name, ".d.mts"),
 		strings.HasSuffix(name, ".test.ts"),
 		strings.HasSuffix(name, ".test.mjs"):
 		return false, nil
-	case strings.HasSuffix(name, ".ts"),
-		strings.HasSuffix(name, ".mjs"):
-		return true, nil
 	default:
 		return false, fmt.Errorf("unclassified file in opencode plugin source tree: %s", name)
 	}
