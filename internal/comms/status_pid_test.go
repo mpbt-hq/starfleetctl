@@ -121,6 +121,7 @@ func TestDoInitKeepsLiveShipPIDAndFields(t *testing.T) {
 		PluginLastRun:   "2026-01-01T00:00:00Z",
 		ModelLastAction: "2026-01-01T00:00:01Z",
 		Task:            "task-x",
+		Note:            "task: current work",
 		Progress:        42,
 		PluginVersion:   "v1",
 		Model:           "some/model",
@@ -141,6 +142,9 @@ func TestDoInitKeepsLiveShipPIDAndFields(t *testing.T) {
 	}
 	if rec.Task != "task-x" || rec.Progress != 42 || rec.Model != "some/model" {
 		t.Fatalf("ack path dropped status fields: %+v", rec)
+	}
+	if rec.Note != "task: current work" {
+		t.Fatalf("init overwrote the active task note: %+v", rec)
 	}
 	if rec.State != "working" {
 		t.Fatalf("init must preserve the existing task state: %+v", rec)
