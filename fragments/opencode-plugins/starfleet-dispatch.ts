@@ -154,8 +154,10 @@ function tickLog(line: string): void {
 export const plugin = async ({ client, $ }: any) => {
   loadConfig()
 
-  // Initial health: reset stale + fresh write.
-  bus({ cmd: 'health', reset: true, state: 'idle', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
+  // Refresh process identity without resetting task/status state. A new
+  // status record defaults to idle in Go; an existing task lifecycle survives
+  // plugin restarts and session recreation.
+  bus({ cmd: 'health', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
 
   let tuiReady = false
   let sessionNeedsIdentity = true
@@ -971,7 +973,7 @@ const logPollTimer = setInterval(async () => {
           }
         } catch { /* ignore */ }
 
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'idle', pid: process.pid, ...currentModel })
+        bus({ cmd: 'health', model_last_action: new Date().toISOString(), pid: process.pid, ...currentModel })
         const shipName = process.env.STARFLEET_SHIP_ID
         if (shipName && sessionId) {
           try {
@@ -984,7 +986,7 @@ const logPollTimer = setInterval(async () => {
         turnCount = 0
         currentModel = {}
         hasSwitchedToFallback.v = false
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'idle', pid: process.pid })
+        bus({ cmd: 'health', model_last_action: new Date().toISOString(), pid: process.pid })
       }
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
