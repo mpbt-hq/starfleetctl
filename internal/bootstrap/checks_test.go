@@ -163,7 +163,19 @@ func TestFixOpencodePluginsInstallsModuleAssets(t *testing.T) {
 		t.Fatalf("fixOpencodePlugins: %v", err)
 	}
 
-	helperNames := []string{"session-resolution.mjs", "runtime-identity.mjs"}
+	assets, err := discoverPluginRuntimeAssets(starfleetctl.Fragments, filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir))
+	if err != nil {
+		t.Fatalf("discover embedded plugin assets: %v", err)
+	}
+	var helperNames []string
+	for name := range assets {
+		if strings.HasSuffix(name, ".mjs") {
+			helperNames = append(helperNames, name)
+		}
+	}
+	if len(helperNames) == 0 {
+		t.Fatal("expected at least one imported .mjs helper module")
+	}
 	for _, helperName := range helperNames {
 		embeddedPath := filepath.Join(starfleetctl.FragmentsRoot, opencodePluginsSubdir, helperName)
 		want, err := fs.ReadFile(starfleetctl.Fragments, embeddedPath)
