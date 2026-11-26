@@ -21,9 +21,9 @@ test('plugin heartbeat cannot overwrite explicit task lifecycle state', () => {
   assert.doesNotMatch(heartbeat[1], /\btask\s*:/)
 })
 
-test('plugin startup and session resets preserve existing task status', () => {
+test('plugin lifecycle events preserve task status instead of inferring it', () => {
   assert.match(plugin, /cmd: 'health', plugin_last_run:/)
   assert.doesNotMatch(plugin, /reset: true/)
   assert.doesNotMatch(plugin, /state: 'idle'/)
-  assert.match(plugin, /cmd: 'health', state: 'working', error_tag:/)
+  assert.doesNotMatch(plugin, /state: 'working'/)
 })
