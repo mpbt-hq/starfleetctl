@@ -623,7 +623,8 @@ func (b *Bus) DoExit(reason string) error {
 }
 
 // DoInit consolidates the plugin's startup sequence into a single bus call:
-// prune stale data, set status to idle, and return the unread messages.
+// prune stale data, refresh liveness while preserving an existing status, and
+// return the unread messages. New or offline ships start with status idle.
 //
 // It deliberately does NOT ack them: acknowledging at startup would consume
 // work the agent never saw (the classic "messages lost across restart" bug).
@@ -706,11 +707,11 @@ func (b *Bus) DoInit(note string) ([]Message, error) {
 		}
 	}
 
-	// 4. Set status to idle — preserving the ship's own fields.
-	// Start from the existing record so that the PID of the long-lived ship
-	// process and the plugin-liveness/task fields survive this write. This
-	// writer is a short-lived helper process (the ship calls it through its
-	// shell) and must not take over the PID nor drop liveness information.
+	// 4. Refresh status while preserving an existing lifecycle state.
+	// New ships and previously offline ships start idle; a live ship's
+	// explicit task/Comms status must survive plugin or session restarts.
+	// Start from the existing record so the long-lived ship PID and its
+	// plugin-liveness/task fields survive this short-lived helper write.
 	prev, _ := parseStatusFile(b.sfile(b.ShipID))
 	if note == "" {
 		note = "opencode ship"
@@ -728,10 +729,16 @@ func (b *Bus) DoInit(note string) ([]Message, error) {
 	rec.ISO = isots()
 	rec.Agent = b.ShipID
 	rec.Project = pp
-	rec.State = "idle"
+	rec.State = prev.State
+	if rec.State == "" || rec.State == "offline" {
+		rec.State = "idle"
+	}
 	rec.PID = statusPIDForWrite(prev.PID)
 	rec.Handle = hh
-	rec.Note = clean(note)
+	rec.Note = prev.Note
+	if rec.Note == "" {
+		rec.Note = clean(note)
+	}
 	data, _ := json.MarshalIndent(rec, "", "  ")
 	_ = os.WriteFile(b.sfile(b.ShipID), append(data, '\n'), 0o644)
 

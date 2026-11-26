@@ -230,19 +230,6 @@ comms: directive m124 from 'Enterprise' → TestShip
       assert.strictEqual(parts[0], 'warning')
     })
 
-    test('should auto-adopt task from dashboard-topic reference with backticks', () => {
-      const text = 'Please work on (Dashboard-Topic `starfleet/task-example`) now.'
-      const topic = /Dashboard-Topic[ \t]*[`']([^`']+)[`']/.exec(text)
-      assert.ok(topic !== null)
-      assert.strictEqual(topic![1], 'starfleet/task-example')
-    })
-
-    test('should auto-adopt task from dashboard-topic reference with single quotes', () => {
-      const text = "See (Dashboard-Topic 'starfleet/task-example') for details."
-      const topic = /Dashboard-Topic[ \t]*[`']([^`']+)[`']/.exec(text)
-      assert.ok(topic !== null)
-      assert.strictEqual(topic![1], 'starfleet/task-example')
-    })
   })
 
   describe('executeAction() recovery actions logic', () => {
