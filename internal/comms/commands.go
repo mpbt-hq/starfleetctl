@@ -623,7 +623,8 @@ func (b *Bus) DoExit(reason string) error {
 }
 
 // DoInit consolidates the plugin's startup sequence into a single bus call:
-// prune stale data, set status to idle, and return the unread messages.
+// prune stale data, refresh liveness while preserving an existing status, and
+// return the unread messages. New or offline ships start with status idle.
 //
 // It deliberately does NOT ack them: acknowledging at startup would consume
 // work the agent never saw (the classic "messages lost across restart" bug).
