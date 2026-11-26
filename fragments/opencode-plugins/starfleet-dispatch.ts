@@ -243,7 +243,7 @@ export const plugin = async ({ client, $ }: any) => {
           currentModel.model = targetModel
           tickLog(`${src}: ok → ${targetModel}`)
           toastBus('success', 'starfleet-dispatch', `Model switched to ${targetModel}`, 5000)
-          bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString(), ...currentModel })
+          bus({ cmd: 'health', model_last_action: new Date().toISOString(), ...currentModel })
         })
         .catch((e: any) => {
           const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
@@ -348,7 +348,7 @@ export const plugin = async ({ client, $ }: any) => {
                   .then(() => {
                     tickLog(`${src}: ok`)
                     toastBus('success', 'starfleet-dispatch', 'Session cleared', 3000)
-                    bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+                    bus({ cmd: 'health', model_last_action: new Date().toISOString() })
                   })
                   .catch((e: any) => {
                     const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
@@ -388,7 +388,7 @@ export const plugin = async ({ client, $ }: any) => {
                 .then(() => {
                   tickLog(`${src}: ok → ${target}`)
                   toastBus('success', 'starfleet-dispatch', `Abort-retry + switch to ${target} done`, 5000)
-                  bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+                  bus({ cmd: 'health', model_last_action: new Date().toISOString() })
                 })
                 .catch((e: any) => {
                   const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
@@ -424,7 +424,7 @@ export const plugin = async ({ client, $ }: any) => {
                 .then(() => {
                   tickLog(`${src}: ok`)
                   toastBus('success', 'starfleet-dispatch', 'Session cleared — SOP index will reload on restart', 5000)
-                  bus({ cmd: 'health', state: 'working', model_last_action: new Date().toISOString() })
+                  bus({ cmd: 'health', model_last_action: new Date().toISOString() })
                 })
                 .catch((e: any) => {
                   const emsg = `${src}: failed: ${String(e).slice(0, 120)}`
@@ -996,7 +996,7 @@ const logPollTimer = setInterval(async () => {
             tickLog(`MODEL RECOVERY: session recovered on ${info.modelID} — fallback worked`)
             hasSwitchedToFallback.v = false
           }
-          bus({ cmd: 'health', state: 'working', error_tag: undefined, plugin_last_run: new Date().toISOString() })
+          bus({ cmd: 'health', error_tag: undefined, plugin_last_run: new Date().toISOString() })
         }
       }
 if (event.type === 'session.error') {
