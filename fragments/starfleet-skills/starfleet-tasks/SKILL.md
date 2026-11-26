@@ -53,6 +53,9 @@ After deciding to take the assigned task, explicitly run
 dashboard task to `in-progress`, and marks the ship `working`. Until then,
 the task remains merely assigned. If the ship cannot or will not take it,
 communicate that explicitly rather than reporting it as active work.
+The plugin heartbeat is liveness-only: it must not infer or overwrite task
+state. Use the lifecycle commands for task status; for one-off work, update
+the Comms status explicitly when starting and finishing.
 
 ## Working a task (mandatory cycle)
 
