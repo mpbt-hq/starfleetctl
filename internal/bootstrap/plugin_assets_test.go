@@ -325,7 +325,7 @@ func TestFixOpencodePluginsRemovesLegacyTestAssetsAndRegistration(t *testing.T) 
 		t.Fatalf("verifier after migration = (%v, %q), want clean install", ok, detail)
 	}
 	for _, name := range staleTests {
-		if _, err := os.Stat(filepath.Join(installedRoot, name)); !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(filepath.Join(installedRoot, name)); !os.IsNotExist(err) {
 			t.Errorf("legacy test asset %s remains installed (stat err=%v)", name, err)
 		}
 	}
