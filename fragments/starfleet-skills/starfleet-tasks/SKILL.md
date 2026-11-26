@@ -40,6 +40,20 @@ starfleetctl task purge [--no-push]                    # delete ALL done tasks
 starfleetctl task orphans [--json]                     # tasks assigned to vanished ships
 ```
 
+## Commission messages and Dashboard-Topic references
+
+A commission message may contain a marker such as
+`(Dashboard-Topic \`<slug>\`)`. This is a **reference to the task record only**.
+Receiving, importing, or injecting that message does not mean the task has been
+accepted or started, and must not by itself change the ship's current task or
+board status.
+
+After deciding to take the assigned task, explicitly run
+`starfleetctl task begin <slug>`. This records the acceptance, changes the
+dashboard task to `in-progress`, and marks the ship `working`. Until then,
+the task remains merely assigned. If the ship cannot or will not take it,
+communicate that explicitly rather than reporting it as active work.
+
 ## Working a task (mandatory cycle)
 
 When you **take on / work a task**, the following applies to every session:
