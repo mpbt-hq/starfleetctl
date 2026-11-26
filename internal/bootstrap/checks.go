@@ -613,7 +613,7 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 		// Plugin must be registered in .opencode/opencode.json so opencode
 		// actually loads it. Path is relative to .opencode/ (see resolvePluginSpec
 		// path handling) to avoid the doubled-.opencode path bug.
-		if strings.HasSuffix(e.Name(), ".ts") && !registered[pluginConfigSpec(e.Name())] {
+		if isOpencodePluginEntryPoint(e.Name()) && !registered[pluginConfigSpec(e.Name())] {
 			unregistered = append(unregistered, e.Name())
 		}
 	}
@@ -638,7 +638,18 @@ func verifyOpencodePlugins(b *Bootstrap) (bool, string) {
 // .mjs files may be imported helper modules and must be installed alongside
 // them, but must not be registered as plugins themselves.
 func isOpencodePluginAsset(name string) bool {
-	return strings.HasSuffix(name, ".ts") || strings.HasSuffix(name, ".mjs")
+	// Source-side tests live beside runtime code but must never be copied into
+	// .opencode/plugins/ or exposed to OpenCode as executable plugins.
+	if strings.HasSuffix(name, ".test.ts") || strings.HasSuffix(name, ".test.mjs") {
+		return false
+	}
+	return isOpencodePluginEntryPoint(name) || strings.HasSuffix(name, ".mjs")
+}
+
+// isOpencodePluginEntryPoint identifies executable TypeScript plugin entry
+// points. Test files are source assets, not OpenCode plugins.
+func isOpencodePluginEntryPoint(name string) bool {
+	return strings.HasSuffix(name, ".ts") && !strings.HasSuffix(name, ".test.ts")
 }
 
 // pluginConfigSpec returns the opencode config "plugin" array entry for a
@@ -711,7 +722,7 @@ func fixOpencodePlugins(b *Bootstrap) error {
 	pkgPath := filepath.Join(b.Root, ".opencode", "package.json")
 	if _, err := os.Stat(pkgPath); errors.Is(err, os.ErrNotExist) {
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+			if e.IsDir() || !isOpencodePluginEntryPoint(e.Name()) {
 				continue
 			}
 			name := strings.TrimSuffix(e.Name(), ".ts")
@@ -756,7 +767,7 @@ func fixOpencodePlugins(b *Bootstrap) error {
 	}
 	changed := false
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+		if e.IsDir() || !isOpencodePluginEntryPoint(e.Name()) {
 			continue
 		}
 		spec := pluginConfigSpec(e.Name())
