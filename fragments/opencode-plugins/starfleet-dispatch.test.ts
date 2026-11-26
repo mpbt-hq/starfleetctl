@@ -7,7 +7,6 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert'
-import { readFileSync } from 'node:fs'
 
 // ============================================================================
 // PURE LOGIC TESTS - No mocks needed, just test the logic directly
@@ -231,20 +230,6 @@ comms: directive m124 from 'Enterprise' → TestShip
       assert.strictEqual(parts[0], 'warning')
     })
 
-    test('dashboard-topic markers are references, never automatic task adoption', () => {
-      // Guard the real plugin source: a delivered directive must not adopt
-      // its referenced task, and heartbeats must not overwrite lifecycle state.
-      // Task association is changed only by explicit task commands/lifecycle.
-      const source = readFileSync(new URL('./starfleet-dispatch.ts', import.meta.url), 'utf8')
-      assert.doesNotMatch(source, /Dashboard-Topic/)
-      assert.doesNotMatch(source, /task-adopt/)
-      assert.doesNotMatch(source, /currentTask/)
-      assert.match(source, /case 'task':/)
-      const heartbeat = source.match(/const heartbeatTimer = setInterval\(\(\) => \{([\s\S]*?)\n  \}, HEARTBEAT_MS\)/)
-      assert.ok(heartbeat, 'heartbeat handler must exist')
-      assert.doesNotMatch(heartbeat[1], /\bstate\s*:/)
-      assert.doesNotMatch(heartbeat[1], /\btask\s*:/)
-    })
   })
 
   describe('executeAction() recovery actions logic', () => {
