@@ -58,9 +58,9 @@ on `dashboard/topics/*.md`.
   injection of a commission message does not change the ship's current task or
   board status. A ship that decides to take the task must explicitly run
   `starfleetctl task begin <slug>`; this is the acceptance/status transition.
-  Plugin heartbeats refresh liveness only; they must not reset a task's
-  explicit board state. Plugin startup/session recreation must preserve an
-  existing task state (a new ship with no record defaults to idle). Use
+  Plugin startup, session recreation, model-activity telemetry, and heartbeats
+  must not infer or overwrite task state. They preserve an existing board
+  status (a new ship with no record defaults to idle). Use
   `task progress` / `task done` for lifecycle
   transitions, and explicit Comms status updates for one-off work.
 
