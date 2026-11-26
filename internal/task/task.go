@@ -402,13 +402,13 @@ func commitAndReindex(d *dashboard.Dashboard, slug, msg string, push bool) {
 // call, so the message reads as a fresh assignment vs. a reassignment. When
 // the target is the flagship, the message explicitly notes that it may
 // delegate the task to a worker ship instead of executing it itself.
-func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
+func commissionMessage(slug, title, ship, flagship string, wasAssigned bool) string {
 	reference := " (Dashboard-Topic `" + slug + "`; nur Referenz, keine automatische Übernahme)."
 	begin := " Bei Übernahme bitte `.starfleet-ai/bin/starfleetctl task begin " + slug + "` ausführen."
 	delegate := reference + " Du kannst sie selbst übernehmen." + begin +
 		" Oder an einen freien Worker delegieren (z.B. via `.starfleet-ai/bin/starfleetctl task assign " + slug + " <ship>`)."
 	var msg string
-	if ship == shipnames.FlagshipName(root) {
+	if ship == flagship {
 		if wasAssigned {
 			msg = "Dir wurde die Aufgabe neu zugewiesen: " + title + delegate
 		} else {
@@ -421,6 +421,12 @@ func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
 		msg = "Neue Aufgabe für dich erfasst: " + title + reference +
 			" Bitte lies dort die Details." + begin + " Falls du sie nicht übernehmen kannst, melde dich via Comms."
 	}
+	return msg
+}
+
+// commissionShip sends the assignment directive to the assigned ship.
+func commissionShip(root, slug, title, ship string, wasAssigned bool) error {
+	msg := commissionMessage(slug, title, ship, shipnames.FlagshipName(root), wasAssigned)
 	b, err := comms.New(root)
 	if err != nil {
 		return err
