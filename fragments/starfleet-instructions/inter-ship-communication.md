@@ -54,6 +54,13 @@ on `dashboard/topics/*.md`.
   correct way to accept a task.
 - **Notice something worth a look → park it immediately.** Add a dashboard Parked
   entry rather than just mentioning it and moving on.
+- **A Dashboard-Topic marker is a reference, not acceptance.** Delivery or
+  injection of a commission message does not change the ship's current task or
+  board status. A ship that decides to take the task must explicitly run
+  `starfleetctl task begin <slug>`; this is the acceptance/status transition.
+  Plugin heartbeats refresh liveness only; they must not reset a task's
+  explicit board state. Use `task progress` / `task done` for lifecycle
+  transitions, and explicit Comms status updates for one-off work.
 
 ### Work coordination (avoiding concurrent edits + exchanging findings)
 

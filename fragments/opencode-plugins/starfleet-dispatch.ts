@@ -155,7 +155,7 @@ export const plugin = async ({ client, $ }: any) => {
   loadConfig()
 
   // Initial health: reset stale + fresh write.
-  bus({ cmd: 'health', reset: true, state: 'working', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
+  bus({ cmd: 'health', reset: true, state: 'idle', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
 
   let tuiReady = false
   let sessionNeedsIdentity = true
@@ -165,7 +165,6 @@ export const plugin = async ({ client, $ }: any) => {
   let currentModel: { model?: string; server?: string } = {}
   let currentSessionID = ''
   let sessionResolveDiagnosticLogged = false
-  let currentTask = ''
   const hasSwitchedToFallback = { v: false }
 
   // Model-switch helpers.
@@ -286,15 +285,6 @@ export const plugin = async ({ client, $ }: any) => {
       case 'user':
       case 'control':
       case 'message': {
-        // Auto-report: task-commission directives reference the dashboard
-        // topic ("(Dashboard-Topic `slug`)"). Adopt it as the current task so
-        // the fleet can see what this ship is working on right now.
-        const topic = /Dashboard-Topic[ \t]*[`']([^`']+)[`']/.exec(text)
-        if (topic) {
-          currentTask = topic[1]
-          bus({ cmd: 'task', task: topic[1] })
-          tickLog(`[task-adopt] ${msg.from}: → ${topic[1]}`)
-        }
         return false
       }
 
@@ -325,12 +315,10 @@ export const plugin = async ({ client, $ }: any) => {
             // `task done` (or bare `task`) — report back to idle.
             const src = `[command task from=${msg.from}]`
             if (!args || args === 'clear' || args === 'done') {
-              currentTask = ''
               bus({ cmd: 'task', task: '', task_clear: true })
               tickLog(`${src}: cleared`)
               toastBus('info', 'starfleet-dispatch', 'Task cleared', 3000)
             } else {
-              currentTask = args
               bus({ cmd: 'task', task: args })
               tickLog(`${src}: → ${args}`)
               toastBus('info', 'starfleet-dispatch', `Task set: ${args}`, 3000)
@@ -552,9 +540,11 @@ export const plugin = async ({ client, $ }: any) => {
     tickLog(`ERROR-HANDLE ${src}: unknown action "${action}" — ignoring`)
   }
 
+  // Heartbeats refresh liveness only. Task/status transitions belong to
+  // explicit task lifecycle commands and must never be inferred from delivery
+  // or a plugin-local cache that cannot observe CLI task begin/done operations.
   const heartbeatTimer = setInterval(() => {
-    const state = currentTask ? 'working' : 'idle'
-    bus({ cmd: 'health', touch: true, state, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel, task: currentTask })
+    bus({ cmd: 'health', touch: true, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel })
   }, HEARTBEAT_MS)
 
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
@@ -981,7 +971,7 @@ const logPollTimer = setInterval(async () => {
           }
         } catch { /* ignore */ }
 
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid, ...currentModel })
+        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'idle', pid: process.pid, ...currentModel })
         const shipName = process.env.STARFLEET_SHIP_ID
         if (shipName && sessionId) {
           try {
@@ -994,7 +984,7 @@ const logPollTimer = setInterval(async () => {
         turnCount = 0
         currentModel = {}
         hasSwitchedToFallback.v = false
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'working', pid: process.pid })
+        bus({ cmd: 'health', model_last_action: new Date().toISOString(), state: 'idle', pid: process.pid })
       }
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
