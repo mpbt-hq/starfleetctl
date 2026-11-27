@@ -873,6 +873,12 @@ const logPollTimer = setInterval(async () => {
     pid: process.pid,
     plugin_version: PLUGIN_VERSION,
   })
+  const pluginStartedAt = new Date().toISOString()
+  sendRuntimeUpdate({
+    runtime: 'starting',
+    observedAt: pluginStartedAt,
+    eventID: `plugin-start:${aid()}:${process.pid}:${pluginStartedAt}`,
+  })
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -1095,6 +1101,14 @@ const logPollTimer = setInterval(async () => {
             }
             pendingByMessage.delete(currentMessageID)
             eventCoordinator.forget(prepared.eventIds)
+            sendRuntimeUpdate({
+              runtime: 'waiting',
+              health: 'degraded',
+              healthReason: `Comms prompt handoff failed: ${String(resErr).slice(0, 420)}`,
+              errorTag: 'comms-prompt-handoff',
+              sessionID,
+              eventID: `prompt-handoff-failed:${sessionID}:${currentMessageID}:${Date.now()}`,
+            })
             tickLog(`handoff-fail ship=${aid()} sid=${sessionID} ids=[${prepared.eventIds.join(',')}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
           }
         } catch (e) {
@@ -1105,6 +1119,14 @@ const logPollTimer = setInterval(async () => {
           }
           pendingByMessage.delete(currentMessageID)
           eventCoordinator.forget(prepared.eventIds)
+          sendRuntimeUpdate({
+            runtime: 'waiting',
+            health: 'degraded',
+            healthReason: `Comms prompt handoff threw: ${String(e).slice(0, 420)}`,
+            errorTag: 'comms-prompt-handoff',
+            sessionID,
+            eventID: `prompt-handoff-exception:${sessionID}:${currentMessageID}:${Date.now()}`,
+          })
           tickLog(`handoff-exception ship=${aid()} sid=${sessionID} ids=[${prepared.eventIds.join(',')}] error=${String(e).slice(0, 200)}`)
         }
       }
@@ -1189,6 +1211,14 @@ const logPollTimer = setInterval(async () => {
         return
       }
       const correlation = turnCorrelation.metadata || {}
+      const turnStartedAt = new Date().toISOString()
+      activeTurns.set(turnCorrelation.messageID, { sessionID: handoffSid, startedAt: turnStartedAt })
+      sendRuntimeUpdate({
+        runtime: 'working',
+        sessionID: handoffSid,
+        observedAt: turnStartedAt,
+        eventID: `turn-start:${handoffSid}:${turnCorrelation.messageID}:${turnStartedAt}`,
+      })
       if (correlation.kind === 'synthetic') {
         const eventIDs = Array.isArray(correlation.eventIDs) ? correlation.eventIDs : []
         const pending = pendingByMessage.get(turnCorrelation.messageID)
@@ -1249,6 +1279,13 @@ const logPollTimer = setInterval(async () => {
         hasSwitchedToFallback.v = false
         const sessionId = (event.properties?.info as { id?: string })?.id
         if (sessionId) currentSessionID = sessionId
+        const sessionCreatedAt = runtimeTimestamp((event.properties?.info as any)?.time?.created)
+        sendRuntimeUpdate({
+          runtime: 'starting',
+          sessionID: sessionId || currentSessionID,
+          observedAt: sessionCreatedAt,
+          eventID: `session-created:${sessionId || currentSessionID || aid()}:${sessionCreatedAt}`,
+        })
 
         // Try to read the current model from the session config.
         try {
