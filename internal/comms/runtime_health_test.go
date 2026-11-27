@@ -122,8 +122,8 @@ func TestDoErrorHandleDoesNotOverwriteManualTaskState(t *testing.T) {
 	if rec.State != "working" || rec.Task != "task-30" {
 		t.Fatalf("legacy model error handler overwrote task/manual state: state=%q task=%q", rec.State, rec.Task)
 	}
-	if rec.ErrorTag != "resource-exhausted" {
-		t.Fatalf("error tag = %q, want resource-exhausted", rec.ErrorTag)
+	if rec.ErrorTag != "nim-overload" {
+		t.Fatalf("error tag = %q, want nim-overload", rec.ErrorTag)
 	}
 }
 
