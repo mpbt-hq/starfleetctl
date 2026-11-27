@@ -799,6 +799,18 @@ export const plugin = async ({ client, $ }: any) => {
       ship: aid(), pid: process.pid, current_model: currentModel.model || '',
       session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
     })
+    if (r?.ok && hasActiveTurnForSession(currentSessionID)) {
+      const observedAt = new Date().toISOString()
+      sendRuntimeUpdate({
+        runtime: 'waiting',
+        health: r.action === 'retry' ? 'degraded' : 'error',
+        healthReason: detail,
+        errorTag: r.tag || 'model-retry',
+        sessionID: currentSessionID,
+        observedAt,
+        eventID: `retry-status:${currentSessionID}:${r.tag || 'unknown'}:${observedAt}`,
+      })
+    }
     tickLog(`RETRY-STATUS bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'}`)
 
     // Only toast for non-auto-restart errors.
@@ -836,6 +848,18 @@ const logPollTimer = setInterval(async () => {
     ship: aid(), pid: process.pid, current_model: currentModel.model || '',
     session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
   })
+  if (r?.ok && hasActiveTurnForSession(currentSessionID)) {
+    const observedAt = new Date().toISOString()
+    sendRuntimeUpdate({
+      runtime: 'waiting',
+      health: r.action === 'retry' ? 'degraded' : 'error',
+      healthReason: errDetail,
+      errorTag: r.tag || 'log-monitor',
+      sessionID: currentSessionID,
+      observedAt,
+      eventID: `log-monitor:${currentSessionID}:${r.tag || 'unknown'}:${observedAt}`,
+    })
+  }
   tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
   appLog('warn', `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}`)
 
