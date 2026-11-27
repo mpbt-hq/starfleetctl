@@ -692,9 +692,17 @@ export const plugin = async ({ client, $ }: any) => {
     tickLog(`ERROR-HANDLE ${src}: unknown action "${action}" — ignoring`)
   }
 
-  // Heartbeats refresh liveness only; explicit task lifecycle commands own task/status.
+  // Heartbeats refresh liveness only; they never imply model activity or task progress.
   const heartbeatTimer = setInterval(() => {
-    bus({ cmd: 'health', touch: true, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel })
+    bus({
+      cmd: 'health',
+      touch: true,
+      plugin_last_run: new Date().toISOString(),
+      plugin_version: PLUGIN_VERSION,
+      heartbeat_ms: HEARTBEAT_MS,
+      pid: process.pid,
+      ...currentModel,
+    })
   }, HEARTBEAT_MS)
 
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
@@ -815,7 +823,13 @@ const logPollTimer = setInterval(async () => {
   eventCoordinator.seed(startupEvents)
 
   // DoInit must prune stale records before this process refreshes its PID/liveness.
-  bus({ cmd: 'health', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
+  bus({
+    cmd: 'health',
+    plugin_last_run: new Date().toISOString(),
+    heartbeat_ms: HEARTBEAT_MS,
+    pid: process.pid,
+    plugin_version: PLUGIN_VERSION,
+  })
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -1103,8 +1117,14 @@ const logPollTimer = setInterval(async () => {
     ) => {
       turnCount++
       if (input?.sessionID && input.sessionID !== currentSessionID) currentSessionID = input.sessionID
-      bus({ cmd: 'health', plugin_last_run: new Date().toISOString(),
-        model_last_action: turnCount > 1 ? new Date().toISOString() : undefined, pid: process.pid })
+      const turnStartedAt = new Date().toISOString()
+      bus({
+        cmd: 'health',
+        plugin_last_run: turnStartedAt,
+        model_last_action: turnStartedAt,
+        heartbeat_ms: HEARTBEAT_MS,
+        pid: process.pid,
+      })
 
       const hasIdentity = output.system.some(l => l.includes('--- fleet identity ---'))
       if (sessionNeedsIdentity || !hasIdentity) {
@@ -1201,7 +1221,13 @@ const logPollTimer = setInterval(async () => {
           }
         } catch { /* ignore */ }
 
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), pid: process.pid, ...currentModel })
+        bus({
+          cmd: 'health',
+          plugin_last_run: new Date().toISOString(),
+          heartbeat_ms: HEARTBEAT_MS,
+          pid: process.pid,
+          ...currentModel,
+        })
         const shipName = process.env.STARFLEET_SHIP_ID
         if (shipName && sessionId) {
           try {
@@ -1214,7 +1240,12 @@ const logPollTimer = setInterval(async () => {
         turnCount = 0
         currentModel = {}
         hasSwitchedToFallback.v = false
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), pid: process.pid })
+        bus({
+          cmd: 'health',
+          plugin_last_run: new Date().toISOString(),
+          heartbeat_ms: HEARTBEAT_MS,
+          pid: process.pid,
+        })
       }
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
