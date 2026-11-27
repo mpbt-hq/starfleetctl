@@ -26,6 +26,14 @@ type dispatchRequest struct {
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
 	PluginVersion   string `json:"plugin_version,omitempty"`
+	HeartbeatMS     int    `json:"heartbeat_ms,omitempty"`
+
+	// Runtime observation (cmd: runtime.update)
+	Runtime       string `json:"runtime,omitempty"`
+	Health        string `json:"health,omitempty"`
+	EventID       string `json:"event_id,omitempty"`
+	ObservedAt    string `json:"observed_at,omitempty"`
+	HealthReason  string `json:"health_reason,omitempty"`
 	Delete          bool   `json:"delete,omitempty"`
 	Reset           bool   `json:"reset,omitempty"`
 	Touch           bool   `json:"touch,omitempty"`
@@ -145,6 +153,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchInit(req)
 	case "health":
 		return b.dispatchHealth(req)
+	case "runtime.update":
+		return b.dispatchRuntimeUpdate(req)
 	case "inbox":
 		return b.dispatchInbox(req)
 	case "events.poll":
@@ -255,6 +265,9 @@ func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
 		}
 		if req.PluginVersion != "" {
 			args = append(args, "--plugin-version", req.PluginVersion)
+		}
+		if req.HeartbeatMS > 0 {
+			args = append(args, "--heartbeat-ms", fmt.Sprintf("%d", req.HeartbeatMS))
 		}
 		if req.Task != "" {
 			args = append(args, "--task", req.Task)
