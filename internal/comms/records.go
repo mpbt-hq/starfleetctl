@@ -43,7 +43,18 @@ type StatusRecord struct {
 	Model           string `json:"model,omitempty"`
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
-	PluginVersion   string `json:"plugin_version,omitempty"`
+	PluginVersion      string `json:"plugin_version,omitempty"`
+	PluginHeartbeatMS  int    `json:"plugin_heartbeat_ms,omitempty"`
+
+	// Runtime/model health are independent of manual task state.
+	Runtime           string `json:"runtime,omitempty"`
+	Health            string `json:"health,omitempty"`
+	RuntimeUpdated    string `json:"runtime_updated,omitempty"`
+	HealthUpdated     string `json:"health_updated,omitempty"`
+	RuntimeEventID    string `json:"runtime_event_id,omitempty"`
+	HealthEventID     string `json:"health_event_id,omitempty"`
+	RuntimeSessionID  string `json:"runtime_session_id,omitempty"`
+	HealthReason      string `json:"health_reason,omitempty"`
 
 	// Toast fields (from plugin commands, shown in web UI).
 	ToastVariant string `json:"toast_variant,omitempty"`
