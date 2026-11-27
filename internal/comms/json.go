@@ -45,6 +45,8 @@ type BoardEntryJSON struct {
 	RuntimeUpdated string `json:"runtime_updated,omitempty"`
 	HealthUpdated  string `json:"health_updated,omitempty"`
 	HealthReason   string `json:"health_reason,omitempty"`
+	RuntimeSessionID string `json:"runtime_session_id,omitempty"`
+	PluginHeartbeatMS int `json:"plugin_heartbeat_ms,omitempty"`
 	Updated        string `json:"updated,omitempty"`
 	Unattached   bool   `json:"unattached,omitempty"`
 	ToastVariant string `json:"toast_variant,omitempty"`
@@ -121,6 +123,12 @@ func (b *Bus) BoardEntries() []BoardEntryJSON {
 		}
 		if r.HealthReason != "" {
 			e.HealthReason = r.HealthReason
+		}
+		if r.RuntimeSessionID != "" {
+			e.RuntimeSessionID = r.RuntimeSessionID
+		}
+		if r.PluginHeartbeatMS > 0 {
+			e.PluginHeartbeatMS = r.PluginHeartbeatMS
 		}
 		if r.Updated != "" {
 			e.Updated = r.Updated
