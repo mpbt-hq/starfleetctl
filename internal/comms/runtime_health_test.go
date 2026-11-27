@@ -390,3 +390,29 @@ func TestEvalHealthUsesRuntimeWorkingForStuckDetection(t *testing.T) {
 		t.Fatalf("runtime working with stale model activity = %q, want STUCK", got.State)
 	}
 }
+
+func TestDispatchRuntimeUpdatePersistsRuntimeObservation(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	resp := b.dispatchRuntimeUpdate(dispatchRequest{
+		Runtime: "working",
+		Health: "healthy",
+		EventID: "dispatch:turn:1",
+		ObservedAt: "2026-11-27T12:30:00Z",
+		SessionID: "ses-dispatch",
+		PID: os.Getpid(),
+		Model: "model-dispatch",
+		Server: "provider-dispatch",
+	})
+	if !resp.OK {
+		t.Fatalf("runtime.update dispatch failed: %+v", resp)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing status record")
+	}
+	if rec.Runtime != "working" || rec.Health != "healthy" ||
+		rec.RuntimeEventID != "dispatch:turn:1" || rec.RuntimeSessionID != "ses-dispatch" ||
+		rec.Model != "model-dispatch" || rec.Server != "provider-dispatch" {
+		t.Fatalf("runtime.update dispatch did not persist request: %+v", rec)
+	}
+}
