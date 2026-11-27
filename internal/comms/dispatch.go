@@ -371,7 +371,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 		return dispatchResponse{OK: true}
 	}
 	tag := ClassifyModelError(req.Detail)
-	_ = b.DoHealthUpdate([]string{"--state", "blocked", "--error-tag", tag})
+	_ = b.DoHealthUpdate([]string{"--error-tag", tag})
 	label := ""
 	if tag != "" {
 		label = " [" + tag + "]"
@@ -430,7 +430,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	tag := ClassifyModelError(detail)
 
 	// 3. Health update + notification (same as dispatchError).
-	_ = b.DoHealthUpdate([]string{"--state", "blocked", "--error-tag", tag})
+	_ = b.DoHealthUpdate([]string{"--error-tag", tag})
 	label := ""
 	if tag != "" {
 		label = " [" + tag + "]"
