@@ -413,6 +413,17 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		}
 	}
 
+	lock, err := b.lockBus()
+	if err != nil {
+		return err
+	}
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			_ = lock.Close()
+		}
+	}()
+
 	fpath := b.sfile(b.ShipID)
 
 	if deleteFile {
@@ -485,6 +496,11 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	if err := os.WriteFile(fpath, append(data, '\n'), 0o644); err != nil {
 		return err
 	}
+
+	// Release the read-modify-write lock before DoTouch, which acquires the
+	// same bus lock to refresh the heartbeat timestamp.
+	_ = lock.Close()
+	lockHeld = false
 
 	// --touch: refresh heartbeat timestamp so the board sees a live ship.
 	if touch {
