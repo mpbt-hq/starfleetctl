@@ -11,12 +11,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
 const (
-	defaultStalePlugin = 120 // plugin_last_run older than this → STALE
+	defaultStalePlugin = 0   // auto: 2*heartbeat + 30s; legacy fallback 600s
 	defaultStaleModel  = 300 // model_last_action older than this (while working) → STUCK
 )
 
@@ -28,26 +29,38 @@ unresponsive ships.
 Flags:
   --json              output JSON (array of ship objects) instead of a table
   --loop [SEC]        run continuously; default interval 30s (--once is default)
-  --stale-plugin N    plugin_last_run age (s) above which a ship is STALE (120)
+  --stale-plugin N    override heartbeat-derived liveness timeout (seconds)
   --stale-model N     model_last_action age (s) above which a working ship is
                       STUCK (300)
   -h, --help          this help
 
-Effective state (one of): healthy raw state, or BLOCKED (plugin says so),
-DEAD (pid no longer alive), STALE (plugin silent), STUCK (model silent while
-working). Exit code 1 if any ship is unhealthy (non-loop mode only), 0 if all
-healthy — so it can drive a cron job / CI gate.
+Effective state prioritizes liveness (OFFLINE), model health (ERROR/DEGRADED),
+and correlated runtime state (STARTING/WORKING/WAITING/IDLE). A legacy manual
+offline state is STOPPED; task state is reported separately. The default
+heartbeat timeout is twice the plugin-reported interval plus 30s (600s for
+legacy records without an interval). Exit code 1 for OFFLINE/ERROR/DEGRADED/
+BLOCKED/STUCK ships (non-loop mode only), 0 otherwise.
 `
 
 // healthEntry mirrors one ship's evaluated health for the watchdog output.
 type healthEntry struct {
-	Ship       string `json:"ship"`
-	State      string `json:"state"`
-	RawState   string `json:"raw_state"`
-	PID        int    `json:"pid"`
-	PIDAlive   bool   `json:"pid_alive"`
-	PluginAgeS int64  `json:"plugin_age_s"`
-	ModelAgeS  int64  `json:"model_age_s"`
+	Ship              string `json:"ship"`
+	State             string `json:"state"`
+	RawState          string `json:"raw_state"`
+	TaskState         string `json:"task_state"`
+	Runtime           string `json:"runtime,omitempty"`
+	Health            string `json:"health,omitempty"`
+	HealthReason      string `json:"health_reason,omitempty"`
+	ErrorTag          string `json:"error_tag,omitempty"`
+	RuntimeSessionID  string `json:"runtime_session_id,omitempty"`
+	PID               int    `json:"pid"`
+	PIDAlive          bool   `json:"pid_alive"`
+	PluginAgeS        int64  `json:"plugin_age_s"`
+	StalePluginS      int64  `json:"stale_plugin_s"`
+	ModelAgeS         int64  `json:"model_age_s"`
+	RuntimeAgeS       int64  `json:"runtime_age_s"`
+	HealthAgeS        int64  `json:"health_age_s"`
+	PluginHeartbeatMS int    `json:"plugin_heartbeat_ms,omitempty"`
 }
 
 // readHealth reads status/<agent>.json and returns it, or nil on any error.
@@ -154,7 +167,8 @@ func (b *Bus) checkHealth(jsonOut bool, stalePlugin, staleModel int) (int, error
 
 	unhealthy := 0
 	for _, h := range out {
-		if h.State == "BLOCKED" || h.State == "DEAD" || h.State == "STALE" || h.State == "STUCK" {
+		if h.State == "BLOCKED" || h.State == "DEAD" || h.State == "STALE" ||
+			h.State == "OFFLINE" || h.State == "ERROR" || h.State == "DEGRADED" || h.State == "STUCK" {
 			unhealthy++
 		}
 	}
@@ -167,18 +181,18 @@ func (b *Bus) checkHealth(jsonOut bool, stalePlugin, staleModel int) (int, error
 		fmt.Println("No ships reporting.")
 		return 0, nil
 	}
-	fmt.Printf("%-15s %-9s %-8s %-26s %-26s %s\n",
-		"SHIP", "STATE", "PID", "PLUGIN_LAST_RUN", "MODEL_LAST_ACTION", "AGE")
+	fmt.Printf("%-15s %-9s %-9s %-9s %-9s %-8s %-10s %-10s\n",
+		"SHIP", "STATE", "TASK", "RUNTIME", "HEALTH", "PID", "PLUGIN_AGE", "MODEL_AGE")
 	for _, h := range out {
-		fmt.Printf("%-15s %-9s %-8d %-26s %-26s %ds\n",
-			h.Ship, h.State, h.PID, pluginTs(h), modelTs(h), h.PluginAgeS)
+		fmt.Printf("%-15s %-9s %-9s %-9s %-9s %-8d %-10ds %-10ds\n",
+			h.Ship, h.State, h.TaskState, h.Runtime, h.Health, h.PID, h.PluginAgeS, h.ModelAgeS)
 	}
 	return unhealthy, nil
 }
 
 func EvalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) healthEntry {
 	now := time.Now()
-	var pluginAge, modelAge int64
+	var pluginAge, modelAge, runtimeAge, healthAge int64
 	if rec.PluginLastRun != "" {
 		if t, err := time.Parse(time.RFC3339Nano, rec.PluginLastRun); err == nil {
 			pluginAge = now.Unix() - t.Unix()
@@ -195,6 +209,32 @@ func EvalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) heal
 			}
 		}
 	}
+	if rec.RuntimeUpdated != "" {
+		if t, err := time.Parse(time.RFC3339Nano, rec.RuntimeUpdated); err == nil {
+			runtimeAge = now.Unix() - t.Unix()
+			if runtimeAge < 0 {
+				runtimeAge = 0
+			}
+		}
+	}
+	if rec.HealthUpdated != "" {
+		if t, err := time.Parse(time.RFC3339Nano, rec.HealthUpdated); err == nil {
+			healthAge = now.Unix() - t.Unix()
+			if healthAge < 0 {
+				healthAge = 0
+			}
+		}
+	}
+
+	stalePluginLimit := int64(stalePlugin)
+	if stalePluginLimit <= 0 {
+		if rec.PluginHeartbeatMS > 0 {
+			heartbeatSeconds := int64((rec.PluginHeartbeatMS + 999) / 1000)
+			stalePluginLimit = heartbeatSeconds*2 + 30
+		} else {
+			stalePluginLimit = 600
+		}
+	}
 
 	pidAlive := true
 	if rec.PID > 0 {
@@ -204,13 +244,21 @@ func EvalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) heal
 	effective := rec.State
 	switch {
 	case rec.State == "offline":
-		effective = "OFFLINE" // intentional shutdown, not a problem
+		effective = "STOPPED" // explicit owner shutdown
+	case rec.PID > 0 && !pidAlive:
+		effective = "OFFLINE"
+	case rec.PluginLastRun != "" && pluginAge > stalePluginLimit:
+		effective = "OFFLINE"
+	case rec.Health == "error":
+		effective = "ERROR"
+	case rec.Health == "degraded":
+		effective = "DEGRADED"
+	case rec.Runtime == "working" && modelAge > int64(staleModel):
+		effective = "STUCK"
+	case rec.Runtime != "":
+		effective = strings.ToUpper(rec.Runtime)
 	case rec.State == "blocked":
 		effective = "BLOCKED"
-	case rec.PID > 0 && !pidAlive:
-		effective = "DEAD"
-	case pluginAge > int64(stalePlugin):
-		effective = "STALE"
 	case modelAge > int64(staleModel) && rec.State == "working":
 		effective = "STUCK"
 	}
@@ -219,13 +267,23 @@ func EvalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) heal
 	}
 
 	return healthEntry{
-		Ship:       ship,
-		State:      effective,
-		RawState:   rec.State,
-		PID:        rec.PID,
-		PIDAlive:   pidAlive,
-		PluginAgeS: pluginAge,
-		ModelAgeS:  modelAge,
+		Ship:              ship,
+		State:             effective,
+		RawState:          rec.State,
+		TaskState:         rec.State,
+		Runtime:           rec.Runtime,
+		Health:            rec.Health,
+		HealthReason:      rec.HealthReason,
+		ErrorTag:          rec.ErrorTag,
+		RuntimeSessionID:  rec.RuntimeSessionID,
+		PID:               rec.PID,
+		PIDAlive:          pidAlive,
+		PluginAgeS:        pluginAge,
+		StalePluginS:      stalePluginLimit,
+		ModelAgeS:         modelAge,
+		RuntimeAgeS:       runtimeAge,
+		HealthAgeS:        healthAge,
+		PluginHeartbeatMS: rec.PluginHeartbeatMS,
 	}
 }
 
