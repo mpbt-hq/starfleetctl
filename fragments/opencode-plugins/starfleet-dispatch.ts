@@ -1245,7 +1245,6 @@ const logPollTimer = setInterval(async () => {
         return
       }
       const correlation = turnCorrelation.metadata || {}
-      const turnStartedAt = new Date().toISOString()
       activeTurns.set(turnCorrelation.messageID, { sessionID: handoffSid, startedAt: turnStartedAt })
       sendRuntimeUpdate({
         runtime: 'working',
