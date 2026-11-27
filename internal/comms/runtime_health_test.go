@@ -152,3 +152,35 @@ func TestBoardEntriesExposeRuntimeHealth(t *testing.T) {
 		t.Fatalf("board projection omitted runtime/health fields: got %+v", entry)
 	}
 }
+
+
+func TestDoHealthUpdateSerializesWithTaskStatusWrites(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	lock, err := b.lockBus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- b.DoHealthUpdate([]string{"--plugin-version", "2.5.20"})
+	}()
+
+	select {
+	case err := <-done:
+		_ = lock.Close()
+		t.Fatalf("health update did not wait for the shared bus lock: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("health update after lock release: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("health update did not resume after bus lock release")
+	}
+}
