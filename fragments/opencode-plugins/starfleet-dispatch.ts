@@ -1312,7 +1312,7 @@ const logPollTimer = setInterval(async () => {
         hasSwitchedToFallback.v = false
         const sessionId = (event.properties?.info as { id?: string })?.id
         if (sessionId) currentSessionID = sessionId
-        const sessionCreatedAt = runtimeTimestamp((event.properties?.info as any)?.time?.created)
+        const sessionCreatedAt = new Date().toISOString()
         sendRuntimeUpdate({
           runtime: 'starting',
           sessionID: sessionId || currentSessionID,
@@ -1353,6 +1353,17 @@ const logPollTimer = setInterval(async () => {
         turnCount = 0
         currentModel = {}
         hasSwitchedToFallback.v = false
+        const resetSessionID = currentSessionID
+        for (const [messageID, active] of activeTurns) {
+          if (active.sessionID === resetSessionID) activeTurns.delete(messageID)
+        }
+        const resetAt = new Date().toISOString()
+        sendRuntimeUpdate({
+          runtime: 'idle',
+          sessionID: resetSessionID,
+          observedAt: resetAt,
+          eventID: `session-reset:${resetSessionID || aid()}:${resetAt}`,
+        })
         bus({
           cmd: 'health',
           plugin_last_run: new Date().toISOString(),
@@ -1505,7 +1516,6 @@ if (event.type === 'session.error') {
 
          // Rate-limit/coalesce session.error reports: buffer unique errors and
          // send a single aggregated report after a cooldown period of no new errors.
-         const now = Date.now()
          if (!sessionErrorBuffer.includes(candidate)) {
            sessionErrorBuffer.push(candidate)
          }
