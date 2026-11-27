@@ -9,6 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PLUGIN_TEST="fragments/opencode-plugins/starfleet-dispatch.test.ts"
+PLUGIN_INTEGRATION_TEST="fragments/opencode-plugins/starfleet-dispatch.integration.test.mjs"
 
 note() { printf 'test-opencode-plugin: %s\n' "$*"; }
 
@@ -22,10 +23,20 @@ if command -v tsx >/dev/null 2>&1; then
     note "Running plugin unit tests with tsx..."
     tsx "$PLUGIN_TEST"
     note "Plugin unit tests PASSED"
+    if [ -f "$PLUGIN_INTEGRATION_TEST" ]; then
+        note "Running production plugin integration tests with tsx..."
+        tsx "$PLUGIN_INTEGRATION_TEST"
+        note "Plugin integration tests PASSED"
+    fi
 elif command -v npx >/dev/null 2>&1 && npx --no-install tsx --version >/dev/null 2>&1; then
     note "Running plugin unit tests with local tsx..."
     npx --no-install tsx "$PLUGIN_TEST"
     note "Plugin unit tests PASSED"
+    if [ -f "$PLUGIN_INTEGRATION_TEST" ]; then
+        note "Running production plugin integration tests with npx tsx..."
+        npx --no-install tsx "$PLUGIN_INTEGRATION_TEST"
+        note "Plugin integration tests PASSED"
+    fi
 else
     note "tsx not installed — skipping tests (install tsx to run them)"
 fi

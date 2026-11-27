@@ -569,7 +569,9 @@
   <div class="modal">
     <header>
       <span class="agent" id="ship_name"></span>
-      <span class="pill" id="ship_state"></span>
+      <span class="pill" id="ship_state" title="Task state"></span>
+      <span class="pill" id="ship_runtime" style="font-size:11px;display:none"></span>
+      <span class="pill" id="ship_health" style="font-size:11px;display:none"></span>
       <span class="pill" id="ship_model" style="font-size:11px"></span>
       <select id="ship_model_switch" style="font-size:11px;width:auto;max-width:160px;margin-left:6px;display:none"></select>
       <button class="sec" id="ship_model_btn" style="font-size:11px;padding:3px 8px;display:none" onclick="shipSwitchModel()" data-i18n="ship.switch" data-i18n-title="ship.switch.tooltip" title="Switch model for this ship">Switch</button>
@@ -1301,6 +1303,12 @@ async function loadBoard(){
       if (r.eta) detail.push(`<span class="muted">ETA ${esc(r.eta)}</span>`);
       if (r.unattached) detail.push(`<span class="pill bad">⚠ ${t('board.notask')}</span>`);
       const meta = [];
+      if (r.runtime) meta.push(`<span class="pill ${r.runtime==='working'||r.runtime==='starting'||r.runtime==='waiting'?'warn':'ok'}" title="Runtime state">⚙ ${esc(r.runtime)}</span>`);
+      if (r.health) {
+        const healthCls = r.health==='error'?'bad':(r.health==='degraded'?'warn':'ok');
+        const healthTitle = r.health_reason ? ` title="${esc(r.health_reason)}"` : ' title="Model health"';
+        meta.push(`<span class="pill ${healthCls}"${healthTitle}>♥ ${esc(r.health)}</span>`);
+      }
       if (r.model) meta.push(`<span class="pill dim">🧠 ${esc(r.model)}</span>`);
       else if (r.provider) meta.push(`<span class="pill dim">🧠 ${esc(r.provider)}</span>`);
       if (r.class) meta.push(`<span class="pill dim">🏷 ${esc(r.class)}</span>`);
@@ -1314,7 +1322,7 @@ async function loadBoard(){
       }).join(' '));
       return `<div class="card ship${stale}" onclick="openShip('${esc(r.agent)}')">
         <div class="row"><span class="agent grow">${esc(r.agent)}</span>
-          <span class="pill ${cls}">${esc(st)}</span></div>
+          <span class="pill ${cls}" title="Task state">${esc(st)}</span></div>
         <div class="row" style="margin-top:6px">
           <span class="muted">${esc(r.project||'-')}</span>
           <span class="muted">· ${age(r.age_seconds)}</span>
@@ -1372,6 +1380,24 @@ async function loadShip(name){
     const cls = st==='done'?'ok':(st==='blocked'?'bad':(st==='working'||st==='building'?'warn':'dim'));
     document.getElementById('ship_state').className = 'pill '+cls;
     document.getElementById('ship_state').textContent = st;
+    const runtimeEl = document.getElementById('ship_runtime');
+    if (s.runtime) {
+      runtimeEl.className = 'pill '+(['working','starting','waiting'].includes(s.runtime)?'warn':'ok');
+      runtimeEl.textContent = '⚙ '+s.runtime;
+      runtimeEl.style.display = '';
+    } else {
+      runtimeEl.style.display = 'none';
+    }
+    const healthEl = document.getElementById('ship_health');
+    if (s.health) {
+      healthEl.className = 'pill '+(s.health==='error'?'bad':(s.health==='degraded'?'warn':'ok'));
+      healthEl.textContent = '♥ '+s.health;
+      healthEl.title = s.health_reason || 'Model health';
+      healthEl.style.display = '';
+    } else {
+      healthEl.style.display = 'none';
+      healthEl.title = '';
+    }
     // Show model in header pill + populate switch dropdown
     const modelEl = document.getElementById('ship_model');
     const switchSel = document.getElementById('ship_model_switch');
@@ -1401,6 +1427,11 @@ async function loadShip(name){
     add('ETA', s.eta);
     add(t('ship.model'), s.model);
     add('Provider', s.provider);
+    add('Runtime', s.runtime);
+    add('Model health', s.health);
+    add('Health reason', s.health_reason);
+    add('Runtime session', s.runtime_session_id);
+    add('Heartbeat interval', s.plugin_heartbeat_ms ? Math.round(s.plugin_heartbeat_ms / 1000)+'s' : '');
     add(t('ship.kv.launch'), s.launch_type);
     add(t('ship.kv.parent'), s.parent);
     add('Note', s.note);

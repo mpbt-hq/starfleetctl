@@ -392,3 +392,40 @@ func TestAPITasksOrphansEmpty(t *testing.T) {
 		t.Fatalf("body = %s, want []", raw)
 	}
 }
+
+
+func TestAPIShipsIncludesRuntimeHealth(t *testing.T) {
+	s := newTestServer(t)
+	statusDir := filepath.Join(s.Root, ".starfleet-ai", "var", "comms", "status")
+	if err := os.MkdirAll(statusDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	status := `{"agent":"TestShip","state":"working","runtime":"waiting","health":"degraded","runtime_updated":"2026-11-27T12:00:00Z","health_updated":"2026-11-27T12:01:00Z","health_reason":"provider retry"}`
+	if err := os.WriteFile(filepath.Join(statusDir, "TestShip.json"), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, raw := apiGetRaw(t, s.Handler(), "/api/ships")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", code, raw)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("unmarshal ships: %v (body: %s)", err, raw)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d ships, want 1 (body: %s)", len(rows), raw)
+	}
+	row := rows[0]
+	for key, want := range map[string]string{
+		"runtime": "waiting",
+		"health": "degraded",
+		"runtime_updated": "2026-11-27T12:00:00Z",
+		"health_updated": "2026-11-27T12:01:00Z",
+		"health_reason": "provider retry",
+	} {
+		if row[key] != want {
+			t.Errorf("%s = %v, want %q (row: %+v)", key, row[key], want, row)
+		}
+	}
+}
