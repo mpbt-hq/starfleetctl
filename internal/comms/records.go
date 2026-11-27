@@ -45,6 +45,13 @@ type StatusRecord struct {
 	ErrorTag        string `json:"error_tag,omitempty"`
 	PluginVersion   string `json:"plugin_version,omitempty"`
 
+	// Runtime/model health are independent of manual task state.
+	Runtime        string `json:"runtime,omitempty"`
+	Health         string `json:"health,omitempty"`
+	RuntimeUpdated string `json:"runtime_updated,omitempty"`
+	HealthUpdated  string `json:"health_updated,omitempty"`
+	HealthReason   string `json:"health_reason,omitempty"`
+
 	// Toast fields (from plugin commands, shown in web UI).
 	ToastVariant string `json:"toast_variant,omitempty"`
 	ToastTitle   string `json:"toast_title,omitempty"`
