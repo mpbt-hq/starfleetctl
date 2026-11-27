@@ -1489,20 +1489,18 @@ if (event.type === 'session.error') {
              break
            }
          }
-         if (correlatedMessageID) {
-           activeTurns.delete(correlatedMessageID)
-           if (candidate && candidate !== 'unknown error') {
-             const observedAt = new Date().toISOString()
-             sendRuntimeUpdate({
-               runtime: 'waiting',
-               health: 'error',
-               healthReason: String(candidate).slice(0, 512),
-               errorTag: 'session-error',
-               sessionID: failedSessionID,
-               observedAt,
-               eventID: `session-error:${failedSessionID}:${correlatedMessageID}:${observedAt}`,
-             })
-           }
+         if (correlatedMessageID) activeTurns.delete(correlatedMessageID)
+         if (candidate && candidate !== 'unknown error') {
+           const observedAt = runtimeTimestamp(err?.time || (event.properties as any)?.time || (event.properties as any)?.timestamp)
+           sendRuntimeUpdate({
+             runtime: correlatedMessageID ? 'waiting' : undefined,
+             health: 'error',
+             healthReason: String(candidate).slice(0, 512),
+             errorTag: 'session-error',
+             sessionID: failedSessionID,
+             observedAt,
+             eventID: `session-error:${failedSessionID}:${correlatedMessageID || 'uncorrelated'}:${observedAt}`,
+           })
          }
 
          // opencode's session.error often surfaces a generic "unknown error" for
