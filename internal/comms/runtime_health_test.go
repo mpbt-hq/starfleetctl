@@ -126,3 +126,29 @@ func TestDoErrorHandleDoesNotOverwriteManualTaskState(t *testing.T) {
 		t.Fatalf("error tag = %q, want resource-exhausted", rec.ErrorTag)
 	}
 }
+
+func TestBoardEntriesExposeRuntimeHealth(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	if err := b.DoStatus("working", "implementation", StatusPatch{Task: "task-30"}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing status record")
+	}
+	rec.Runtime = "working"
+	rec.Health = "healthy"
+	rec.RuntimeUpdated = "2026-11-27T12:10:00Z"
+	rec.HealthUpdated = "2026-11-27T12:10:00Z"
+	writeStatusRecord(t, b, b.ShipID, rec)
+
+	entries := b.BoardEntries()
+	if len(entries) != 1 {
+		t.Fatalf("board entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Runtime != "working" || entry.Health != "healthy" ||
+		entry.RuntimeUpdated != rec.RuntimeUpdated || entry.HealthUpdated != rec.HealthUpdated {
+		t.Fatalf("board projection omitted runtime/health fields: got %+v", entry)
+	}
+}
