@@ -1390,13 +1390,36 @@ const logPollTimer = setInterval(async () => {
       }
       if (event.type === 'session.status') {
         const props = event.properties as any
-        if (props?.status?.type === 'busy') {
+        const sessionID = String(props?.sessionID || currentSessionID)
+        const statusType = props?.status?.type
+        const observedAt = new Date().toISOString()
+        if (statusType === 'busy') {
+          sendRuntimeUpdate({
+            runtime: 'working',
+            sessionID,
+            observedAt,
+            eventID: `session-busy:${sessionID}:${observedAt}`,
+          })
           for (const [messageID, correlation] of pendingByMessage) {
-            if (correlation.sessionID !== props.sessionID) continue
+            if (correlation.sessionID !== sessionID) continue
             markTurnStarted(messageID, correlation)
             break // session busy identifies the oldest pending turn in this session
           }
+        } else if (statusType === 'retry') {
+          const detail = props?.status?.action?.message ||
+            props?.status?.action?.reason || props?.status?.message || 'model retry'
+          sendRuntimeUpdate({
+            runtime: 'waiting',
+            health: 'degraded',
+            healthReason: String(detail).slice(0, 512),
+            errorTag: 'model-retry',
+            sessionID,
+            observedAt,
+            eventID: `session-retry:${sessionID}:${observedAt}`,
+          })
         }
+        // An idle status is not a correlated assistant completion. Only
+        // message.updated with a matching parentID may close a model turn.
       }
 if (event.type === 'session.error') {
          const failedSessionID = String((event.properties as any)?.sessionID || currentSessionID)
