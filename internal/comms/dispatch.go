@@ -26,6 +26,14 @@ type dispatchRequest struct {
 	Server          string `json:"server,omitempty"`
 	ErrorTag        string `json:"error_tag,omitempty"`
 	PluginVersion   string `json:"plugin_version,omitempty"`
+	HeartbeatMS     int    `json:"heartbeat_ms,omitempty"`
+
+	// Runtime observation (cmd: runtime.update)
+	Runtime       string `json:"runtime,omitempty"`
+	Health        string `json:"health,omitempty"`
+	EventID       string `json:"event_id,omitempty"`
+	ObservedAt    string `json:"observed_at,omitempty"`
+	HealthReason  string `json:"health_reason,omitempty"`
 	Delete          bool   `json:"delete,omitempty"`
 	Reset           bool   `json:"reset,omitempty"`
 	Touch           bool   `json:"touch,omitempty"`
@@ -145,6 +153,8 @@ func (b *Bus) dispatch(req dispatchRequest) dispatchResponse {
 		return b.dispatchInit(req)
 	case "health":
 		return b.dispatchHealth(req)
+	case "runtime.update":
+		return b.dispatchRuntimeUpdate(req)
 	case "inbox":
 		return b.dispatchInbox(req)
 	case "events.poll":
@@ -256,11 +266,33 @@ func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
 		if req.PluginVersion != "" {
 			args = append(args, "--plugin-version", req.PluginVersion)
 		}
+		if req.HeartbeatMS > 0 {
+			args = append(args, "--heartbeat-ms", fmt.Sprintf("%d", req.HeartbeatMS))
+		}
 		if req.Task != "" {
 			args = append(args, "--task", req.Task)
 		}
 	}
 	if err := b.DoHealthUpdate(args); err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
+	return dispatchResponse{OK: true}
+}
+
+func (b *Bus) dispatchRuntimeUpdate(req dispatchRequest) dispatchResponse {
+	update := RuntimeUpdate{
+		Runtime:      req.Runtime,
+		Health:       req.Health,
+		EventID:      req.EventID,
+		ObservedAt:   req.ObservedAt,
+		HealthReason: req.HealthReason,
+		ErrorTag:     req.ErrorTag,
+		SessionID:    req.SessionID,
+		PID:          req.PID,
+		Model:        req.Model,
+		Provider:     req.Server,
+	}
+	if err := b.DoRuntimeUpdate(update); err != nil {
 		return dispatchResponse{OK: false, Error: err.Error()}
 	}
 	return dispatchResponse{OK: true}
@@ -371,7 +403,7 @@ func (b *Bus) dispatchError(req dispatchRequest) dispatchResponse {
 		return dispatchResponse{OK: true}
 	}
 	tag := ClassifyModelError(req.Detail)
-	_ = b.DoHealthUpdate([]string{"--state", "blocked", "--error-tag", tag})
+	_ = b.DoHealthUpdate([]string{"--error-tag", tag})
 	label := ""
 	if tag != "" {
 		label = " [" + tag + "]"
@@ -430,7 +462,7 @@ func (b *Bus) dispatchErrorHandle(req dispatchRequest) dispatchResponse {
 	tag := ClassifyModelError(detail)
 
 	// 3. Health update + notification (same as dispatchError).
-	_ = b.DoHealthUpdate([]string{"--state", "blocked", "--error-tag", tag})
+	_ = b.DoHealthUpdate([]string{"--error-tag", tag})
 	label := ""
 	if tag != "" {
 		label = " [" + tag + "]"

@@ -165,7 +165,70 @@ export const plugin = async ({ client, $ }: any) => {
   const consumerID = `${aid()}:${process.pid}`
   const turnCorrelationQueue = createTurnCorrelationQueue()
   const pendingByMessage = new Map<string, { sessionID: string; eventIDs: string[]; submitted?: boolean; startSeen?: boolean; completionSeen?: boolean }>()
+  const activeTurns = new Map<string, { sessionID: string; startedAt: string }>()
   const syntheticMessageIDs = new Set<string>()
+  let lastRuntimeObservationMS = 0
+  const runtimeTimestamp = (value?: any): string => {
+    if (typeof value === 'string') {
+      const parsed = new Date(value)
+      if (!Number.isNaN(parsed.getTime())) {
+        lastRuntimeObservationMS = Math.max(lastRuntimeObservationMS, parsed.getTime())
+        return parsed.toISOString()
+      }
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const milliseconds = value < 1e12 ? value * 1000 : value
+      const parsed = new Date(milliseconds)
+      if (!Number.isNaN(parsed.getTime())) {
+        lastRuntimeObservationMS = Math.max(lastRuntimeObservationMS, parsed.getTime())
+        return parsed.toISOString()
+      }
+    }
+    // Locally observed transitions must be strictly monotonic at JS Date
+    // precision; equal timestamps would make the Go reducer reject one.
+    lastRuntimeObservationMS = Math.max(Date.now(), lastRuntimeObservationMS + 1)
+    return new Date(lastRuntimeObservationMS).toISOString()
+  }
+  const hasActiveTurnForSession = (sessionID: string): boolean => {
+    if (!sessionID) return false
+    for (const active of activeTurns.values()) {
+      if (active.sessionID === sessionID) return true
+    }
+    for (const pending of pendingByMessage.values()) {
+      if (pending.sessionID === sessionID) return true
+    }
+    return false
+  }
+  const sendRuntimeUpdate = (update: {
+    runtime?: string
+    health?: string
+    healthReason?: string
+    errorTag?: string
+    sessionID?: string
+    observedAt?: string
+    eventID?: string
+  }): void => {
+    const observedAt = runtimeTimestamp(update.observedAt)
+    const sessionID = update.sessionID || currentSessionID
+    const eventID = update.eventID ||
+      `runtime:${update.runtime || 'none'}:${update.health || 'none'}:${sessionID || 'unknown'}:${observedAt}`
+    const response = bus({
+      cmd: 'runtime.update',
+      runtime: update.runtime,
+      health: update.health,
+      event_id: eventID,
+      observed_at: observedAt,
+      health_reason: update.healthReason,
+      error_tag: update.errorTag,
+      session_id: sessionID,
+      pid: process.pid,
+      model: currentModel.model || '',
+      server: currentModel.server || '',
+    })
+    if (!response?.ok) {
+      tickLog(`runtime-update-failed ship=${aid()} event=${eventID} error=${String(response?.error || 'unknown').slice(0, 160)}`)
+    }
+  }
   const lastReconcileAt = new Map<string, number>()
   const unsupportedEventDiagnostics = new Set<string>()
 
@@ -692,9 +755,17 @@ export const plugin = async ({ client, $ }: any) => {
     tickLog(`ERROR-HANDLE ${src}: unknown action "${action}" — ignoring`)
   }
 
-  // Heartbeats refresh liveness only; explicit task lifecycle commands own task/status.
+  // Heartbeats refresh liveness only; they never imply model activity or task progress.
   const heartbeatTimer = setInterval(() => {
-    bus({ cmd: 'health', touch: true, plugin_last_run: new Date().toISOString(), plugin_version: PLUGIN_VERSION, ...currentModel })
+    bus({
+      cmd: 'health',
+      touch: true,
+      plugin_last_run: new Date().toISOString(),
+      plugin_version: PLUGIN_VERSION,
+      heartbeat_ms: HEARTBEAT_MS,
+      pid: process.pid,
+      ...currentModel,
+    })
   }, HEARTBEAT_MS)
 
   // Model-error retry detection: opencode does NOT surface quota/rate-limit
@@ -738,6 +809,18 @@ export const plugin = async ({ client, $ }: any) => {
       ship: aid(), pid: process.pid, current_model: currentModel.model || '',
       session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
     })
+    if (r?.ok && hasActiveTurnForSession(currentSessionID)) {
+      const observedAt = runtimeTimestamp()
+      sendRuntimeUpdate({
+        runtime: 'waiting',
+        health: r.action === 'retry' ? 'degraded' : 'error',
+        healthReason: detail,
+        errorTag: r.tag || 'model-retry',
+        sessionID: currentSessionID,
+        observedAt,
+        eventID: `retry-status:${currentSessionID}:${r.tag || 'unknown'}:${observedAt}`,
+      })
+    }
     tickLog(`RETRY-STATUS bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'}`)
 
     // Only toast for non-auto-restart errors.
@@ -775,6 +858,18 @@ const logPollTimer = setInterval(async () => {
     ship: aid(), pid: process.pid, current_model: currentModel.model || '',
     session_id: currentSessionID, has_fallback: hasSwitchedToFallback.v,
   })
+  if (r?.ok && hasActiveTurnForSession(currentSessionID)) {
+    const observedAt = new Date().toISOString()
+    sendRuntimeUpdate({
+      runtime: 'waiting',
+      health: r.action === 'retry' ? 'degraded' : 'error',
+      healthReason: errDetail,
+      errorTag: r.tag || 'log-monitor',
+      sessionID: currentSessionID,
+      observedAt,
+      eventID: `log-monitor:${currentSessionID}:${r.tag || 'unknown'}:${observedAt}`,
+    })
+  }
   tickLog(`LOG-MONITOR bus: ok=${r.ok} action=${r.action || 'none'} tag=${r.tag || 'none'} err=${r.error || 'none'} detail=${errDetail.slice(0, 60)}`)
   appLog('warn', `log-monitor bus result: ${JSON.stringify(r).slice(0, 200)}`)
 
@@ -815,7 +910,19 @@ const logPollTimer = setInterval(async () => {
   eventCoordinator.seed(startupEvents)
 
   // DoInit must prune stale records before this process refreshes its PID/liveness.
-  bus({ cmd: 'health', plugin_last_run: new Date().toISOString(), pid: process.pid, plugin_version: PLUGIN_VERSION })
+  bus({
+    cmd: 'health',
+    plugin_last_run: new Date().toISOString(),
+    heartbeat_ms: HEARTBEAT_MS,
+    pid: process.pid,
+    plugin_version: PLUGIN_VERSION,
+  })
+  const pluginStartedAt = runtimeTimestamp()
+  sendRuntimeUpdate({
+    runtime: 'starting',
+    observedAt: pluginStartedAt,
+    eventID: `plugin-start:${aid()}:${process.pid}:${pluginStartedAt}`,
+  })
 
   setTimeout(() => {
     if (!tuiReady) {
@@ -1038,6 +1145,14 @@ const logPollTimer = setInterval(async () => {
             }
             pendingByMessage.delete(currentMessageID)
             eventCoordinator.forget(prepared.eventIds)
+            sendRuntimeUpdate({
+              runtime: 'waiting',
+              health: 'degraded',
+              healthReason: `Comms prompt handoff failed: ${String(resErr).slice(0, 420)}`,
+              errorTag: 'comms-prompt-handoff',
+              sessionID,
+              eventID: `prompt-handoff-failed:${sessionID}:${currentMessageID}:${Date.now()}`,
+            })
             tickLog(`handoff-fail ship=${aid()} sid=${sessionID} ids=[${prepared.eventIds.join(',')}] promptError=${JSON.stringify(resErr).slice(0, 180)}`)
           }
         } catch (e) {
@@ -1048,6 +1163,14 @@ const logPollTimer = setInterval(async () => {
           }
           pendingByMessage.delete(currentMessageID)
           eventCoordinator.forget(prepared.eventIds)
+          sendRuntimeUpdate({
+            runtime: 'waiting',
+            health: 'degraded',
+            healthReason: `Comms prompt handoff threw: ${String(e).slice(0, 420)}`,
+            errorTag: 'comms-prompt-handoff',
+            sessionID,
+            eventID: `prompt-handoff-exception:${sessionID}:${currentMessageID}:${Date.now()}`,
+          })
           tickLog(`handoff-exception ship=${aid()} sid=${sessionID} ids=[${prepared.eventIds.join(',')}] error=${String(e).slice(0, 200)}`)
         }
       }
@@ -1103,8 +1226,14 @@ const logPollTimer = setInterval(async () => {
     ) => {
       turnCount++
       if (input?.sessionID && input.sessionID !== currentSessionID) currentSessionID = input.sessionID
-      bus({ cmd: 'health', plugin_last_run: new Date().toISOString(),
-        model_last_action: turnCount > 1 ? new Date().toISOString() : undefined, pid: process.pid })
+      const turnStartedAt = runtimeTimestamp()
+      bus({
+        cmd: 'health',
+        plugin_last_run: turnStartedAt,
+        model_last_action: turnStartedAt,
+        heartbeat_ms: HEARTBEAT_MS,
+        pid: process.pid,
+      })
 
       const hasIdentity = output.system.some(l => l.includes('--- fleet identity ---'))
       if (sessionNeedsIdentity || !hasIdentity) {
@@ -1126,6 +1255,13 @@ const logPollTimer = setInterval(async () => {
         return
       }
       const correlation = turnCorrelation.metadata || {}
+      activeTurns.set(turnCorrelation.messageID, { sessionID: handoffSid, startedAt: turnStartedAt })
+      sendRuntimeUpdate({
+        runtime: 'working',
+        sessionID: handoffSid,
+        observedAt: turnStartedAt,
+        eventID: `turn-start:${handoffSid}:${turnCorrelation.messageID}:${turnStartedAt}`,
+      })
       if (correlation.kind === 'synthetic') {
         const eventIDs = Array.isArray(correlation.eventIDs) ? correlation.eventIDs : []
         const pending = pendingByMessage.get(turnCorrelation.messageID)
@@ -1186,6 +1322,13 @@ const logPollTimer = setInterval(async () => {
         hasSwitchedToFallback.v = false
         const sessionId = (event.properties?.info as { id?: string })?.id
         if (sessionId) currentSessionID = sessionId
+        const sessionCreatedAt = runtimeTimestamp()
+        sendRuntimeUpdate({
+          runtime: 'starting',
+          sessionID: sessionId || currentSessionID,
+          observedAt: sessionCreatedAt,
+          eventID: `session-created:${sessionId || currentSessionID || aid()}:${sessionCreatedAt}`,
+        })
 
         // Try to read the current model from the session config.
         try {
@@ -1201,7 +1344,13 @@ const logPollTimer = setInterval(async () => {
           }
         } catch { /* ignore */ }
 
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), pid: process.pid, ...currentModel })
+        bus({
+          cmd: 'health',
+          plugin_last_run: new Date().toISOString(),
+          heartbeat_ms: HEARTBEAT_MS,
+          pid: process.pid,
+          ...currentModel,
+        })
         const shipName = process.env.STARFLEET_SHIP_ID
         if (shipName && sessionId) {
           try {
@@ -1214,27 +1363,67 @@ const logPollTimer = setInterval(async () => {
         turnCount = 0
         currentModel = {}
         hasSwitchedToFallback.v = false
-        bus({ cmd: 'health', model_last_action: new Date().toISOString(), pid: process.pid })
+        const resetSessionID = currentSessionID
+        for (const [messageID, active] of activeTurns) {
+          if (active.sessionID === resetSessionID) activeTurns.delete(messageID)
+        }
+        const resetAt = runtimeTimestamp()
+        sendRuntimeUpdate({
+          runtime: 'idle',
+          sessionID: resetSessionID,
+          observedAt: resetAt,
+          eventID: `session-reset:${resetSessionID || aid()}:${resetAt}`,
+        })
+        bus({
+          cmd: 'health',
+          plugin_last_run: new Date().toISOString(),
+          heartbeat_ms: HEARTBEAT_MS,
+          pid: process.pid,
+        })
       }
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
         if (info?.role === 'assistant') {
-          const correlation = pendingByMessage.get(info.parentID)
-          if (correlation) {
-            const updateState = classifyAssistantUpdate(info, correlation.sessionID, info.parentID)
+          const messageID = String(info.parentID || '')
+          const correlation = pendingByMessage.get(messageID)
+          const active = activeTurns.get(messageID)
+          const sessionID = correlation?.sessionID || active?.sessionID || ''
+          if (sessionID && messageID) {
+            const updateState = classifyAssistantUpdate(info, sessionID, messageID)
             if (updateState === 'failed') {
-              for (const id of correlation.eventIDs) transitionEvent(id, 'failed', correlation.sessionID, info.parentID, String(info.error).slice(0, 512))
-              pendingByMessage.delete(info.parentID)
-              lastReconcileAt.delete(info.parentID)
-              eventCoordinator.forget(correlation.eventIDs)
-            } else if (updateState === 'completed') {
-              if (completeCorrelation(info.parentID, correlation)) {
-                tickLog(`event-turn-completed ship=${aid()} sid=${correlation.sessionID} message=${info.parentID} ids=[${correlation.eventIDs.join(',')}]`)
-              } else {
-                tickLog(`event-turn-completion-pending ship=${aid()} sid=${correlation.sessionID} message=${info.parentID} ids=[${correlation.eventIDs.join(',')}]`)
+              const observedAt = runtimeTimestamp(info.time?.updated || info.time?.completed)
+              sendRuntimeUpdate({
+                runtime: 'waiting',
+                health: 'error',
+                healthReason: String(info.error || 'assistant turn failed').slice(0, 512),
+                sessionID,
+                observedAt,
+                eventID: `assistant-failed:${sessionID}:${messageID}:${observedAt}`,
+              })
+              activeTurns.delete(messageID)
+              if (correlation) {
+                for (const id of correlation.eventIDs) transitionEvent(id, 'failed', sessionID, messageID, String(info.error).slice(0, 512))
+                pendingByMessage.delete(messageID)
+                lastReconcileAt.delete(messageID)
+                eventCoordinator.forget(correlation.eventIDs)
               }
-            } else if (updateState === 'started') {
-              markTurnStarted(info.parentID, correlation)
+            } else if (updateState === 'completed') {
+              const observedAt = runtimeTimestamp(info.time?.completed || info.time?.updated)
+              sendRuntimeUpdate({
+                runtime: 'idle',
+                health: 'healthy',
+                sessionID,
+                observedAt,
+                eventID: `assistant-completed:${sessionID}:${messageID}:${observedAt}`,
+              })
+              activeTurns.delete(messageID)
+              if (correlation) {
+                if (completeCorrelation(messageID, correlation)) {
+                  tickLog(`event-turn-completed ship=${aid()} sid=${sessionID} message=${messageID} ids=[${correlation.eventIDs.join(',')}]`)
+                } else {
+                  tickLog(`event-turn-completion-pending ship=${aid()} sid=${sessionID} message=${messageID} ids=[${correlation.eventIDs.join(',')}]`)
+                }
+              }
             }
           }
           if (info.modelID) {
@@ -1243,40 +1432,91 @@ const logPollTimer = setInterval(async () => {
               tickLog(`MODEL RECOVERY: session recovered on ${info.modelID} — fallback worked`)
               hasSwitchedToFallback.v = false
             }
-            bus({ cmd: 'health', error_tag: undefined, plugin_last_run: new Date().toISOString() })
+            bus({
+              cmd: 'health',
+              plugin_last_run: new Date().toISOString(),
+              heartbeat_ms: HEARTBEAT_MS,
+              pid: process.pid,
+              ...currentModel,
+            })
           }
         }
       }
       if (event.type === 'session.status') {
         const props = event.properties as any
-        if (props?.status?.type === 'busy') {
+        const sessionID = String(props?.sessionID || currentSessionID)
+        const statusType = props?.status?.type
+        const observedAt = runtimeTimestamp()
+        if (statusType === 'busy' && hasActiveTurnForSession(sessionID)) {
+          sendRuntimeUpdate({
+            runtime: 'working',
+            sessionID,
+            observedAt,
+            eventID: `session-busy:${sessionID}:${observedAt}`,
+          })
           for (const [messageID, correlation] of pendingByMessage) {
-            if (correlation.sessionID !== props.sessionID) continue
+            if (correlation.sessionID !== sessionID) continue
             markTurnStarted(messageID, correlation)
             break // session busy identifies the oldest pending turn in this session
           }
+        } else if (statusType === 'retry' && hasActiveTurnForSession(sessionID)) {
+          const detail = props?.status?.action?.message ||
+            props?.status?.action?.reason || props?.status?.message || 'model retry'
+          sendRuntimeUpdate({
+            runtime: 'waiting',
+            health: 'degraded',
+            healthReason: String(detail).slice(0, 512),
+            errorTag: 'model-retry',
+            sessionID,
+            observedAt,
+            eventID: `session-retry:${sessionID}:${observedAt}`,
+          })
         }
+        // An idle status is not a correlated assistant completion. Only
+        // message.updated with a matching parentID may close a model turn.
       }
 if (event.type === 'session.error') {
          const failedSessionID = String((event.properties as any)?.sessionID || currentSessionID)
-         const correlatedError = (event.properties?.error as any)?.message ||
-           (event.properties?.error as any)?.code || 'correlated session.error'
+         const err = event.properties?.error as any
+         const candidate =
+           err?.message || err?.code || err?.error ||
+           (typeof err === 'string' ? err : '') || ''
+         let correlatedMessageID = ''
+         const correlatedError = err?.message || err?.code || candidate || 'correlated session.error'
          for (const [messageID, correlation] of pendingByMessage) {
            if (correlation.sessionID !== failedSessionID) continue
+           correlatedMessageID = messageID
            for (const id of correlation.eventIDs) transitionEvent(id, 'failed', correlation.sessionID, messageID, String(correlatedError).slice(0, 512))
            pendingByMessage.delete(messageID)
            lastReconcileAt.delete(messageID)
            eventCoordinator.forget(correlation.eventIDs)
            break // session.error applies to the active (oldest) correlated turn
          }
+         if (!correlatedMessageID) {
+           for (const [messageID, active] of activeTurns) {
+             if (active.sessionID !== failedSessionID) continue
+             correlatedMessageID = messageID
+             break
+           }
+         }
+         if (correlatedMessageID) activeTurns.delete(correlatedMessageID)
+         if (candidate && candidate !== 'unknown error') {
+           const observedAt = runtimeTimestamp(err?.time || (event.properties as any)?.time || (event.properties as any)?.timestamp)
+           sendRuntimeUpdate({
+             runtime: correlatedMessageID ? 'waiting' : undefined,
+             health: 'error',
+             healthReason: String(candidate).slice(0, 512),
+             errorTag: 'session-error',
+             sessionID: failedSessionID,
+             observedAt,
+             eventID: `session-error:${failedSessionID}:${correlatedMessageID || 'uncorrelated'}:${observedAt}`,
+           })
+         }
+
          // opencode's session.error often surfaces a generic "unknown error" for
          // stream/API errors like ResourceExhausted — the real detail is only in
          // the opencode.log (handled by LOG-MONITOR). Only dispatch if we have
          // something real.
-         const err = event.properties?.error as any
-         const candidate =
-           err?.message || err?.code || err?.error ||
-           (typeof err === 'string' ? err : '') || ''
          if (!candidate || candidate === 'unknown error') {
            tickLog(`session.error: "${candidate}" — skipping, LOG-MONITOR will handle`)
            return
@@ -1284,16 +1524,13 @@ if (event.type === 'session.error') {
 
          // Rate-limit/coalesce session.error reports: buffer unique errors and
          // send a single aggregated report after a cooldown period of no new errors.
-         const now = Date.now()
          if (!sessionErrorBuffer.includes(candidate)) {
            sessionErrorBuffer.push(candidate)
          }
-         // Reset the timer: if there is an existing timer, clear it and start a new one.
          if (sessionErrorTimer !== null) {
            clearTimeout(sessionErrorTimer)
          }
          sessionErrorTimer = setTimeout(() => {
-           // Time to send the aggregated report.
            if (sessionErrorBuffer.length > 0) {
              const aggregated = sessionErrorBuffer.join('; ')
              bus({
@@ -1303,7 +1540,7 @@ if (event.type === 'session.error') {
                ship: aid(),
                pid: process.pid,
                current_model: currentModel.model || '',
-               session_id: currentSessionID,
+               session_id: failedSessionID,
                has_fallback: hasSwitchedToFallback.v,
              })
              sessionErrorBuffer = []
