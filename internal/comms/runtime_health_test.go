@@ -6,6 +6,7 @@ package comms
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestDoStatusAndHealthUpdatePreserveRuntimeHealth(t *testing.T) {
