@@ -279,6 +279,25 @@ func (b *Bus) dispatchHealth(req dispatchRequest) dispatchResponse {
 	return dispatchResponse{OK: true}
 }
 
+func (b *Bus) dispatchRuntimeUpdate(req dispatchRequest) dispatchResponse {
+	update := RuntimeUpdate{
+		Runtime:      req.Runtime,
+		Health:       req.Health,
+		EventID:      req.EventID,
+		ObservedAt:   req.ObservedAt,
+		HealthReason: req.HealthReason,
+		ErrorTag:     req.ErrorTag,
+		SessionID:    req.SessionID,
+		PID:          req.PID,
+		Model:        req.Model,
+		Provider:     req.Server,
+	}
+	if err := b.DoRuntimeUpdate(update); err != nil {
+		return dispatchResponse{OK: false, Error: err.Error()}
+	}
+	return dispatchResponse{OK: true}
+}
+
 func (b *Bus) dispatchInbox(req dispatchRequest) dispatchResponse {
 	msgs := b.allMsgRecords()
 	agent := b.ShipID
