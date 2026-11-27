@@ -192,7 +192,7 @@ func (b *Bus) DoErrorHandle(args []string) error {
 
 	// Update health record so the fleet console can distinguish a
 	// throttled ship from a hard crash.
-	healthArgs := []string{"--state", "blocked", "--error-tag", tag}
+	healthArgs := []string{"--error-tag", tag}
 	if payload.PID > 0 {
 		// Only the ship process itself may set the PID; a short-lived helper
 		// must not install its own (it would be dead as soon as it exits).
