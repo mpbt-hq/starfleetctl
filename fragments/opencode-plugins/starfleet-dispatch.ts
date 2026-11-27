@@ -1457,24 +1457,48 @@ const logPollTimer = setInterval(async () => {
       }
 if (event.type === 'session.error') {
          const failedSessionID = String((event.properties as any)?.sessionID || currentSessionID)
-         const correlatedError = (event.properties?.error as any)?.message ||
-           (event.properties?.error as any)?.code || 'correlated session.error'
+         const err = event.properties?.error as any
+         const candidate =
+           err?.message || err?.code || err?.error ||
+           (typeof err === 'string' ? err : '') || ''
+         let correlatedMessageID = ''
+         const correlatedError = err?.message || err?.code || candidate || 'correlated session.error'
          for (const [messageID, correlation] of pendingByMessage) {
            if (correlation.sessionID !== failedSessionID) continue
+           correlatedMessageID = messageID
            for (const id of correlation.eventIDs) transitionEvent(id, 'failed', correlation.sessionID, messageID, String(correlatedError).slice(0, 512))
            pendingByMessage.delete(messageID)
            lastReconcileAt.delete(messageID)
            eventCoordinator.forget(correlation.eventIDs)
            break // session.error applies to the active (oldest) correlated turn
          }
+         if (!correlatedMessageID) {
+           for (const [messageID, active] of activeTurns) {
+             if (active.sessionID !== failedSessionID) continue
+             correlatedMessageID = messageID
+             break
+           }
+         }
+         if (correlatedMessageID) {
+           activeTurns.delete(correlatedMessageID)
+           if (candidate && candidate !== 'unknown error') {
+             const observedAt = new Date().toISOString()
+             sendRuntimeUpdate({
+               runtime: 'waiting',
+               health: 'error',
+               healthReason: String(candidate).slice(0, 512),
+               errorTag: 'session-error',
+               sessionID: failedSessionID,
+               observedAt,
+               eventID: `session-error:${failedSessionID}:${correlatedMessageID}:${observedAt}`,
+             })
+           }
+         }
+
          // opencode's session.error often surfaces a generic "unknown error" for
          // stream/API errors like ResourceExhausted — the real detail is only in
          // the opencode.log (handled by LOG-MONITOR). Only dispatch if we have
          // something real.
-         const err = event.properties?.error as any
-         const candidate =
-           err?.message || err?.code || err?.error ||
-           (typeof err === 'string' ? err : '') || ''
          if (!candidate || candidate === 'unknown error') {
            tickLog(`session.error: "${candidate}" — skipping, LOG-MONITOR will handle`)
            return
@@ -1486,12 +1510,10 @@ if (event.type === 'session.error') {
          if (!sessionErrorBuffer.includes(candidate)) {
            sessionErrorBuffer.push(candidate)
          }
-         // Reset the timer: if there is an existing timer, clear it and start a new one.
          if (sessionErrorTimer !== null) {
            clearTimeout(sessionErrorTimer)
          }
          sessionErrorTimer = setTimeout(() => {
-           // Time to send the aggregated report.
            if (sessionErrorBuffer.length > 0) {
              const aggregated = sessionErrorBuffer.join('; ')
              bus({
@@ -1501,7 +1523,7 @@ if (event.type === 'session.error') {
                ship: aid(),
                pid: process.pid,
                current_model: currentModel.model || '',
-               session_id: currentSessionID,
+               session_id: failedSessionID,
                has_fallback: hasSwitchedToFallback.v,
              })
              sessionErrorBuffer = []
