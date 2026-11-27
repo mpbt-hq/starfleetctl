@@ -107,11 +107,21 @@ func (b *Bus) BoardEntries() []BoardEntryJSON {
 		if r.ErrorTag != "" {
 			e.ErrorTag = r.ErrorTag
 		}
-		if r.Runtime != "" { e.Runtime = r.Runtime }
-		if r.Health != "" { e.Health = r.Health }
-		if r.RuntimeUpdated != "" { e.RuntimeUpdated = r.RuntimeUpdated }
-		if r.HealthUpdated != "" { e.HealthUpdated = r.HealthUpdated }
-		if r.HealthReason != "" { e.HealthReason = r.HealthReason }
+		if r.Runtime != "" {
+			e.Runtime = r.Runtime
+		}
+		if r.Health != "" {
+			e.Health = r.Health
+		}
+		if r.RuntimeUpdated != "" {
+			e.RuntimeUpdated = r.RuntimeUpdated
+		}
+		if r.HealthUpdated != "" {
+			e.HealthUpdated = r.HealthUpdated
+		}
+		if r.HealthReason != "" {
+			e.HealthReason = r.HealthReason
+		}
 		if r.Updated != "" {
 			e.Updated = r.Updated
 		}
