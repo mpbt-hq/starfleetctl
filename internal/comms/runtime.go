@@ -72,6 +72,12 @@ func (b *Bus) DoRuntimeUpdate(update RuntimeUpdate) error {
 	if rec.Agent == "" {
 		rec.Agent = b.ShipID
 	}
+	if rec.Epoch == 0 {
+		rec.Epoch = now()
+	}
+	if rec.ISO == "" {
+		rec.ISO = isots()
+	}
 	if rec.PID == 0 && update.PID > 0 {
 		if !pidAliveCheck(update.PID) {
 			return fmt.Errorf("runtime update: reported pid %d is not alive", update.PID)
@@ -84,9 +90,6 @@ func (b *Bus) DoRuntimeUpdate(update RuntimeUpdate) error {
 		rec.Runtime = update.Runtime
 		rec.RuntimeUpdated = observed
 		rec.RuntimeEventID = eventID
-		if update.SessionID != "" {
-			rec.RuntimeSessionID = clean(update.SessionID)
-		}
 		if update.Runtime == "working" {
 			rec.ModelLastAction = observed
 		}
@@ -109,6 +112,9 @@ func (b *Bus) DoRuntimeUpdate(update RuntimeUpdate) error {
 	}
 	if !changed {
 		return nil // duplicate or stale observation; idempotent no-op
+	}
+	if update.SessionID != "" {
+		rec.RuntimeSessionID = clean(update.SessionID)
 	}
 	if update.PID > 0 && pidAliveCheck(update.PID) {
 		rec.PID = update.PID
