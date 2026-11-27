@@ -165,7 +165,50 @@ export const plugin = async ({ client, $ }: any) => {
   const consumerID = `${aid()}:${process.pid}`
   const turnCorrelationQueue = createTurnCorrelationQueue()
   const pendingByMessage = new Map<string, { sessionID: string; eventIDs: string[]; submitted?: boolean; startSeen?: boolean; completionSeen?: boolean }>()
+  const activeTurns = new Map<string, { sessionID: string; startedAt: string }>()
   const syntheticMessageIDs = new Set<string>()
+  const runtimeTimestamp = (value?: any): string => {
+    if (typeof value === 'string') {
+      const parsed = new Date(value)
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const milliseconds = value < 1e12 ? value * 1000 : value
+      const parsed = new Date(milliseconds)
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
+    }
+    return new Date().toISOString()
+  }
+  const sendRuntimeUpdate = (update: {
+    runtime?: string
+    health?: string
+    healthReason?: string
+    errorTag?: string
+    sessionID?: string
+    observedAt?: string
+    eventID?: string
+  }): void => {
+    const observedAt = runtimeTimestamp(update.observedAt)
+    const sessionID = update.sessionID || currentSessionID
+    const eventID = update.eventID ||
+      `runtime:${update.runtime || 'none'}:${update.health || 'none'}:${sessionID || 'unknown'}:${observedAt}`
+    const response = bus({
+      cmd: 'runtime.update',
+      runtime: update.runtime,
+      health: update.health,
+      event_id: eventID,
+      observed_at: observedAt,
+      health_reason: update.healthReason,
+      error_tag: update.errorTag,
+      session_id: sessionID,
+      pid: process.pid,
+      model: currentModel.model || '',
+      server: currentModel.server || '',
+    })
+    if (!response?.ok) {
+      tickLog(`runtime-update-failed ship=${aid()} event=${eventID} error=${String(response?.error || 'unknown').slice(0, 160)}`)
+    }
+  }
   const lastReconcileAt = new Map<string, number>()
   const unsupportedEventDiagnostics = new Set<string>()
 
