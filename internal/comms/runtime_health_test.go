@@ -20,6 +20,9 @@ func TestDoStatusAndHealthUpdatePreserveRuntimeHealth(t *testing.T) {
 	if !ok {
 		t.Fatal("missing status record")
 	}
+	if rec.PluginLastRun != "" || rec.ModelLastAction != "" {
+		t.Fatalf("metadata-only health update fabricated liveness/model activity: plugin=%q model=%q", rec.PluginLastRun, rec.ModelLastAction)
+	}
 	rec.Runtime = "waiting"
 	rec.Health = "degraded"
 	rec.RuntimeUpdated = "2026-11-27T12:00:00Z"
@@ -288,5 +291,102 @@ func TestDoRuntimeUpdateValidatesStatesAndEventEnvelope(t *testing.T) {
 	}
 	if _, ok := parseStatusFile(b.sfile(b.ShipID)); ok {
 		t.Fatal("invalid observations must not create or mutate status")
+	}
+}
+
+
+func TestDoHealthUpdateStoresHeartbeatCadenceWithoutModelActivity(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	ts := "2026-11-27T12:20:00Z"
+	if err := b.DoHealthUpdate([]string{"--plugin-ts", ts, "--heartbeat-ms", "300000"}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing status record")
+	}
+	if rec.PluginLastRun != ts || rec.PluginHeartbeatMS != 300000 {
+		t.Fatalf("heartbeat metadata not persisted: plugin_last_run=%q heartbeat_ms=%d", rec.PluginLastRun, rec.PluginHeartbeatMS)
+	}
+	if rec.ModelLastAction != "" {
+		t.Fatalf("heartbeat falsely recorded model activity at %q", rec.ModelLastAction)
+	}
+}
+
+func TestEvalHealthUsesHeartbeatCadenceAndSeparatesRuntimeHealth(t *testing.T) {
+	now := time.Now()
+	rec := StatusRecord{
+		State: "working",
+		PID: os.Getpid(),
+		PluginLastRun: now.Add(-400 * time.Second).Format(time.RFC3339Nano),
+		PluginHeartbeatMS: 300000,
+		Runtime: "idle",
+		Health: "healthy",
+		RuntimeUpdated: now.Add(-5 * time.Second).Format(time.RFC3339Nano),
+		HealthUpdated: now.Add(-5 * time.Second).Format(time.RFC3339Nano),
+	}
+	got := EvalHealth("TestShip", rec, 0, 300)
+	if got.StalePluginS != 630 {
+		t.Fatalf("heartbeat-derived stale threshold = %d, want 630", got.StalePluginS)
+	}
+	if got.State != "IDLE" {
+		t.Fatalf("runtime idle should not inherit manual task state or be marked stale: %+v", got)
+	}
+	if got.TaskState != "working" || got.Runtime != "idle" || got.Health != "healthy" {
+		t.Fatalf("task/runtime/health dimensions were conflated: %+v", got)
+	}
+}
+
+func TestEvalHealthMarksExpiredHeartbeatOffline(t *testing.T) {
+	now := time.Now()
+	rec := StatusRecord{
+		State: "working",
+		PID: os.Getpid(),
+		PluginLastRun: now.Add(-700 * time.Second).Format(time.RFC3339Nano),
+		PluginHeartbeatMS: 300000,
+		Runtime: "working",
+		Health: "healthy",
+	}
+	got := EvalHealth("TestShip", rec, 0, 300)
+	if got.State != "OFFLINE" {
+		t.Fatalf("expired heartbeat state = %q, want OFFLINE", got.State)
+	}
+}
+
+func TestEvalHealthDistinguishesLiveModelErrorFromDeadProcess(t *testing.T) {
+	now := time.Now()
+	live := StatusRecord{
+		State: "working",
+		PID: os.Getpid(),
+		PluginLastRun: now.Format(time.RFC3339Nano),
+		Runtime: "waiting",
+		Health: "error",
+		HealthReason: "provider rejected request",
+		ErrorTag: "nim-overload",
+	}
+	if got := EvalHealth("TestShip", live, 0, 300); got.State != "ERROR" {
+		t.Fatalf("live model error state = %q, want ERROR", got.State)
+	}
+	dead := live
+	dead.PID = 99999999
+	dead.Health = "healthy"
+	if got := EvalHealth("TestShip", dead, 0, 300); got.State != "OFFLINE" {
+		t.Fatalf("dead process state = %q, want OFFLINE", got.State)
+	}
+}
+
+func TestEvalHealthUsesRuntimeWorkingForStuckDetection(t *testing.T) {
+	now := time.Now()
+	rec := StatusRecord{
+		State: "idle",
+		PID: os.Getpid(),
+		PluginLastRun: now.Format(time.RFC3339Nano),
+		Runtime: "working",
+		Health: "healthy",
+		ModelLastAction: now.Add(-600 * time.Second).Format(time.RFC3339Nano),
+	}
+	got := EvalHealth("TestShip", rec, 0, 300)
+	if got.State != "STUCK" {
+		t.Fatalf("runtime working with stale model activity = %q, want STUCK", got.State)
 	}
 }
