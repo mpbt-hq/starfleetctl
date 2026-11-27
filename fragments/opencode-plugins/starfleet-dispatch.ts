@@ -179,6 +179,16 @@ export const plugin = async ({ client, $ }: any) => {
     }
     return new Date().toISOString()
   }
+  const hasActiveTurnForSession = (sessionID: string): boolean => {
+    if (!sessionID) return false
+    for (const active of activeTurns.values()) {
+      if (active.sessionID === sessionID) return true
+    }
+    for (const pending of pendingByMessage.values()) {
+      if (pending.sessionID === sessionID) return true
+    }
+    return false
+  }
   const sendRuntimeUpdate = (update: {
     runtime?: string
     health?: string
@@ -1393,7 +1403,7 @@ const logPollTimer = setInterval(async () => {
         const sessionID = String(props?.sessionID || currentSessionID)
         const statusType = props?.status?.type
         const observedAt = new Date().toISOString()
-        if (statusType === 'busy') {
+        if (statusType === 'busy' && hasActiveTurnForSession(sessionID)) {
           sendRuntimeUpdate({
             runtime: 'working',
             sessionID,
@@ -1405,7 +1415,7 @@ const logPollTimer = setInterval(async () => {
             markTurnStarted(messageID, correlation)
             break // session busy identifies the oldest pending turn in this session
           }
-        } else if (statusType === 'retry') {
+        } else if (statusType === 'retry' && hasActiveTurnForSession(sessionID)) {
           const detail = props?.status?.action?.message ||
             props?.status?.action?.reason || props?.status?.message || 'model retry'
           sendRuntimeUpdate({
