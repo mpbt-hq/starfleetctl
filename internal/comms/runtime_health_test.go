@@ -3,7 +3,10 @@
 
 package comms
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestDoStatusAndHealthUpdatePreserveRuntimeHealth(t *testing.T) {
 	b := newTestBus(t, "TestShip")
@@ -85,5 +88,41 @@ func TestDispatchModelErrorsDoNotOverwriteManualTaskState(t *testing.T) {
 				t.Fatal("expected model error classification to remain recorded")
 			}
 		})
+	}
+}
+
+func TestDoErrorHandleDoesNotOverwriteManualTaskState(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	if err := b.DoStatus("working", "implementation", StatusPatch{Task: "task-30"}); err != nil {
+		t.Fatal(err)
+	}
+
+	input, err := os.CreateTemp(t.TempDir(), "error-payload-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	if _, err := input.WriteString(`{"detail":"ResourceExhausted: provider temporarily overloaded"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	previousStdin := os.Stdin
+	os.Stdin = input
+	defer func() { os.Stdin = previousStdin }()
+
+	if err := b.DoErrorHandle([]string{"--stdin"}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing status record")
+	}
+	if rec.State != "working" || rec.Task != "task-30" {
+		t.Fatalf("legacy model error handler overwrote task/manual state: state=%q task=%q", rec.State, rec.Task)
+	}
+	if rec.ErrorTag != "resource-exhausted" {
+		t.Fatalf("error tag = %q, want resource-exhausted", rec.ErrorTag)
 	}
 }
