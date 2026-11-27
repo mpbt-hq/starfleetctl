@@ -175,6 +175,11 @@ process.stdin.on('end', () => {
       tui: { showToast() {} },
     }
     const hooks = await plugin({ client, $: {} })
+    const runtimeCalls = () => readCalls(callsPath).filter((call) => call.cmd === 'runtime.update')
+    assert.ok(runtimeCalls().some((call) => call.runtime === 'starting'), 'plugin startup publishes runtime starting')
+    assert.ok(readCalls(callsPath).some((call) =>
+      call.cmd === 'health' && call.heartbeat_ms === 60000 && call.plugin_last_run,
+    ), 'plugin reports its configured heartbeat cadence independently of model activity')
     const pollTimer = intervals.find((timer) => timer.fn.name === 'poll')
     assert.ok(pollTimer, 'production poll timer was installed')
     assert.ok(typeof hooks.event === 'function', 'production event hook was returned')
@@ -232,6 +237,9 @@ process.stdin.on('end', () => {
       .map((call) => call.lifecycle_state)
     assert.ok(completedStates.includes('turn_started'))
     assert.ok(completedStates.includes('completed'), 'only the correlated assistant completion closes the event')
+    assert.ok(runtimeCalls().some((call) =>
+      call.runtime === 'idle' && call.health === 'healthy' && call.session_id === 'ses-integration',
+    ), 'correlated assistant completion publishes idle/healthy runtime state')
 
     // Second event: a promptAsync error remains retryable and is released.
     updateState({ pollError: false, events: [makeEvent('evt-prompt-retry')] })
@@ -248,6 +256,9 @@ process.stdin.on('end', () => {
       Array.isArray(call.ids) &&
       call.ids.includes('evt-prompt-retry'),
     ), 'failed prompt handoff releases the event lease for retry')
+    assert.ok(runtimeCalls().some((call) =>
+      call.runtime === 'waiting' && call.health === 'degraded' && call.error_tag === 'comms-prompt-handoff',
+    ), 'promptAsync rejection publishes waiting/degraded runtime health')
 
     // The same durable event is then returned by the fake CLI. The actual
     // production poller retries it and records submission after promptAsync.
@@ -298,6 +309,21 @@ process.stdin.on('end', () => {
       .map((call) => call.lifecycle_state)
     assert.ok(transformStates.includes('prepared'))
     assert.ok(transformStates.includes('submitted'))
+    assert.ok(runtimeCalls().some((call) =>
+      call.runtime === 'working' && call.session_id === 'ses-integration',
+    ), 'transform adapter publishes runtime working')
+
+    const beforeIdleStatus = runtimeCalls().length
+    await hooks.event({
+      event: {
+        type: 'session.status',
+        properties: { sessionID: 'ses-integration', status: { type: 'idle' } },
+      },
+    })
+    assert.equal(runtimeCalls().length, beforeIdleStatus, 'session idle alone is not treated as assistant completion')
+    assert.equal(readCalls(callsPath).some((call) =>
+      call.cmd === 'events.transition' && call.id === 'evt-transform' && call.lifecycle_state === 'completed',
+    ), false, 'session idle does not complete an unrelated Comms event')
 
     await hooks.event({
       event: {
@@ -317,6 +343,9 @@ process.stdin.on('end', () => {
       .map((call) => call.lifecycle_state)
     assert.ok(transformCompleted.includes('turn_started'))
     assert.ok(transformCompleted.includes('completed'))
+    assert.ok(runtimeCalls().some((call) =>
+      call.runtime === 'idle' && call.health === 'healthy' && call.session_id === 'ses-integration',
+    ), 'only correlated assistant completion returns runtime to idle/healthy')
   } finally {
     for (const timer of intervals) globalThis.clearInterval(timer)
     globalThis.setInterval = originalSetInterval
