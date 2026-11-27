@@ -1651,6 +1651,11 @@ func (s *Server) apiShips(w http.ResponseWriter, r *http.Request) {
 		Progress      int    `json:"progress,omitempty"`
 		Blocker       string `json:"blocker,omitempty"`
 		PluginVersion string `json:"plugin_version,omitempty"`
+		Runtime        string `json:"runtime,omitempty"`
+		Health         string `json:"health,omitempty"`
+		RuntimeUpdated string `json:"runtime_updated,omitempty"`
+		HealthUpdated  string `json:"health_updated,omitempty"`
+		HealthReason   string `json:"health_reason,omitempty"`
 	}
 	var ships []shipInfo
 	for _, rec := range records {
@@ -1666,6 +1671,11 @@ func (s *Server) apiShips(w http.ResponseWriter, r *http.Request) {
 			Progress:      rec.Progress,
 			Blocker:       rec.Blocker,
 			PluginVersion: rec.PluginVersion,
+			Runtime:        rec.Runtime,
+			Health:         rec.Health,
+			RuntimeUpdated: rec.RuntimeUpdated,
+			HealthUpdated:  rec.HealthUpdated,
+			HealthReason:   rec.HealthReason,
 		}
 		ships = append(ships, info)
 	}

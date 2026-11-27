@@ -39,8 +39,13 @@ type BoardEntryJSON struct {
 	Model        string `json:"model,omitempty"`
 	Class        string `json:"class,omitempty"`
 	Server       string `json:"server,omitempty"`
-	ErrorTag     string `json:"error_tag,omitempty"`
-	Updated      string `json:"updated,omitempty"`
+	ErrorTag       string `json:"error_tag,omitempty"`
+	Runtime        string `json:"runtime,omitempty"`
+	Health         string `json:"health,omitempty"`
+	RuntimeUpdated string `json:"runtime_updated,omitempty"`
+	HealthUpdated  string `json:"health_updated,omitempty"`
+	HealthReason   string `json:"health_reason,omitempty"`
+	Updated        string `json:"updated,omitempty"`
 	Unattached   bool   `json:"unattached,omitempty"`
 	ToastVariant string `json:"toast_variant,omitempty"`
 	ToastTitle   string `json:"toast_title,omitempty"`
@@ -102,6 +107,11 @@ func (b *Bus) BoardEntries() []BoardEntryJSON {
 		if r.ErrorTag != "" {
 			e.ErrorTag = r.ErrorTag
 		}
+		if r.Runtime != "" { e.Runtime = r.Runtime }
+		if r.Health != "" { e.Health = r.Health }
+		if r.RuntimeUpdated != "" { e.RuntimeUpdated = r.RuntimeUpdated }
+		if r.HealthUpdated != "" { e.HealthUpdated = r.HealthUpdated }
+		if r.HealthReason != "" { e.HealthReason = r.HealthReason }
 		if r.Updated != "" {
 			e.Updated = r.Updated
 		}

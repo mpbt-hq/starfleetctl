@@ -457,6 +457,11 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		Parent:          coalesce(parent, prev.Parent),
 		Provider:        coalesce(provider, prev.Provider),
 		PluginVersion:   coalesce(pluginVersion, prev.PluginVersion),
+		Runtime:         prev.Runtime,
+		Health:          prev.Health,
+		RuntimeUpdated:  prev.RuntimeUpdated,
+		HealthUpdated:   prev.HealthUpdated,
+		HealthReason:    prev.HealthReason,
 		Updated:         coalesce(updated, prev.Updated, nowTs),
 		// Auto-set Unattached: working/building without task or note
 		Unattached: (state == "working" || state == "building") && task == "" && note == "",
