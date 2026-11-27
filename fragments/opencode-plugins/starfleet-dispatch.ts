@@ -1330,22 +1330,46 @@ const logPollTimer = setInterval(async () => {
       if (event.type === 'message.updated') {
         const info = event.properties?.info as any
         if (info?.role === 'assistant') {
-          const correlation = pendingByMessage.get(info.parentID)
-          if (correlation) {
-            const updateState = classifyAssistantUpdate(info, correlation.sessionID, info.parentID)
+          const messageID = String(info.parentID || '')
+          const correlation = pendingByMessage.get(messageID)
+          const active = activeTurns.get(messageID)
+          const sessionID = correlation?.sessionID || active?.sessionID || ''
+          if (sessionID && messageID) {
+            const updateState = classifyAssistantUpdate(info, sessionID, messageID)
             if (updateState === 'failed') {
-              for (const id of correlation.eventIDs) transitionEvent(id, 'failed', correlation.sessionID, info.parentID, String(info.error).slice(0, 512))
-              pendingByMessage.delete(info.parentID)
-              lastReconcileAt.delete(info.parentID)
-              eventCoordinator.forget(correlation.eventIDs)
-            } else if (updateState === 'completed') {
-              if (completeCorrelation(info.parentID, correlation)) {
-                tickLog(`event-turn-completed ship=${aid()} sid=${correlation.sessionID} message=${info.parentID} ids=[${correlation.eventIDs.join(',')}]`)
-              } else {
-                tickLog(`event-turn-completion-pending ship=${aid()} sid=${correlation.sessionID} message=${info.parentID} ids=[${correlation.eventIDs.join(',')}]`)
+              const observedAt = runtimeTimestamp(info.time?.updated || info.time?.completed)
+              sendRuntimeUpdate({
+                runtime: 'waiting',
+                health: 'error',
+                healthReason: String(info.error || 'assistant turn failed').slice(0, 512),
+                sessionID,
+                observedAt,
+                eventID: `assistant-failed:${sessionID}:${messageID}:${observedAt}`,
+              })
+              activeTurns.delete(messageID)
+              if (correlation) {
+                for (const id of correlation.eventIDs) transitionEvent(id, 'failed', sessionID, messageID, String(info.error).slice(0, 512))
+                pendingByMessage.delete(messageID)
+                lastReconcileAt.delete(messageID)
+                eventCoordinator.forget(correlation.eventIDs)
               }
-            } else if (updateState === 'started') {
-              markTurnStarted(info.parentID, correlation)
+            } else if (updateState === 'completed') {
+              const observedAt = runtimeTimestamp(info.time?.completed || info.time?.updated)
+              sendRuntimeUpdate({
+                runtime: 'idle',
+                health: 'healthy',
+                sessionID,
+                observedAt,
+                eventID: `assistant-completed:${sessionID}:${messageID}:${observedAt}`,
+              })
+              activeTurns.delete(messageID)
+              if (correlation) {
+                if (completeCorrelation(messageID, correlation)) {
+                  tickLog(`event-turn-completed ship=${aid()} sid=${sessionID} message=${messageID} ids=[${correlation.eventIDs.join(',')}]`)
+                } else {
+                  tickLog(`event-turn-completion-pending ship=${aid()} sid=${sessionID} message=${messageID} ids=[${correlation.eventIDs.join(',')}]`)
+                }
+              }
             }
           }
           if (info.modelID) {
@@ -1354,7 +1378,13 @@ const logPollTimer = setInterval(async () => {
               tickLog(`MODEL RECOVERY: session recovered on ${info.modelID} — fallback worked`)
               hasSwitchedToFallback.v = false
             }
-            bus({ cmd: 'health', error_tag: undefined, plugin_last_run: new Date().toISOString() })
+            bus({
+              cmd: 'health',
+              plugin_last_run: new Date().toISOString(),
+              heartbeat_ms: HEARTBEAT_MS,
+              pid: process.pid,
+              ...currentModel,
+            })
           }
         }
       }
