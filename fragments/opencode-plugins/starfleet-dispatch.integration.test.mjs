@@ -117,7 +117,7 @@ process.stdin.on('end', () => {
   const promptCalls = []
   const promptResults = [
     { ok: true },
-    { error: 'promptAsync rejected transiently' },
+    new Error('promptAsync rejected transiently'),
     { ok: true },
   ]
 
@@ -163,7 +163,9 @@ process.stdin.on('end', () => {
         },
         async promptAsync(params) {
           promptCalls.push(params)
-          return promptResults.shift() ?? { ok: true }
+          const next = promptResults.shift()
+          if (next instanceof Error) throw next
+          return next ?? { ok: true }
         },
         async update() {
           return { ok: true }
@@ -199,15 +201,15 @@ process.stdin.on('end', () => {
     const updateState = (value) => writeFileSync(statePath, JSON.stringify(value))
 
     // First event: real poll adapter -> actual promptAsync -> durable submitted.
-    updateState({ pollError: false, events: [makeEvent('evt-poll-success')] })
+    updateState({ pollError: false, events: [makeEvent('evt-retryable-poll')] })
     await poll()
     assert.equal(promptCalls.length, 1)
     assert.equal(promptCalls[0].path.id, 'ses-integration')
-    assert.match(promptCalls[0].body.parts[0].text, /directive payload for evt-poll-success/)
+    assert.match(promptCalls[0].body.parts[0].text, /directive payload for evt-retryable-poll/)
     const firstMessageID = promptCalls[0].body.messageID
     assert.ok(firstMessageID, 'plugin supplied deterministic message correlation')
     const firstStates = readCalls(callsPath)
-      .filter((call) => call.cmd === 'events.transition' && call.id === 'evt-poll-success')
+      .filter((call) => call.cmd === 'events.transition' && call.id === 'evt-retryable-poll')
       .map((call) => call.lifecycle_state)
     assert.ok(firstStates.includes('prepared'))
     assert.ok(firstStates.includes('submitted'))
@@ -226,7 +228,7 @@ process.stdin.on('end', () => {
       },
     })
     const completedStates = readCalls(callsPath)
-      .filter((call) => call.cmd === 'events.transition' && call.id === 'evt-poll-success')
+      .filter((call) => call.cmd === 'events.transition' && call.id === 'evt-retryable-poll')
       .map((call) => call.lifecycle_state)
     assert.ok(completedStates.includes('turn_started'))
     assert.ok(completedStates.includes('completed'), 'only the correlated assistant completion closes the event')
