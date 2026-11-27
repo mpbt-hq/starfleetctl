@@ -249,7 +249,7 @@ func EvalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) heal
 		effective = "OFFLINE"
 	case rec.PluginLastRun != "" && pluginAge > stalePluginLimit:
 		effective = "OFFLINE"
-	case rec.Health == "error" || rec.ErrorTag != "":
+	case rec.Health == "error":
 		effective = "ERROR"
 	case rec.Health == "degraded":
 		effective = "DEGRADED"
@@ -507,14 +507,6 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	}
 
 	nowTs := time.Now().Format(time.RFC3339Nano)
-	health := prev.Health
-	healthUpdated := prev.HealthUpdated
-	healthReason := prev.HealthReason
-	if errorTag != "" {
-		health = "error"
-		healthUpdated = nowTs
-		healthReason = errorTag
-	}
 	rec := StatusRecord{
 		Epoch:   prev.Epoch,
 		ISO:     prev.ISO,
@@ -543,13 +535,13 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		PluginVersion:   coalesce(pluginVersion, prev.PluginVersion),
 		PluginHeartbeatMS: coalesceInt(heartbeatMS, prev.PluginHeartbeatMS),
 		Runtime:         prev.Runtime,
-		Health:          health,
+		Health:          prev.Health,
 		RuntimeUpdated:  prev.RuntimeUpdated,
-		HealthUpdated:   healthUpdated,
+		HealthUpdated:   prev.HealthUpdated,
 		RuntimeEventID:  prev.RuntimeEventID,
 		HealthEventID:   prev.HealthEventID,
 		RuntimeSessionID: prev.RuntimeSessionID,
-		HealthReason:    healthReason,
+		HealthReason:    prev.HealthReason,
 		Updated:         coalesce(updated, prev.Updated, nowTs),
 		// Auto-set Unattached: working/building without task or note
 		Unattached: (state == "working" || state == "building") && task == "" && note == "",
