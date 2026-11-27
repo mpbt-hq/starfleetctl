@@ -267,7 +267,8 @@ of truth. Only supplied flags are merged into the existing file
 
 Plugin flags (used by opencode plugin):
   --state <s>        idle|working|blocked
-  --plugin-ts <iso>  ISO timestamp of last plugin run
+  --plugin-ts <iso>  ISO timestamp of last plugin heartbeat
+  --heartbeat-ms <n> configured plugin heartbeat interval in milliseconds
   --model-ts <iso>   ISO timestamp of last model action
   --pid <n>          process ID
   --model <m>        model identifier (e.g. "openai/gpt-4o")
@@ -297,6 +298,7 @@ Launch metadata (set on ship startup):
 
 func (b *Bus) DoHealthUpdate(args []string) error {
 	var state, pluginTS, modelTS, model, server, errorTag, pluginVersion string
+	heartbeatMS := 0
 	var task, blocker, eta, branch, note, launchType, parent, provider, updated string
 	progress := -1
 	pid := 0
@@ -344,6 +346,11 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		case "--plugin-version":
 			if i+1 < len(args) {
 				pluginVersion = args[i+1]
+				i++
+			}
+		case "--heartbeat-ms":
+			if i+1 < len(args) {
+				heartbeatMS, _ = strconv.Atoi(args[i+1])
 				i++
 			}
 		case "--task":
@@ -454,8 +461,8 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		PID:             coalesceInt(pid, statusPIDForWrite(prev.PID)),
 		Handle:          prev.Handle,
 		Note:            coalesce(note, prev.Note),
-		PluginLastRun:   coalesce(pluginTS, prev.PluginLastRun, nowTs),
-		ModelLastAction: coalesce(modelTS, prev.ModelLastAction, nowTs),
+		PluginLastRun:   coalesce(pluginTS, prev.PluginLastRun),
+		ModelLastAction: coalesce(modelTS, prev.ModelLastAction),
 		Model:           coalesce(model, prev.Model),
 		Server:          coalesce(server, prev.Server),
 		ErrorTag:        coalesce(errorTag, prev.ErrorTag),
@@ -468,10 +475,14 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		Parent:          coalesce(parent, prev.Parent),
 		Provider:        coalesce(provider, prev.Provider),
 		PluginVersion:   coalesce(pluginVersion, prev.PluginVersion),
+		PluginHeartbeatMS: coalesceInt(heartbeatMS, prev.PluginHeartbeatMS),
 		Runtime:         prev.Runtime,
 		Health:          prev.Health,
 		RuntimeUpdated:  prev.RuntimeUpdated,
 		HealthUpdated:   prev.HealthUpdated,
+		RuntimeEventID:  prev.RuntimeEventID,
+		HealthEventID:   prev.HealthEventID,
+		RuntimeSessionID: prev.RuntimeSessionID,
 		HealthReason:    prev.HealthReason,
 		Updated:         coalesce(updated, prev.Updated, nowTs),
 		// Auto-set Unattached: working/building without task or note
