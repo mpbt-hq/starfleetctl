@@ -249,7 +249,7 @@ func EvalHealth(ship string, rec StatusRecord, stalePlugin, staleModel int) heal
 		effective = "OFFLINE"
 	case rec.PluginLastRun != "" && pluginAge > stalePluginLimit:
 		effective = "OFFLINE"
-	case rec.Health == "error":
+	case rec.Health == "error" || rec.ErrorTag != "":
 		effective = "ERROR"
 	case rec.Health == "degraded":
 		effective = "DEGRADED"
