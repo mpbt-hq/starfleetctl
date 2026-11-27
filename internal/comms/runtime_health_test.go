@@ -184,3 +184,109 @@ func TestDoHealthUpdateSerializesWithTaskStatusWrites(t *testing.T) {
 		t.Fatal("health update did not resume after bus lock release")
 	}
 }
+
+func TestDoRuntimeUpdateIsIdempotentAndPreservesTaskState(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	if err := b.DoStatus("working", "implementation", StatusPatch{Task: "task-30"}); err != nil {
+		t.Fatal(err)
+	}
+	first := RuntimeUpdate{
+		Runtime: "working", Health: "error", EventID: "turn:session:message:1",
+		ObservedAt: "2026-11-27T12:00:00Z", HealthReason: "provider overloaded",
+		ErrorTag: "nim-overload", SessionID: "ses-runtime", PID: os.Getpid(),
+		Model: "model-a", Provider: "provider-a",
+	}
+	if err := b.DoRuntimeUpdate(first); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing runtime status")
+	}
+	if rec.Runtime != "working" || rec.Health != "error" ||
+		rec.RuntimeEventID != first.EventID || rec.HealthEventID != first.EventID ||
+		rec.RuntimeSessionID != first.SessionID || rec.HealthReason != first.HealthReason ||
+		rec.ErrorTag != first.ErrorTag || rec.Model != first.Model || rec.Server != first.Provider {
+		t.Fatalf("runtime observation not persisted: %+v", rec)
+	}
+	if rec.State != "working" || rec.Task != "task-30" {
+		t.Fatalf("runtime update changed task state: state=%q task=%q", rec.State, rec.Task)
+	}
+	if rec.ModelLastAction != first.ObservedAt {
+		t.Fatalf("model last action = %q, want %q", rec.ModelLastAction, first.ObservedAt)
+	}
+
+	// Replaying the same event ID with a newer timestamp cannot change either
+	// dimension; a new successful event is required for recovery.
+	duplicate := RuntimeUpdate{
+		Runtime: "idle", Health: "healthy", EventID: first.EventID,
+		ObservedAt: "2026-11-27T12:05:00Z", SessionID: first.SessionID,
+	}
+	if err := b.DoRuntimeUpdate(duplicate); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = parseStatusFile(b.sfile(b.ShipID))
+	if rec.Runtime != "working" || rec.Health != "error" || rec.HealthReason != first.HealthReason {
+		t.Fatalf("duplicate event changed runtime/health: %+v", rec)
+	}
+
+	recovery := RuntimeUpdate{
+		Runtime: "idle", Health: "healthy", EventID: "turn:session:message:2",
+		ObservedAt: "2026-11-27T12:06:00Z", SessionID: first.SessionID,
+	}
+	if err := b.DoRuntimeUpdate(recovery); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = parseStatusFile(b.sfile(b.ShipID))
+	if rec.Runtime != "idle" || rec.Health != "healthy" || rec.HealthReason != "" || rec.ErrorTag != "" {
+		t.Fatalf("newer successful event did not clear recoverable health error: %+v", rec)
+	}
+	if rec.State != "working" || rec.Task != "task-30" {
+		t.Fatalf("recovery changed task state: state=%q task=%q", rec.State, rec.Task)
+	}
+}
+
+func TestDoRuntimeUpdateRejectsOutOfOrderEvents(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "working", EventID: "event-new", ObservedAt: "2026-11-27T12:10:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "idle", EventID: "event-old", ObservedAt: "2026-11-27T12:09:59Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing runtime status")
+	}
+	if rec.Runtime != "working" || rec.RuntimeEventID != "event-new" {
+		t.Fatalf("out-of-order event regressed runtime state: %+v", rec)
+	}
+}
+
+func TestDoRuntimeUpdateValidatesStatesAndEventEnvelope(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	tests := []struct {
+		name string
+		update RuntimeUpdate
+	}{
+		{name: "runtime offline is derived", update: RuntimeUpdate{Runtime: "offline", EventID: "e1", ObservedAt: "2026-11-27T12:00:00Z"}},
+		{name: "health offline is derived", update: RuntimeUpdate{Health: "offline", EventID: "e2", ObservedAt: "2026-11-27T12:00:00Z"}},
+		{name: "event id required", update: RuntimeUpdate{Runtime: "working", ObservedAt: "2026-11-27T12:00:00Z"}},
+		{name: "timestamp required", update: RuntimeUpdate{Runtime: "working", EventID: "e3"}},
+		{name: "event id cannot contain whitespace", update: RuntimeUpdate{Runtime: "working", EventID: "bad id", ObservedAt: "2026-11-27T12:00:00Z"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := b.DoRuntimeUpdate(tc.update); err == nil {
+				t.Fatal("expected invalid runtime update to be rejected")
+			}
+		})
+	}
+	if _, ok := parseStatusFile(b.sfile(b.ShipID)); ok {
+		t.Fatal("invalid observations must not create or mutate status")
+	}
+}
