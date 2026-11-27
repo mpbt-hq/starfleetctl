@@ -507,6 +507,14 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	}
 
 	nowTs := time.Now().Format(time.RFC3339Nano)
+	health := prev.Health
+	healthUpdated := prev.HealthUpdated
+	healthReason := prev.HealthReason
+	if errorTag != "" {
+		health = "error"
+		healthUpdated = nowTs
+		healthReason = errorTag
+	}
 	rec := StatusRecord{
 		Epoch:   prev.Epoch,
 		ISO:     prev.ISO,
@@ -535,13 +543,13 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		PluginVersion:   coalesce(pluginVersion, prev.PluginVersion),
 		PluginHeartbeatMS: coalesceInt(heartbeatMS, prev.PluginHeartbeatMS),
 		Runtime:         prev.Runtime,
-		Health:          prev.Health,
+		Health:          health,
 		RuntimeUpdated:  prev.RuntimeUpdated,
-		HealthUpdated:   prev.HealthUpdated,
+		HealthUpdated:   healthUpdated,
 		RuntimeEventID:  prev.RuntimeEventID,
 		HealthEventID:   prev.HealthEventID,
 		RuntimeSessionID: prev.RuntimeSessionID,
-		HealthReason:    prev.HealthReason,
+		HealthReason:    healthReason,
 		Updated:         coalesce(updated, prev.Updated, nowTs),
 		// Auto-set Unattached: working/building without task or note
 		Unattached: (state == "working" || state == "building") && task == "" && note == "",
