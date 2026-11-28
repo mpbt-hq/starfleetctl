@@ -31,3 +31,31 @@ export function resolveLatestShipSession(response, ship, root) {
   const latest = matches.filter((session, index) => updated[index] === latestUpdated)
   return latest.length === 1 ? latest[0].id : ''
 }
+
+ 
+// Select a status entry only when its session identity is unambiguous. OpenCode
+// has returned both keyed maps and arrays; never fall back to the first of
+// several sessions when the requested ID is absent.
+export function selectSessionStatusEntry(response, sessionID) {
+  const body = response?.body ?? response
+  const data = body?.data ?? body
+  const entries = Array.isArray(data?.sessions) ? data.sessions : data
+  if (Array.isArray(entries)) {
+    if (sessionID) {
+      const matches = entries.filter(entry => entry?.id === sessionID)
+      return matches.length === 1 ? matches[0] : undefined
+    }
+    return entries.length === 1 ? entries[0] : undefined
+  }
+  if (!entries || typeof entries !== 'object') return undefined
+  if (sessionID && Object.prototype.hasOwnProperty.call(entries, sessionID)) {
+    return entries[sessionID]
+  }
+  // Some SDK versions return the single status object directly rather than
+  // a session-ID keyed map. Accept that shape only when its status fields are
+  // on the object itself; never unwrap an unrelated map entry by position.
+  if ('model' in entries || 'modelID' in entries || 'providerID' in entries) {
+    return entries
+  }
+  return undefined
+}

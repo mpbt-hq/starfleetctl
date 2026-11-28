@@ -191,16 +191,22 @@ func TestGitCommandTimeoutKillsBlockedProcess(t *testing.T) {
 		remote := setupRemote(t)
 		root := t.TempDir()
 		cfg := testConfig(remote)
-		cfg.Sync.CommandTimeout = deadline.String()
-		cfg.Sync.CloneTimeout = deadline.String()
+		// Seed/setup work must not run under the deliberately tiny timeout
+		// used by the assertions below. On loaded CI workers, the initial
+		// commit can legitimately take longer than 200ms.
+		cfg.Sync.CommandTimeout = "5s"
+		cfg.Sync.CloneTimeout = "5s"
 		writeConfig(t, root, cfg)
 		cloneTimeout, commandTimeout := testTimeouts(cfg)
 		sp := newSpool(root, cfg.Repositories[0], 0, "alpha", cloneTimeout, commandTimeout)
 
-		// Prepare a real clone with the FIFO inactive.
+		// Prepare a real clone with the FIFO inactive and normal setup
+		// deadlines. Only the operations under test use the short timeout.
 		if err := sp.Publish(NewMessage("alpha", "beta", "info", "timeout-seed", "")); err != nil {
 			t.Fatalf("publish seed: %v", err)
 		}
+		sp.git.config.CloneTimeout = deadline
+		sp.git.config.CommandTimeout = deadline
 		cloneDir := sp.git.CloneDir()
 
 		fifoDir := t.TempDir()

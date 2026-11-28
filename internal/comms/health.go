@@ -506,6 +506,34 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 	}
 
 	nowTs := time.Now().Format(time.RFC3339Nano)
+	pluginStartEventID := prev.PluginStartEventID
+	pluginStartPID := prev.PluginStartPID
+	pluginStartAt := prev.PluginStartAt
+	runtimeSessionID := prev.RuntimeSessionID
+	pluginLastRun := prev.PluginLastRun
+	pluginVersionForPID := prev.PluginVersion
+	pluginHeartbeatForPID := prev.PluginHeartbeatMS
+	modelForPID := prev.Model
+	serverForPID := prev.Server
+	modelLastActionForPID := prev.ModelLastAction
+	processChanged := pid > 0 && ((pluginStartPID > 0 && pid != pluginStartPID) ||
+		(pluginStartPID == 0 && prev.PID > 0 && pid != prev.PID))
+	if processChanged {
+		// A new plugin process must establish all of its own readiness and
+		// model observations. Never let a previous process's heartbeat or
+		// effective model satisfy the new child's startup handshake.
+		pluginStartEventID = ""
+		pluginStartPID = 0
+		pluginStartAt = ""
+		runtimeSessionID = ""
+		pluginLastRun = ""
+		pluginVersionForPID = ""
+		pluginHeartbeatForPID = 0
+		modelForPID = ""
+		serverForPID = ""
+		modelLastActionForPID = ""
+	}
+
 	rec := StatusRecord{
 		Epoch:   prev.Epoch,
 		ISO:     prev.ISO,
@@ -518,10 +546,10 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		PID:             coalesceInt(pid, statusPIDForWrite(prev.PID)),
 		Handle:          prev.Handle,
 		Note:            coalesce(note, prev.Note),
-		PluginLastRun:   coalesce(pluginTS, prev.PluginLastRun),
-		ModelLastAction: coalesce(modelTS, prev.ModelLastAction),
-		Model:           coalesce(model, prev.Model),
-		Server:          coalesce(server, prev.Server),
+		PluginLastRun:   coalesce(pluginTS, pluginLastRun),
+		ModelLastAction: coalesce(modelTS, modelLastActionForPID),
+		Model:           coalesce(model, modelForPID),
+		Server:          coalesce(server, serverForPID),
 		ErrorTag:        coalesce(errorTag, prev.ErrorTag),
 		Task:            coalesce(task, prev.Task),
 		Progress:        coalesceProgress(progress, prev.Progress),
@@ -531,15 +559,18 @@ func (b *Bus) DoHealthUpdate(args []string) error {
 		LaunchType:      coalesce(launchType, prev.LaunchType),
 		Parent:          coalesce(parent, prev.Parent),
 		Provider:        coalesce(provider, prev.Provider),
-		PluginVersion:   coalesce(pluginVersion, prev.PluginVersion),
-		PluginHeartbeatMS: coalesceInt(heartbeatMS, prev.PluginHeartbeatMS),
+		PluginVersion:   coalesce(pluginVersion, pluginVersionForPID),
+		PluginHeartbeatMS: coalesceInt(heartbeatMS, pluginHeartbeatForPID),
+		PluginStartEventID: pluginStartEventID,
+		PluginStartPID:     pluginStartPID,
+		PluginStartAt:      pluginStartAt,
 		Runtime:         prev.Runtime,
 		Health:          prev.Health,
 		RuntimeUpdated:  prev.RuntimeUpdated,
 		HealthUpdated:   prev.HealthUpdated,
 		RuntimeEventID:  prev.RuntimeEventID,
 		HealthEventID:   prev.HealthEventID,
-		RuntimeSessionID: prev.RuntimeSessionID,
+		RuntimeSessionID: runtimeSessionID,
 		HealthReason:    prev.HealthReason,
 		Updated:         coalesce(updated, prev.Updated, nowTs),
 		// Auto-set Unattached: working/building without task or note

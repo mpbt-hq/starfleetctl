@@ -159,6 +159,14 @@ func main() {
 	if os.Args[1] == "termctl-run" {
 		os.Exit(session.RunTermctl("", os.Args[2:]))
 	}
+	// ship-supervisor runs inside termctl's persistent PTY.
+	if os.Args[1] == "ship-supervisor" {
+		os.Exit(session.RunShipSupervisor(os.Getenv("MPBT_WORKSPACE_ROOT"), os.Args[2:]))
+	}
+	// ship-exec waits for foreground PTY handoff before execing OpenCode.
+	if os.Args[1] == "ship-exec" {
+		os.Exit(session.RunShipExec(os.Args[2:]))
+	}
 
 	// json is a stateless utility — no workspace root needed.
 	if os.Args[1] == "json" {

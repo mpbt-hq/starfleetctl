@@ -45,6 +45,12 @@ type StatusRecord struct {
 	ErrorTag        string `json:"error_tag,omitempty"`
 	PluginVersion      string `json:"plugin_version,omitempty"`
 	PluginHeartbeatMS  int    `json:"plugin_heartbeat_ms,omitempty"`
+	// PluginStart* is a process-correlated startup receipt. Unlike RuntimeEventID,
+	// it survives later runtime transitions so a supervisor can prove that the
+	// current OpenCode PID loaded the plugin.
+	PluginStartEventID string `json:"plugin_start_event_id,omitempty"`
+	PluginStartPID     int    `json:"plugin_start_pid,omitempty"`
+	PluginStartAt      string `json:"plugin_start_at,omitempty"`
 
 	// Runtime/model health are independent of manual task state.
 	Runtime           string `json:"runtime,omitempty"`

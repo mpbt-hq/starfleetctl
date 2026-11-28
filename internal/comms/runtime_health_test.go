@@ -4,7 +4,10 @@
 package comms
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -426,5 +429,180 @@ func TestEvalHealthWithoutLivenessEvidenceIsOffline(t *testing.T) {
 	}
 	if got.PIDAlive {
 		t.Fatal("missing PID must not be reported as alive")
+	}
+}
+
+
+func TestPluginStartReceiptSurvivesLaterRuntimeAndHealthUpdates(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	pid := os.Getpid()
+	if err := b.DoHealthUpdate([]string{"--pid", fmt.Sprint(pid), "--plugin-version", "2.5.20"}); err != nil {
+		t.Fatal(err)
+	}
+	startID := "plugin-start:TestShip:" + fmt.Sprint(pid) + ":2026-11-27T12:40:00.000Z"
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "starting", EventID: startID,
+		ObservedAt: "2026-11-27T12:40:00Z", PID: pid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "working", EventID: "assistant-started:session:message",
+		ObservedAt: "2026-11-27T12:40:01Z", PID: pid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DoStatus("idle", "test status write", StatusPatch{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DoHealthUpdate([]string{"--pid", fmt.Sprint(pid), "--plugin-version", "2.5.20", "--plugin-ts", "2026-11-27T12:40:02Z"}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing status record")
+	}
+	if rec.PluginStartEventID != startID || rec.PluginStartPID != pid || rec.PluginStartAt != "2026-11-27T12:40:00Z" {
+		t.Fatalf("process-correlated plugin start receipt was not preserved: %+v", rec)
+	}
+	if rec.RuntimeEventID != "assistant-started:session:message" {
+		t.Fatalf("test did not advance the ordinary runtime event: %+v", rec)
+	}
+}
+
+func TestDoHealthUpdateClearsPreviousPluginSessionOnPIDChange(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	old := exec.Command("sleep", "60")
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	oldPID := old.Process.Pid
+	observedAt := time.Now().Format(time.RFC3339Nano)
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "starting",
+		EventID: fmt.Sprintf("plugin-start:%s:%d:%s", b.ShipID, oldPID, observedAt),
+		ObservedAt: observedAt,
+		SessionID: "old-session",
+		PID: oldPID,
+	}); err != nil {
+		_ = old.Process.Kill()
+		_ = old.Wait()
+		t.Fatal(err)
+	}
+	_ = old.Process.Kill()
+	_ = old.Wait()
+
+	newPID := os.Getpid()
+	if err := b.DoHealthUpdate([]string{
+		"--pid", strconv.Itoa(newPID),
+		"--plugin-version", "new-version",
+		"--plugin-ts", time.Now().Format(time.RFC3339Nano),
+		"--heartbeat-ms", "5000",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing updated status record")
+	}
+	if rec.PID != newPID || rec.PluginStartEventID != "" || rec.PluginStartPID != 0 ||
+		rec.PluginStartAt != "" || rec.RuntimeSessionID != "" {
+		t.Fatalf("new plugin process inherited stale readiness/session identity: %+v", rec)
+	}
+}
+
+func TestDoRuntimeUpdateClearsStaleSessionWhenPluginPIDChanges(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	old := exec.Command("sleep", "60")
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	oldPID := old.Process.Pid
+	oldAt := time.Now().Format(time.RFC3339Nano)
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "starting",
+		EventID: fmt.Sprintf("plugin-start:%s:%d:%s", b.ShipID, oldPID, oldAt),
+		ObservedAt: oldAt,
+		SessionID: "old-session",
+		PID: oldPID,
+	}); err != nil {
+		_ = old.Process.Kill()
+		_ = old.Wait()
+		t.Fatal(err)
+	}
+	_ = old.Process.Kill()
+	_ = old.Wait()
+
+	newPID := os.Getpid()
+	newAt := time.Now().Add(time.Second).Format(time.RFC3339Nano)
+	newEvent := fmt.Sprintf("plugin-start:%s:%d:%s", b.ShipID, newPID, newAt)
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "starting",
+		EventID: newEvent,
+		ObservedAt: newAt,
+		PID: newPID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing updated status record")
+	}
+	if rec.PID != newPID || rec.PluginStartEventID != newEvent ||
+		rec.PluginStartPID != newPID || rec.PluginStartAt != newAt ||
+		rec.RuntimeSessionID != "" {
+		t.Fatalf("new plugin process inherited stale session identity: %+v", rec)
+	}
+
+	sessionAt := time.Now().Add(2 * time.Second).Format(time.RFC3339Nano)
+	if err := b.DoRuntimeUpdate(RuntimeUpdate{
+		Runtime: "working",
+		EventID: "session-created:new",
+		ObservedAt: sessionAt,
+		SessionID: "new-session",
+		PID: newPID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = parseStatusFile(b.sfile(b.ShipID))
+	if rec.RuntimeSessionID != "new-session" || rec.PluginStartEventID != newEvent || rec.PluginStartPID != newPID {
+		t.Fatalf("new session did not bind to new plugin start: %+v", rec)
+	}
+}
+
+
+func TestHealthUpdateClearsPreviousProcessModelAndReadiness(t *testing.T) {
+	b := newTestBus(t, "TestShip")
+	old := StatusRecord{
+		Agent: "TestShip", PID: 111, Model: "old-model", Server: "old-provider",
+		PluginVersion: "2.5.20", PluginHeartbeatMS: 5000,
+		PluginLastRun: "2026-11-27T12:00:00Z",
+		PluginStartEventID: "plugin-start:TestShip:111:2026-11-27T12:00:00Z",
+		PluginStartPID: 111, PluginStartAt: "2026-11-27T12:00:00Z",
+		RuntimeSessionID: "old-session", ModelLastAction: "2026-11-27T12:00:00Z",
+	}
+	writeStatusRecord(t, b, b.ShipID, old)
+
+	if err := b.DoHealthUpdate([]string{
+		"--pid", "222", "--plugin-version", "2.5.21",
+		"--heartbeat-ms", "5000", "--plugin-ts", "2026-11-27T12:01:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := parseStatusFile(b.sfile(b.ShipID))
+	if !ok {
+		t.Fatal("missing updated status record")
+	}
+	if got.PID != 222 {
+		t.Fatalf("PID = %d, want new process 222", got.PID)
+	}
+	if got.Model != "" || got.Server != "" || got.ModelLastAction != "" {
+		t.Fatalf("previous process model observation leaked into new PID: model=%q server=%q last_action=%q", got.Model, got.Server, got.ModelLastAction)
+	}
+	if got.PluginStartPID != 0 || got.PluginStartEventID != "" || got.PluginStartAt != "" || got.RuntimeSessionID != "" {
+		t.Fatalf("previous process startup receipt leaked into new PID: %+v", got)
+	}
+	if got.PluginLastRun != "2026-11-27T12:01:00Z" || got.PluginVersion != "2.5.21" || got.PluginHeartbeatMS != 5000 {
+		t.Fatalf("new process health observation was not retained: %+v", got)
 	}
 }

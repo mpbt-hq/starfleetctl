@@ -156,7 +156,7 @@ process.stdin.on('end', () => {
           }
         },
         async status() {
-          return { data: { 'ses-integration': { type: 'busy' } } }
+          return { data: { 'ses-integration': { type: 'busy', model: 'model-integration', providerID: 'provider-integration' } } }
         },
         async messages() {
           return { data: [] }
@@ -175,6 +175,15 @@ process.stdin.on('end', () => {
       tui: { showToast() {} },
     }
     const hooks = await plugin({ client, $: {} })
+    await waitFor(
+      () => readCalls(callsPath).some((call) =>
+        call.cmd === 'runtime.update' &&
+        call.event_id?.startsWith('plugin-model-recovered:') &&
+        call.model === 'model-integration' &&
+        call.server === 'provider-integration',
+      ),
+      'resumed-session model recovery',
+    )
     const runtimeCalls = () => readCalls(callsPath).filter((call) => call.cmd === 'runtime.update')
     assert.ok(runtimeCalls().some((call) => call.runtime === 'starting'), 'plugin startup publishes runtime starting')
     assert.ok(readCalls(callsPath).some((call) =>

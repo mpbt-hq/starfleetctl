@@ -3,7 +3,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveLatestShipSession } from './session-resolution.mjs'
+import { resolveLatestShipSession, selectSessionStatusEntry } from './session-resolution.mjs'
 
 const root = '/workspace/fleet'
 const voyager = { id: 'ses-voyager', title: 'Voyager', directory: root, time: { created: 10, updated: 100 } }
@@ -53,4 +53,34 @@ test('does not recover a session belonging to another ship', () => {
 
 test('does not recover when the response contains no sessions', () => {
   assert.equal(resolveLatestShipSession({ body: { data: [] } }, 'Voyager', root), '')
+})
+
+test('selects the exact session status from a keyed multi-session response', () => {
+  const wanted = { model: 'model-wanted' }
+  const other = { model: 'model-other' }
+  assert.equal(selectSessionStatusEntry({ body: { data: { wanted, other } } }, 'wanted'), wanted)
+})
+
+test('accepts a direct single-session status object', () => {
+  const only = { model: 'only-model', providerID: 'provider-only' }
+  assert.equal(selectSessionStatusEntry({ data: only }, 'missing'), only)
+})
+
+test('does not unwrap a single unrelated session from a keyed map', () => {
+  const other = { model: 'wrong-model', providerID: 'wrong-provider' }
+  assert.equal(selectSessionStatusEntry({ data: { other } }, 'missing'), undefined)
+})
+
+test('does not guess the first status entry when multiple sessions are present', () => {
+  assert.equal(selectSessionStatusEntry({ data: { first: { model: 'wrong' }, second: { model: 'also-wrong' } } }, 'missing'), undefined)
+})
+
+test('selects the matching session from an array response', () => {
+  const wanted = { id: 'wanted', model: 'model-wanted' }
+  const other = { id: 'other', model: 'model-other' }
+  assert.equal(selectSessionStatusEntry({ body: { data: [other, wanted] } }, 'wanted'), wanted)
+})
+
+test('does not guess from a multi-entry array without a session ID match', () => {
+  assert.equal(selectSessionStatusEntry([{ id: 'first' }, { id: 'second' }], 'missing'), undefined)
 })

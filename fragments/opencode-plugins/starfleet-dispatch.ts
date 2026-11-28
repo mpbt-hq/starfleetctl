@@ -6,7 +6,7 @@
 // .opencode/plugins/starfleet-dispatch.ts. Edit this fragment, never the
 // deployed copy under .opencode/plugins.
 
-const PLUGIN_VERSION = '2.5.20'
+const PLUGIN_VERSION = '2.5.21'
 
 // Plugin→opencode app-logging switch (writes into opencode.log via
 // client.app.log). The per-poll diagnostics (retry-status dumps, inbox
@@ -16,7 +16,7 @@ const APP_LOG_ENABLED = false
 
 import { execSync } from 'node:child_process'
 import { classifyAssistantUpdate, classifyRecoveredTurn, completeEventBatch, createTurnCorrelationQueue, deterministicMessageID, resolveLifecycleSessionID } from './event-lifecycle.mjs'
-import { resolveLatestShipSession } from './session-resolution.mjs'
+import { resolveLatestShipSession, selectSessionStatusEntry } from './session-resolution.mjs'
 import { normalizeInboxResponse } from './inbox-response.mjs'
 import { legacyInboxToEvents, preparePromptEvents } from './prompt-preparation.mjs'
 import { createEventCoordinator, isSupportedEvent, normalizeEventResponse } from './inbox-coordinator.mjs'
@@ -992,6 +992,52 @@ const logPollTimer = setInterval(async () => {
     return ''
   }
 
+
+  // A resumed OpenCode session may not emit session.created. Recover its
+  // effective model from the uniquely resolved ship session so a PTY
+  // supervisor can distinguish plugin startup from model readiness.
+  const recoverStartupModel = async (): Promise<void> => {
+    const sessionID = await resolveSessionId()
+    if (!sessionID) return
+    try {
+      const response = await client.session.status()
+      const entry = selectSessionStatusEntry(response, sessionID)
+      if (typeof entry?.model === 'string' && entry.model) currentModel.model = entry.model
+      else if (typeof entry?.modelID === 'string' && entry.modelID) currentModel.model = entry.modelID
+      if (typeof entry?.providerID === 'string' && entry.providerID) currentModel.server = entry.providerID
+      if (!currentModel.model && typeof client.session.messages === 'function') {
+        const messagesResponse = await client.session.messages({ path: { id: sessionID } })
+        const messagesBody = messagesResponse?.body ?? messagesResponse
+        const messages = Array.isArray(messagesBody) ? messagesBody : Array.isArray(messagesBody?.data) ? messagesBody.data : []
+        const assistant = [...messages].reverse().map((item: any) => item?.info ?? item)
+          .find((info: any) => info?.role === 'assistant')
+        if (typeof assistant?.model === 'string' && assistant.model) currentModel.model = assistant.model
+        if (typeof assistant?.providerID === 'string' && assistant.providerID) currentModel.server = assistant.providerID
+      }
+      if (!currentModel.model) return
+      bus({
+        cmd: 'health',
+        plugin_last_run: new Date().toISOString(),
+        heartbeat_ms: HEARTBEAT_MS,
+        pid: process.pid,
+        plugin_version: PLUGIN_VERSION,
+        ...currentModel,
+      })
+      const observedAt = runtimeTimestamp()
+      sendRuntimeUpdate({
+        runtime: 'idle',
+        health: 'healthy',
+        sessionID,
+        observedAt,
+        eventID: `plugin-model-recovered:${process.pid}:${sessionID}:${observedAt}`,
+      })
+      tickLog(`runtime-model-recovered ${formatRuntimeIdentity(RUNTIME_IDENTITY)} sid=${sessionID} model=${currentModel.model} provider=${currentModel.server || '-'}`)
+    } catch (e) {
+      tickLog(`runtime-model-recovery-failed ship=${aid()} error=${String(e).slice(0, 160)}`)
+    }
+  }
+  void recoverStartupModel()
+
   // All adapters go through this one event poller. Concurrent calls share
   // one in-flight CLI read; the coordinator retains unsubmitted events and
   // leases each event to only one adapter. The raw inbox path is only a
@@ -1333,14 +1379,11 @@ const logPollTimer = setInterval(async () => {
         // Try to read the current model from the session config.
         try {
           const st = await client.session.status()
-          const stBody = st?.body ?? st
-          if (stBody && typeof stBody === 'object') {
-            // opencode session status may contain model/modelID at various depths
-            const stData = (stBody as any).data ?? stBody
-            const stEntry = sessionId ? (stData[sessionId] ?? Object.values(stData)[0]) : Object.values(stData)[0]
-            if (stEntry?.model) currentModel.model = stEntry.model
-            if (stEntry?.modelID) currentModel.model = stEntry.modelID
-            if (stEntry?.providerID) currentModel.server = stEntry.providerID
+          const stEntry = selectSessionStatusEntry(st, sessionId)
+          if (stEntry && typeof stEntry === 'object') {
+            if (stEntry.model) currentModel.model = stEntry.model
+            if (stEntry.modelID) currentModel.model = stEntry.modelID
+            if (stEntry.providerID) currentModel.server = stEntry.providerID
           }
         } catch { /* ignore */ }
 
