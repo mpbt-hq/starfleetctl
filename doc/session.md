@@ -53,6 +53,36 @@ starfleetctl session ship-run --name Voyager --model opencode/big-pickle
 Launches an opencode control-agent session in a detached terminal. The ship
 appears on the fleet board and participates in comms communication.
 
+
+### Restart (PTY-preserving)
+
+```sh
+# Restart the OpenCode child in place; optionally select a replacement model
+starfleetctl session restart Voyager
+starfleetctl session restart Voyager --model nvidia/nemotron-3-ultra-550b-a55b
+```
+
+For PTY-backed ships, restart is handled by the in-PTY supervisor. The existing
+`termctl-run` owner, `TermHandle`, PTY, control FIFO, terminal screen and
+scrollback remain alive. Only the OpenCode child process group is replaced.
+The supervisor transfers the PTY foreground process group to the child while
+it runs and restores itself after the child exits, so keyboard input and
+Ctrl-C continue to target the foreground OpenCode process.
+
+Before stopping the old child, the supervisor validates the replacement model
+and writes a separate configuration file for the new child generation. It
+resumes the exact confirmed OpenCode session ID; it never resends the initial
+prompt to a new session as a fallback. A successful restart acknowledgement
+requires a fresh plugin-start event correlated to the new PID, a fresh plugin
+heartbeat, the effective model and a session ID. Missing or stale readiness
+data fails closed, and a failed replacement is rolled back to the previous
+model when possible.
+
+API-mode and legacy sessions without the in-PTY supervisor do not support this
+restart operation and are rejected explicitly. Do not implement restart by
+sending `stop` through the termctl control FIFO: that command stops the whole
+PTY session and is reserved for an explicit ship stop.
+
 ### stop
 
 ```sh

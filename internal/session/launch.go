@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -590,6 +588,8 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		return "", fmt.Errorf("'%s' already running — stop it first (session stop %s)", name, name)
 	}
 
+	cleanupOpencodeConfigFiles(root, name)
+
 	// State files under .starfleet-ai/var/ships/
 	logPath := LogPath(root, name)
 	pipePath := PipePath(root, name)
@@ -675,257 +675,36 @@ func LaunchShip(root string, o LaunchShipOpts) (string, error) {
 		return name, nil
 	}
 
-	// Control socket for auto-restart feature
-	controlSocketPath := SocketPath(root, name)
-
-	// Track child process for restart/stop management
-	var childCmd *exec.Cmd
-	var childMu sync.Mutex
-	var childPid int
-	var currentModel string // track last-used model for restart without explicit model
-
-	// Get executable path and build child environment (needed by startChild)
+	// Keep termctl-run and its TermHandle/PTY alive for the lifetime of the
+	// ship. The in-PTY supervisor owns only the OpenCode child process group.
 	self, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("os.Executable: %w", err)
+	if err != nil { return "", fmt.Errorf("os.Executable: %w", err) }
+	supervisorParent := parent
+	if supervisorParent == "" { supervisorParent = flagship }
+	inner = "cd " + shellQuote(root) + "; exec " + shellQuote(self) + " ship-supervisor" +
+		" " + shellQuote(name) + " " + shellQuote(effectiveModel) +
+		" " + shellQuote(launchType) + " " + shellQuote(supervisorParent) +
+		" " + shellQuote(o.Class) + " " + strconv.FormatBool(o.Unrestricted) +
+		" " + strconv.FormatBool(o.ForceNew)
+	vars := &LaunchVars{
+		ShipID:name, Role:"ship", PipePath:pipePath, Client:"opencode-ship",
+		ShellCmd:inner, LaunchType:launchType, Parent:supervisorParent,
+		Provider:o.Provider, Model:effectiveModel, Class:o.Class, Mode:"pty",
 	}
-	childEnv := shipProcessEnv(os.Environ(), name, "ship", flagship, launchType, o.Class)
-	childEnv = append(childEnv, "MPBT_WORKSPACE_ROOT="+root)
+	if vars.Provider=="" { vars.Provider=providerFromModel(effectiveModel) }
+	if err:=spawnSessionAt(root,vars,logPath);err!=nil{return "",err}
+	if err:=waitForSupervisorSocket(root,name,supervisorReadyTimeout);err!=nil{return "",fmt.Errorf("ship %s did not become ready: %w",name,err)}
+	return name,nil
+}
 
-	// Function to start/restart the termctl-run child process
-	startChild := func(model string) error {
-		childMu.Lock()
-		defer childMu.Unlock()
-
-		// Kill existing child if any
-		if childCmd != nil && childCmd.Process != nil {
-			_ = childCmd.Process.Kill()
-			childCmd.Wait()
-		}
-
-		// Build the child command with the specified model
-		effectiveModel := model
-		if effectiveModel == "" {
-			effectiveModel = currentModel
-		}
-		if effectiveModel == "" {
-			effectiveModel = o.Model
-		}
-		if effectiveModel == "" {
-			effectiveModel = "nvidia/nemotron-3-ultra-550b-a55b"
-		}
-
-		// Update current model tracker
-		currentModel = effectiveModel
-
-		sessionID := ""
-		if !o.ForceNew {
-			var err error
-			sessionID, err = findLastSessionForShip(root, name)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "LaunchShip: warning: session lookup failed: %v\n", err)
-			}
-		}
-
-		opencodeConfigPath, err := generateOpencodeConfig(root, name, launchType, o.Unrestricted, effectiveModel, o.Class)
-		if err != nil {
-			return fmt.Errorf("generate opencode config: %w", err)
-		}
-
-		inner := "export STARFLEET_SHIP_ID=" + shellQuote(name) + "; "
-		inner += "export STARFLEET_ROLE=ship; "
-		inner += "export STARFLEET_TARGET=" + shellQuote(flagship) + "; "
-		inner += "export STARFLEET_LAUNCH_TYPE=" + shellQuote(launchType) + "; "
-		if o.Class != "" {
-			inner += "export STARFLEET_CLASS=" + shellQuote(o.Class) + "; "
-		} else {
-			inner += "unset STARFLEET_CLASS; "
-		}
-		inner += "export OPENCODE_CONFIG=" + shellQuote(opencodeConfigPath) + "; "
-		inner += "export OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1; "
-		inner += "exec " + shellQuote(resolveClientPath("opencode"))
-		inner += " --model " + shellQuote(effectiveModel)
-		if sessionID != "" {
-			inner += " --session " + shellQuote(sessionID)
-		}
-		shipPrompt := "You are fleet ship " + name + ", report to flagship " + flagship + "."
-		if launchType == "background" || launchType == "auto" {
-			shipPrompt += " You were launched in " + launchType + " mode (detached, no human at your " +
-				"console): never prompt for input on your console and never block waiting for stdin — " +
-				"communicate only via the agent bus (starfleetctl comms tell/ask). Act autonomously " +
-				"and report results back over the bus."
-		}
-		inner += " --prompt " + shellQuote(shipPrompt) + " "
-
-		// Ensure pipe directory exists
-		if err := os.MkdirAll(filepath.Dir(pipePath), 0o755); err != nil {
-			return fmt.Errorf("mkdir pipe dir: %w", err)
-		}
-
-		// Open log file for child output
-		logPath := LogPath(root, name)
-		_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err != nil {
-			return fmt.Errorf("open log file: %w", err)
-		}
-
-		childCmd = exec.Command(self, "termctl-run", name, pipePath, inner)
-		childCmd.Env = childEnv
-		childCmd.Stdin = nil
-		childCmd.Stdout = logFile
-		childCmd.Stderr = logFile
-
-		if err := childCmd.Start(); err != nil {
-			logFile.Close()
-			return fmt.Errorf("spawn termctl-run: %w", err)
-		}
-
-		childPid = childCmd.Process.Pid
-
-		// Write PID file for liveness checking
-		pidPath := PidPath(root, name)
-		_ = os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", childPid)), 0o644)
-
-		fmt.Fprintf(os.Stderr, "Started termctl-run child for %s (pid=%d, model=%s)\n", name, childPid, effectiveModel)
-
-		// Post the initial heartbeat for THIS ship. Set the Bus identity
-		// explicitly instead of mutating the process-global STARFLEET_SHIP_ID
-		// env (which would race with concurrent readers and leak this ship's id
-		// into the caller's environment).
-		if bus, err := comms.New(root); err == nil {
-			bus.ShipID = name
-			bus.ShipIDSet = true
-			provider := o.Provider
-			if provider == "" {
-				provider = providerFromModel(model)
-			}
-			_ = bus.DoStatus("starting", "launched via agent-run (opencode-ship)", comms.StatusPatch{
-				LaunchType: launchType,
-				Parent:     parent,
-				Provider:   provider,
-				Model:      model,
-			})
-		}
-		return nil
-	}
-
-	// Start control socket listener for RESTART/STOP/STATUS commands
-	// Robust socket handling: remove stale socket first, then listen with error logging
-	os.Remove(controlSocketPath)
-	listener, err := net.Listen("unix", controlSocketPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "LaunchShip: Failed to listen on control socket %s: %v\n", controlSocketPath, err)
-		return "", fmt.Errorf("control socket listen failed: %w", err)
-	}
-	fmt.Fprintf(os.Stderr, "LaunchShip: Control socket listener started on %s\n", controlSocketPath)
-
-	// Graceful shutdown. The listener is intentionally NOT closed when
-	// LaunchShip returns: the accept-loop goroutine owns it for the lifetime of
-	// the process (a long-lived web daemon keeps serving RESTART/STOP/STATUS; a
-	// short-lived CLI closes it implicitly on exit, and the next launch removes
-	// the stale socket). It is closed exactly ONCE, on STOP — a stray
-	// double-STOP must not panic on a double channel close.
-	shutdownCh := make(chan struct{})
-	var shutdownOnce sync.Once
-	signalShutdown := func() { shutdownOnce.Do(func() { close(shutdownCh) }) }
-
-	// Tear the listener + socket file down when shutdown is signalled.
-	go func() {
-		<-shutdownCh
-		_ = listener.Close()
-		_ = os.Remove(controlSocketPath)
-		fmt.Fprintf(os.Stderr, "LaunchShip: Control socket listener stopped on %s\n", controlSocketPath)
-	}()
-
-	go func() {
-		fmt.Fprintf(os.Stderr, "LaunchShip: Control socket accept loop starting\n")
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				// The listener is closed only on shutdown, so a closed error is a
-				// clean exit. Anything else is unexpected: log it but do NOT spin
-				// on it — a tight accept-error loop burns 100% CPU.
-				if errors.Is(err, net.ErrClosed) {
-					fmt.Fprintf(os.Stderr, "LaunchShip: Accept loop exiting (listener closed)\n")
-					return
-				}
-				select {
-				case <-shutdownCh:
-					return
-				default:
-					fmt.Fprintf(os.Stderr, "LaunchShip: Failed to accept control connection: %v\n", err)
-					time.Sleep(50 * time.Millisecond)
-				}
-			}
-			fmt.Fprintf(os.Stderr, "LaunchShip: Accepted control connection from %v\n", conn.RemoteAddr())
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				n, err := c.Read(buf)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "LaunchShip: Error reading from control connection: %v\n", err)
-					return
-				}
-				command := strings.TrimSpace(string(buf[:n]))
-				fmt.Fprintf(os.Stderr, "LaunchShip: Control command received: %s\n", command)
-
-				parts := strings.SplitN(command, " ", 2)
-				cmd := strings.ToUpper(strings.TrimSpace(strings.Split(parts[0], "\n")[0]))
-				args := ""
-				if len(parts) > 1 {
-					args = strings.TrimSpace(parts[1])
-				}
-
-				switch cmd {
-				case "RESTART":
-					newModel := ""
-					if strings.HasPrefix(args, "model=") {
-						newModel = strings.TrimPrefix(args, "model=")
-					}
-					fmt.Fprintf(os.Stderr, "LaunchShip: RESTART command, newModel=%q\n", newModel)
-					// Actually restart the child process inline
-					if err := startChild(newModel); err != nil {
-						fmt.Fprintf(os.Stderr, "LaunchShip: Restart failed: %v\n", err)
-						c.Write([]byte("ERROR\n"))
-					} else {
-						c.Write([]byte("OK\n"))
-					}
-				case "STOP":
-					// Stop child and signal shutdown
-					childMu.Lock()
-					if childCmd != nil && childCmd.Process != nil {
-						_ = childCmd.Process.Kill()
-						childCmd.Wait()
-					}
-					childMu.Unlock()
-					signalShutdown()
-					c.Write([]byte("OK\n"))
-				case "STATUS":
-					childMu.Lock()
-					running := childCmd != nil && childCmd.Process != nil
-					childMu.Unlock()
-					if running {
-						c.Write([]byte(fmt.Sprintf("RUNNING pid=%d\n", childPid)))
-					} else {
-						c.Write([]byte("STOPPED\n"))
-					}
-				default:
-					c.Write([]byte("UNKNOWN COMMAND\n"))
-				}
-			}(conn)
-		}
-	}()
-
-	// Start the initial child process. If it fails, tear the listener down again
-	// (otherwise the socket + accept goroutine would leak).
-	if err := startChild(""); err != nil {
-		signalShutdown()
-		return "", err
-	}
-
-	fmt.Fprintf(os.Stderr, "LaunchShip: Supervisor started for %s, returning (listener goroutine manages lifecycle)\n", name)
-	return name, nil
+func waitForSupervisorSocket(root, shipID string, timeout time.Duration) error {
+ socketPath:=SocketPath(root,shipID);deadline:=time.Now().Add(timeout)
+ for time.Now().Before(deadline) {
+  if info,err:=os.Stat(socketPath);err==nil&&info.Mode()&os.ModeSocket!=0{return nil}
+  if !isShipRunning(root,shipID){return fmt.Errorf("termctl-run exited before in-PTY supervisor became ready")}
+  time.Sleep(100*time.Millisecond)
+ }
+ return fmt.Errorf("timed out waiting for in-PTY supervisor socket %s",socketPath)
 }
 
 // StopShip stops a running ship by ID, cleans up its termctl pipe, comms
@@ -958,9 +737,6 @@ func StopShip(root string, id string) error {
 		}
 	}
 
-	// Clean up per-ship temp opencode config
-	_ = os.Remove(opencodeConfigPath(root, id))
-
 	// NOTE: Heartbeat cleanup (DoClear) and ship name release (DoRelease)
 	// are done by the child process's OnExit callback AFTER it reads the
 	// stop-requested marker. This avoids race where parent clears heartbeat
@@ -980,42 +756,44 @@ func StopShip(root string, id string) error {
 	// Clean up stale PID file if process is dead
 	if !isShipRunning(root, id) {
 		_ = os.Remove(PidPath(root, id))
+		cleanupOpencodeConfigFiles(root, id)
 	}
 	return nil
 }
 
-// RestartShip sends a RESTART command to the ship's control socket to request a restart.
-// If model is not empty, it sends "RESTART model=<model>", otherwise just "RESTART".
+// RestartShip sends a RESTART command to the ship's control socket and
+// requires an explicit positive acknowledgement. A successful write alone is
+// not proof that the supervisor processed the request.
 func RestartShip(root, shipID, model string) error {
-	socketPath := SocketPath(root, shipID)
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		return fmt.Errorf("failed to connect to control socket %s: %v", socketPath, err)
-	}
-	defer conn.Close()
-
-	var cmd string
 	if model != "" {
-		cmd = fmt.Sprintf("RESTART model=%s", model)
-	} else {
-		cmd = "RESTART"
+		if err := validateModelAvailable(root, model); err != nil {
+			return fmt.Errorf("model validation failed: %w", err)
+		}
 	}
-
-	_, err = conn.Write([]byte(cmd))
+	command := "RESTART"
+	if model != "" {
+		command += " model=" + model
+	}
+	socketPath := SocketPath(root, shipID)
+	// Check the socket path before dialing. DialUnix may report EINVAL when
+	// even the parent directory is absent; callers still need the same clear
+	// unsupported-mode diagnostic as when the state directory exists but the
+	// supervisor socket does not.
+	if _, err := os.Stat(socketPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("ship %s has no in-PTY restart supervisor (API-mode or legacy session); restart is unsupported: %w", shipID, err)
+		}
+		return fmt.Errorf("inspect ship %s restart socket: %w", shipID, err)
+	}
+	response, err := sendShipControlCommand(socketPath, command)
 	if err != nil {
-		return fmt.Errorf("failed to write to control socket: %v", err)
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("ship %s has no in-PTY restart supervisor (API-mode or legacy session); restart is unsupported: %w", shipID, err)
+		}
+		return err
 	}
-
-	// Read response (optional, but good to verify)
-	response := make([]byte, 128)
-	n, err := conn.Read(response)
-	if err != nil {
-		// Ignore read errors; we assume the command was sent
-		return nil
-	}
-	resp := strings.TrimSpace(string(response[:n]))
-	if resp != "OK" {
-		return fmt.Errorf("unexpected response from control socket: %s", resp)
+	if err := validateRestartAcknowledgement(response); err != nil {
+		return fmt.Errorf("ship %s restart rejected: %w", shipID, err)
 	}
 	return nil
 }
@@ -1054,6 +832,27 @@ func opencodeConfigPath(root, shipID string) string {
 // the user's provider config with launch-type-specific permissions and
 // starfleet-specific settings (plugin, instructions, username).
 func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, model, class string) (string, error) {
+	return generateOpencodeConfigAt(root, shipID, launchType, unrestricted, model, class, opencodeConfigPath(root, shipID))
+}
+
+
+func cleanupOpencodeConfigFiles(root, shipID string) {
+	dir := filepath.Join(root, ".starfleet-ai", "var", "ships")
+	_ = os.Remove(opencodeConfigPath(root, shipID))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	prefix := shipID + ".opencode."
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".json") {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
+}
+
+func generateOpencodeConfigAt(root, shipID, launchType string, unrestricted bool, model, class, configPath string) (string, error) {
 	// Load starfleetctl config for provider_mode setting
 	cfg, err := config.Load(root)
 	if err != nil {
@@ -1211,8 +1010,7 @@ func generateOpencodeConfig(root, shipID, launchType string, unrestricted bool, 
 	shipConfig["instructions"] = []string{".starfleet-ai/var/sop.d/index.md"}
 	shipConfig["plugin"] = []string{"./.opencode/plugins/starfleet-dispatch.ts"}
 
-	// Write to temp file
-	configPath := opencodeConfigPath(root, shipID)
+	// Write the generated config to the caller-selected path.
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return "", err
 	}
@@ -1290,19 +1088,27 @@ func spawnSessionAt(root string, vars *LaunchVars, logPath string) error {
 	// with EPERM. The child owns its own session via the PTY; we just detach
 	// stdio above and SIGHUP is ignored inside RunTermctl.
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("spawn termctl-run: %w", err)
 	}
+
+	// The child inherited the log descriptor; close the parent's copy and
+	// reap termctl-run asynchronously so long-lived daemons do not accumulate
+	// zombies when a terminal ship exits.
+	_ = logFile.Close()
 
 	// Write PID file for liveness checking
 	pidPath := PidPath(root, vars.ShipID)
 	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0o644); err != nil {
-		logFile.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return fmt.Errorf("write pid file: %w", err)
 	}
-
-	// Don't wait - the child process runs independently.
-	// The log file will be closed when the child exits (we don't close it here).
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			fmt.Fprintf(os.Stderr, "spawnSessionAt: termctl-run for %s exited: %v\\n", vars.ShipID, err)
+		}
+	}()
 
 	// Post initial heartbeat using an explicit bus identity. Do not mutate
 	// the caller's process environment: this process may be the flagship or

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -274,5 +275,73 @@ func TestGenerateOpencodeConfigEnabledProviders(t *testing.T) {
 		if got[i] != id {
 			t.Errorf("model-proxy-only: enabled_providers[%d] = %v, want %q", i, got[i], id)
 		}
+	}
+}
+
+
+func TestRestartShipWithoutSupervisorReportsUnsupportedMode(t *testing.T) {
+	// Cover the case where the ship state directory has not been created at
+	// all: RestartShip must still return its explicit unsupported diagnostic.
+	err := RestartShip(t.TempDir(), "TestShip", "")
+	if err == nil {
+		t.Fatal("RestartShip unexpectedly succeeded without a supervisor socket")
+	}
+	if !strings.Contains(err.Error(), "no in-PTY restart supervisor") || !strings.Contains(err.Error(), "restart is unsupported") {
+		t.Fatalf("RestartShip error = %q, want explicit unsupported-mode diagnostic", err)
+	}
+}
+
+func TestGenerateOpencodeConfigAtUsesDistinctPath(t *testing.T) {
+	root := t.TempDir()
+	shipID := "TestShip"
+	fixedPath := opencodeConfigPath(root, shipID)
+	if err := os.MkdirAll(filepath.Dir(fixedPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixedPath, []byte("current child config"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	generationPath := filepath.Join(filepath.Dir(fixedPath), shipID+".opencode.generation.json")
+	got, err := generateOpencodeConfigAt(root, shipID, "terminal", false, "model-x", "", generationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != generationPath {
+		t.Fatalf("config path = %q, want %q", got, generationPath)
+	}
+	if data, err := os.ReadFile(fixedPath); err != nil || string(data) != "current child config" {
+		t.Fatalf("existing child config was modified: data=%q err=%v", data, err)
+	}
+	if data, err := os.ReadFile(generationPath); err != nil || len(data) == 0 {
+		t.Fatalf("generation config was not written: bytes=%d err=%v", len(data), err)
+	}
+}
+
+func TestCleanupOpencodeConfigFilesRemovesAllGenerations(t *testing.T) {
+	root := t.TempDir()
+	shipID := "TestShip"
+	dir := filepath.Dir(opencodeConfigPath(root, shipID))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		opencodeConfigPath(root, shipID),
+		filepath.Join(dir, shipID+".opencode.123.456.json"),
+		filepath.Join(dir, shipID+".opencode.789.012.json"),
+		filepath.Join(dir, "OtherShip.opencode.123.456.json"),
+	}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cleanupOpencodeConfigFiles(root, shipID)
+	for _, path := range paths[:3] {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("config file %s was not removed: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(paths[3]); err != nil {
+		t.Fatalf("cleanup removed another ship's config: %v", err)
 	}
 }

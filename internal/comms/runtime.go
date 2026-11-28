@@ -69,6 +69,21 @@ func (b *Bus) DoRuntimeUpdate(update RuntimeUpdate) error {
 	path := b.sfile(b.ShipID)
 	prev, _ := parseStatusFile(path)
 	rec := prev
+	if update.PID > 0 && ((rec.PID > 0 && update.PID != rec.PID) || (rec.PluginStartPID > 0 && update.PID != rec.PluginStartPID)) {
+		// A new plugin process must publish its own startup marker, session,
+		// heartbeat and effective model. Do not let readiness from a previous
+		// process survive an out-of-order health update.
+		rec.PluginStartEventID = ""
+		rec.PluginStartPID = 0
+		rec.PluginStartAt = ""
+		rec.RuntimeSessionID = ""
+		rec.PluginLastRun = ""
+		rec.PluginVersion = ""
+		rec.PluginHeartbeatMS = 0
+		rec.Model = ""
+		rec.Server = ""
+		rec.ModelLastAction = ""
+	}
 	if rec.Agent == "" {
 		rec.Agent = b.ShipID
 	}
@@ -77,6 +92,11 @@ func (b *Bus) DoRuntimeUpdate(update RuntimeUpdate) error {
 	}
 	if rec.ISO == "" {
 		rec.ISO = isots()
+	}
+	if strings.HasPrefix(eventID, "plugin-start:") && update.PID > 0 && pidAliveCheck(update.PID) {
+		rec.PluginStartEventID = eventID
+		rec.PluginStartPID = update.PID
+		rec.PluginStartAt = observed
 	}
 	if rec.PID == 0 && update.PID > 0 {
 		if !pidAliveCheck(update.PID) {
